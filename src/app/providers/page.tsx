@@ -13,6 +13,8 @@ import { listProviderHealth } from "@/services/provider-health";
 import { VI_PROVIDER_STATUS, type ProviderStatus } from "@/domain/enums";
 import { formatDateVi } from "@/lib/utils";
 import { ProviderCard } from "./provider-forms";
+import { SpendGate } from "@/components/spend-gate";
+import { spendStatus } from "@/services/spend-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +27,16 @@ const STATUS_TONE: Record<ProviderStatus, "ok" | "warn" | "danger" | "neutral"> 
 };
 
 export default async function ProvidersPage() {
-  const [health, configs] = await Promise.all([
+  const [health, configs, textModels, spend] = await Promise.all([
     listProviderHealth(),
     prisma.providerConfig.findMany(),
+    // Only text models get a spend gate in this build - text is the only slot
+    // with a real provider behind it.
+    prisma.modelRegistry.findMany({
+      where: { type: "text", provider: { not: "mock" } },
+      orderBy: [{ provider: "asc" }, { modelId: "asc" }],
+    }),
+    spendStatus(),
   ]);
 
   const configById = new Map(configs.map((c) => [c.name, c]));
@@ -66,6 +75,34 @@ export default async function ProvidersPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <Card className="mb-4 border-ink-700">
+        <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-2 text-xs">
+          <span>
+            <span className="text-ink-500">Đã chi cho API thật: </span>
+            <strong
+              className={spend.spent > 0 ? "text-warn-500" : "text-ok-500"}
+            >
+              ${spend.spent.toFixed(4)}
+            </strong>
+          </span>
+          <span>
+            <span className="text-ink-500">Hạn mức: </span>
+            <strong className="text-brand-400">${spend.cap.toFixed(2)}</strong>
+          </span>
+          <span>
+            <span className="text-ink-500">Còn lại: </span>
+            <strong
+              className={spend.remaining <= 0 ? "text-danger-500" : "text-ink-100"}
+            >
+              ${spend.remaining.toFixed(4)}
+            </strong>
+          </span>
+          <span className="text-ink-500">
+            Đổi hạn mức trong trang Cài đặt.
+          </span>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {health.map((provider) => {
@@ -124,6 +161,17 @@ export default async function ProvidersPage() {
                   canStoreKeys={canStoreKeys}
                   priority={provider.priority}
                   fallbackPriority={provider.fallbackPriority}
+                />
+
+                <SpendGate
+                  provider={provider.name}
+                  models={textModels
+                    .filter((m) => m.provider === provider.name)
+                    .map((m) => ({
+                      modelId: m.modelId,
+                      displayName: m.displayName,
+                      enabled: m.enabled,
+                    }))}
                 />
               </CardContent>
             </Card>

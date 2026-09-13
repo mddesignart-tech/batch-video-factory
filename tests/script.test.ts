@@ -32,18 +32,18 @@ const request = {
 
 describe("script JSON contract", () => {
   it("produces a document that satisfies the schema", async () => {
-    const script = await provider.generateScript(request);
+    const script = (await provider.generateScript(request)).script;
     expect(() => ScriptSchema.parse(script)).not.toThrow();
   });
 
   it("produces 4 to 6 scenes for a normal target duration", async () => {
-    const script = await provider.generateScript(request);
+    const script = (await provider.generateScript(request)).script;
     expect(script.scenes.length).toBeGreaterThanOrEqual(4);
     expect(script.scenes.length).toBeLessThanOrEqual(6);
   });
 
   it("keeps every scene short enough for a single AI generation", async () => {
-    const script = await provider.generateScript(request);
+    const script = (await provider.generateScript(request)).script;
     for (const scene of script.scenes) {
       expect(scene.duration).toBeLessThanOrEqual(6);
       expect(scene.duration).toBeGreaterThanOrEqual(2);
@@ -51,20 +51,20 @@ describe("script JSON contract", () => {
   });
 
   it("lands near the requested total duration", async () => {
-    const script = await provider.generateScript(request);
+    const script = (await provider.generateScript(request)).script;
     const total = script.scenes.reduce((sum, s) => sum + s.duration, 0);
     expect(total).toBeGreaterThan(18);
     expect(total).toBeLessThan(36);
   });
 
   it("carries the meaning and example sentence through to the document", async () => {
-    const script = await provider.generateScript(request);
+    const script = (await provider.generateScript(request)).script;
     expect(script.meaning).toBe("Good luck");
     expect(script.exampleSentence).toBe("Break a leg on your interview!");
   });
 
   it("fills in image and video prompts for every scene", async () => {
-    const script = await provider.generateScript(request);
+    const script = (await provider.generateScript(request)).script;
     for (const scene of script.scenes) {
       expect(scene.imagePrompt.length).toBeGreaterThan(20);
       expect(scene.videoPrompt.length).toBeGreaterThan(20);
@@ -72,47 +72,47 @@ describe("script JSON contract", () => {
   });
 
   it("includes the style preset in the image prompts", async () => {
-    const script = await provider.generateScript(request);
+    const script = (await provider.generateScript(request)).script;
     expect(script.scenes[0]!.imagePrompt).toContain("3D animated cartoon style");
   });
 
   it("marks the opening scene as high spend priority", async () => {
-    const script = withDerivedRouting(await provider.generateScript(request));
+    const script = withDerivedRouting((await provider.generateScript(request)).script);
     expect(script.scenes[0]!.spendPriority).toBe("HIGH");
   });
 });
 
 describe("duplicate prevention", () => {
   it("picks a different comedy angle when the first one is excluded", async () => {
-    const first = await provider.generateScript(request);
-    const second = await provider.generateScript({
+    const first = (await provider.generateScript(request)).script;
+    const second = (await provider.generateScript({
       ...request,
       avoidAngles: [first.angleKey],
-    });
+    })).script;
     expect(second.angleKey).not.toBe(first.angleKey);
   });
 
   it("gives identical scripts the same hash", async () => {
-    const a = await provider.generateScript(request);
-    const b = await provider.generateScript(request);
+    const a = (await provider.generateScript(request)).script;
+    const b = (await provider.generateScript(request)).script;
     expect(scriptHashFor(a)).toBe(scriptHashFor(b));
   });
 
   it("gives different angles different angle keys", async () => {
-    const a = await provider.generateScript(request);
-    const b = await provider.generateScript({
+    const a = (await provider.generateScript(request)).script;
+    const b = (await provider.generateScript({
       ...request,
       avoidAngles: [a.angleKey],
-    });
+    })).script;
     expect(angleKeyFor(a)).not.toBe(angleKeyFor(b));
   });
 
   it("namespaces the angle key by idiom", async () => {
-    const a = await provider.generateScript(request);
-    const b = await provider.generateScript({
+    const a = (await provider.generateScript(request)).script;
+    const b = (await provider.generateScript({
       ...request,
       idiom: "Piece of cake",
-    });
+    })).script;
     expect(angleKeyFor(a).split("::")[0]).not.toBe(
       angleKeyFor(b).split("::")[0],
     );
@@ -171,8 +171,8 @@ describe("malformed JSON repair", () => {
 
 describe("script quality gating", () => {
   it("scores every axis between 1 and 10", async () => {
-    const script = await provider.generateScript(request);
-    const score = await provider.scoreScript(script);
+    const script = (await provider.generateScript(request)).script;
+    const score = (await provider.scoreScript(script)).score;
     for (const value of [
       score.hook,
       score.humor,
@@ -285,8 +285,8 @@ describe("spend priority", () => {
 
 describe("YouTube metadata", () => {
   it("generates a title, description, hashtags and keywords", async () => {
-    const script = await provider.generateScript(request);
-    const meta = await provider.generateYoutubeMeta(script);
+    const script = (await provider.generateScript(request)).script;
+    const meta = (await provider.generateYoutubeMeta(script)).meta;
     expect(meta.title).toContain("Break a leg");
     expect(meta.description).toContain("Good luck");
     expect(meta.hashtags).toContain("#Shorts");

@@ -7,8 +7,10 @@ import {
 } from "@/domain/script";
 import type {
   CostEstimate,
+  ProviderUsage,
   ScriptRequest,
   TextProvider,
+  YoutubeMeta,
 } from "@/providers/types";
 import { hashCode, sleep } from "@/lib/utils";
 
@@ -162,7 +164,10 @@ export class MockTextProvider implements TextProvider {
     };
   }
 
-  async generateScript(req: ScriptRequest): Promise<ScriptDoc> {
+  async generateScript(
+    req: ScriptRequest,
+  ): Promise<{ script: ScriptDoc; usage: ProviderUsage }> {
+    const startedAt = Date.now();
     await sleep(120 + (hashCode(req.idiom) % 200)); // simulate latency
 
     const angle = pickAngle(req.idiom, req.avoidAngles);
@@ -238,16 +243,19 @@ export class MockTextProvider implements TextProvider {
 
     // Validate our own output through exactly the same gate a real provider's
     // output goes through. A template bug should fail loudly, here, not later.
-    return ScriptSchema.parse(doc);
+    return { script: ScriptSchema.parse(doc), usage: freeUsage(startedAt) };
   }
 
-  async scoreScript(script: ScriptDoc): Promise<ScriptScore> {
+  async scoreScript(
+    script: ScriptDoc,
+  ): Promise<{ score: ScriptScore; usage: ProviderUsage }> {
+    const startedAt = Date.now();
     await sleep(60);
     // Deterministic pseudo-scores derived from real properties of the script, so
     // the rewrite path in ScriptService is genuinely reachable in tests.
     const seed = hashCode(script.idiom + script.angleKey);
     const hookLength = script.hook.length;
-    return {
+    const score: ScriptScore = {
       hook: clampScore(7 + (seed % 3) - (hookLength > 90 ? 2 : 0)),
       humor: clampScore(7 + ((seed >> 3) % 3)),
       clarity: clampScore(8 + ((seed >> 5) % 2)),
@@ -257,17 +265,16 @@ export class MockTextProvider implements TextProvider {
       ),
       notes: "Mock đánh giá kịch bản (không gọi API).",
     };
+    return { score, usage: freeUsage(startedAt) };
   }
 
-  async generateYoutubeMeta(script: ScriptDoc): Promise<{
-    title: string;
-    description: string;
-    hashtags: string[];
-    keywords: string[];
-  }> {
+  async generateYoutubeMeta(
+    script: ScriptDoc,
+  ): Promise<{ meta: YoutubeMeta; usage: ProviderUsage }> {
+    const startedAt = Date.now();
     await sleep(40);
     const idiom = script.idiom;
-    return {
+    const meta: YoutubeMeta = {
       title: `He Took "${idiom}" Literally 😂 | English Idioms`,
       description: [
         `What does "${idiom}" actually mean?`,
@@ -293,7 +300,19 @@ export class MockTextProvider implements TextProvider {
         "english shorts",
       ],
     };
+    return { meta, usage: freeUsage(startedAt) };
   }
+}
+
+/** Mock calls consume nothing, but still report the shape a real one does. */
+function freeUsage(startedAt: number): ProviderUsage {
+  return {
+    inputTokens: null,
+    outputTokens: null,
+    durationMs: Date.now() - startedAt,
+    actualCost: 0,
+    model: "mock-text-1",
+  };
 }
 
 // ----------------------------------------------------------------- helpers ---

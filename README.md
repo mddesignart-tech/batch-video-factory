@@ -95,6 +95,7 @@ thao tác riêng biệt, và thao tác thứ hai bị chặn nếu vượt ngân
 | `npm run doctor` | Kiểm tra môi trường |
 | `npm run backup` | Sao lưu `data/` sang `backups/` |
 | `npm run cleanup` | Dọn tệp tạm (thêm `--dry-run` để xem trước) |
+| `npm run compare:text` | So sánh kịch bản Mock và Text AI thật |
 | `npm run verify` | lint + typecheck + test + build |
 
 ---
@@ -146,9 +147,14 @@ Không có Redis, Docker, hay dịch vụ ngoài nào. Xem
 **Milestone 1 hoàn tất và đã kiểm chứng.** Toàn bộ quy trình chạy được ở chế độ
 mock, xuất ra MP4 1080x1920 thật.
 
-**Chưa tích hợp nhà cung cấp AI thật.** Runway, Veo, Kling, OpenAI, ElevenLabs
-đã có sẵn chỗ trong bảng đăng ký mô hình nhưng chưa được nối và chưa được kiểm
-thử — đó là Milestone 2. Chọn một nhà cung cấp chưa tích hợp sẽ báo lỗi rõ ràng
-thay vì im lặng chạy mock.
+**Milestone 2 bước 1 (Text AI thật): code xong, CHƯA CHẠY THẬT.** Lớp tích hợp
+đã viết và đã kiểm thử bằng máy chủ giả lập, nhưng chưa gọi nhà cung cấp thật
+nào vì chưa có API key.
+
+**Tổng chi phí API thật tính đến giờ: 0,00 USD.**
+
+Image AI, Video AI, Voice AI **vẫn hoàn toàn là mock** — đó là các bước sau của
+Milestone 2. Chọn một nhà cung cấp chưa tích hợp sẽ báo lỗi rõ ràng thay vì im
+lặng chạy mock.
 
 Chi tiết trong [.ai/STATE.md](.ai/STATE.md).

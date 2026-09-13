@@ -73,19 +73,42 @@ export interface ScriptRequest {
   systemPrompt: string;
 }
 
+/**
+ * What one provider call actually consumed.
+ *
+ * Every text call reports this so the cost ledger records what was billed
+ * rather than what was predicted. Token counts are null when the API returns no
+ * usage block (some local runtimes do not).
+ */
+export interface ProviderUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  durationMs: number;
+  /** Computed from reported tokens and the registry price. 0 for mock/local. */
+  actualCost: number;
+  model: string;
+}
+
+export interface YoutubeMeta {
+  title: string;
+  description: string;
+  hashtags: string[];
+  keywords: string[];
+}
+
 export interface TextProvider extends BaseProvider {
   estimateScriptCost(req: ScriptRequest): Promise<CostEstimate>;
-  generateScript(req: ScriptRequest): Promise<ScriptDoc>;
-  scoreScript(script: ScriptDoc, model: string): Promise<ScriptScore>;
+  generateScript(
+    req: ScriptRequest,
+  ): Promise<{ script: ScriptDoc; usage: ProviderUsage }>;
+  scoreScript(
+    script: ScriptDoc,
+    model: string,
+  ): Promise<{ score: ScriptScore; usage: ProviderUsage }>;
   generateYoutubeMeta(
     script: ScriptDoc,
     model: string,
-  ): Promise<{
-    title: string;
-    description: string;
-    hashtags: string[];
-    keywords: string[];
-  }>;
+  ): Promise<{ meta: YoutubeMeta; usage: ProviderUsage }>;
 }
 
 // ------------------------------------------------------------------ image ---

@@ -7,6 +7,8 @@ import { getSettings } from "@/lib/settings";
 import { parseJson, round } from "@/lib/utils";
 import { ScriptSchema, type ScriptDoc } from "@/domain/script";
 import { enqueue } from "@/jobs/queue";
+import { isMockMode } from "@/lib/env";
+import { routeScene } from "./ai-router";
 import { checkBudget, type BudgetCheck } from "./budget";
 import {
   estimateAllModes,
@@ -92,6 +94,50 @@ export async function createProjectForIdiom(
 
 // ------------------------------------------------------------------ script ---
 
+/**
+ * Pick which text model writes the script.
+ *
+ * Business logic must not name a provider. The choice comes from the same place
+ * every other choice comes from - the enabled rows in ModelRegistry, filtered by
+ * which providers are usable right now, ranked by the router.
+ *
+ * Mock mode short-circuits: the registry may list real text models, but the
+ * provider layer would hand back a mock anyway, so naming the mock row here
+ * keeps the ledger and the logs honest about what actually ran.
+ */
+export async function selectTextModel(
+  qualityMode: QualityMode,
+): Promise<{ provider: string; model: string }> {
+  if (isMockMode()) return { provider: "mock", model: "mock-text-1" };
+
+  const [models, availableProviders] = await Promise.all([
+    prisma.modelRegistry.findMany({ where: { type: "text", enabled: true } }),
+    availableProviderNames(),
+  ]);
+
+  const decision = routeScene(models, {
+    type: "text",
+    qualityMode,
+    strategy: "AUTO",
+    // A script is one text call; scene-shaped inputs do not apply, but the
+    // router still filters by provider availability and price.
+    complexity: "LOW",
+    spendPriority: "NORMAL",
+    durationSeconds: 0,
+    characterCount: 1,
+    consistencyRequired: false,
+    needs1080p: false,
+    needsReferenceImage: false,
+    // The real ceiling is enforced by the spend guard immediately before the
+    // call; here we only need the router to not reject everything.
+    budgetRemaining: Number.MAX_SAFE_INTEGER,
+    usage: { tokens: 5000, jobs: 1 },
+    availableProviders,
+  });
+
+  return { provider: decision.provider, model: decision.modelId };
+}
+
 export async function generateProjectScript(projectId: string): Promise<ScriptDoc> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -126,8 +172,7 @@ export async function generateProjectScript(projectId: string): Promise<ScriptDo
       personality: c.personality,
       visualPrompt: c.visualPrompt,
     })),
-    provider: "mock",
-    model: "mock-text-1",
+    ...(await selectTextModel(project.qualityMode as QualityMode)),
     projectId: project.id,
   });
 

@@ -10,13 +10,16 @@ import { isMockMode } from "@/lib/env";
 import { DATA_ROOT } from "@/lib/paths";
 import { ffmpegVersion, resolveFfmpeg, resolveFfprobe } from "@/media/ffmpeg";
 import { SettingsForm } from "./settings-form";
+import { SpendCapForm } from "@/components/spend-gate";
+import { spendStatus } from "@/services/spend-guard";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [settings, version] = await Promise.all([
+  const [settings, version, spend] = await Promise.all([
     getSettings(),
     ffmpegVersion(),
+    spendStatus(),
   ]);
 
   return (
@@ -37,6 +40,8 @@ export default async function SettingsPage() {
         </Card>
 
         <div className="space-y-4">
+          <SpendCapForm cap={spend.cap} spent={spend.spent} />
+
           <Card>
             <CardHeader>
               <CardTitle>Môi trường</CardTitle>

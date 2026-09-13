@@ -1,6 +1,6 @@
 # Kiểm soát chi phí
 
-Bốn cơ chế độc lập, xếp chồng lên nhau.
+Sáu cơ chế độc lập, xếp chồng lên nhau. Một yêu cầu trả phí phải qua **tất cả**.
 
 ---
 
@@ -61,7 +61,46 @@ giảm dần qua từng cảnh và hạ cấp mô hình thay vì tiêu quá.
 
 ---
 
-## 4. Chống tính phí hai lần
+## 4. HẠN MỨC CHI TIÊU TOÀN ỨNG DỤNG
+
+Khác với NGÂN SÁCH TỐI ĐA của từng dự án: ngân sách dự án giới hạn **một video**,
+hạn mức này giới hạn **toàn bộ số tiền ứng dụng từng được phép tiêu**, cộng dồn
+mọi dự án, mọi lô và mọi lần thử lại.
+
+Mặc định **0,50 USD**. Sửa trong trang Cài đặt.
+
+Được kiểm tra ngay trước **mọi** request trả phí, và đếm **chi phí thật đã ghi
+nhận**, không phải ước tính. Chi phí của nhà cung cấp mock và các dòng đánh dấu
+"ước tính" đều không tính vào đây.
+
+```
+Đã chi 0,4500 + yêu cầu này 0,1000 = 0,5500 > hạn mức 0,5000  ->  CHẶN
+```
+
+## 5. Cổng xác nhận theo từng model
+
+Trước khi một cặp provider/model được phép gọi API thật lần đầu, người dùng phải
+nhìn thấy và bấm xác nhận:
+
+| Hiển thị | Ví dụ |
+|---|---|
+| Nhà cung cấp | openai |
+| Model | gpt-4o-mini |
+| Giá input | 0,00015 USD / 1k token |
+| Giá output | 0,0006 USD / 1k token |
+| Ước tính / kịch bản | tối đa 0,0018 USD |
+| Đã chi thật | 0,0000 USD |
+| Hạn mức | 0,5000 USD |
+| Còn lại | 0,5000 USD |
+
+Xác nhận có **phạm vi theo từng model**: cho phép một model text rẻ không hề lan
+sang một model video đắt.
+
+Ứng dụng cũng **từ chối bật model chưa nhập giá** (trừ model chạy cục bộ, vốn
+thật sự miễn phí) — vì một model giá 0 khiến mọi ước tính và mọi kiểm tra ngân
+sách âm thầm cho ra 0.
+
+## 6. Chống tính phí hai lần
 
 Đây là cơ chế tinh tế nhất và quan trọng nhất.
 

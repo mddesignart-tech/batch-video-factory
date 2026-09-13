@@ -389,9 +389,25 @@ describe("budget enforcement blocks generation", () => {
     const after = await prisma.project.findUnique({ where: { id: project.id } });
     expect(after?.status).not.toBe("media_generating");
 
-    // Nothing may have been queued or charged.
+    // Nothing may have been queued, and no MEDIA may have been charged for.
+    // Script generation already ran (it is free and happens before the budget
+    // gate), so its $0 ledger rows are expected - what must not exist is any
+    // paid media work.
     expect(await prisma.job.count({ where: { projectId: project.id } })).toBe(0);
-    expect(await prisma.costEntry.count({ where: { projectId: project.id } })).toBe(0);
+
+    const charged = await prisma.costEntry.aggregate({
+      where: { projectId: project.id },
+      _sum: { amount: true },
+    });
+    expect(charged._sum.amount ?? 0).toBe(0);
+
+    const mediaCosts = await prisma.costEntry.count({
+      where: {
+        projectId: project.id,
+        category: { in: ["image", "video", "voice"] },
+      },
+    });
+    expect(mediaCosts).toBe(0);
 
     await prisma.project.delete({ where: { id: project.id } });
     await restoreMockPrices();
@@ -499,9 +515,10 @@ describe("provider failure handling", () => {
       expect(sceneJobs.some((j) => j.status === "failed")).toBe(true);
 
       // Every provider attempt is on record - this is the table that stops a
-      // retry from turning into a second charge.
+      // retry from turning into a second charge. Only the MEDIA jobs failed;
+      // the text call that wrote the script succeeded before media started.
       const providerJobs = await prisma.providerJob.findMany({
-        where: { projectId: project.id },
+        where: { projectId: project.id, kind: { not: "text" } },
       });
       expect(providerJobs.length).toBeGreaterThan(0);
       expect(providerJobs.every((p) => p.status === "failed")).toBe(true);

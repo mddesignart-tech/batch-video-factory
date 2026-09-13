@@ -8,6 +8,7 @@ import { encryptionAvailable, encryptSecret, maskSecret } from "@/lib/crypto";
 import { saveSettings } from "@/lib/settings";
 import { errorMessage, slugify } from "@/lib/utils";
 import { enqueue } from "@/jobs/queue";
+import { canEnableModel } from "@/services/spend-guard";
 import type { ActionResult } from "./idioms";
 
 /** Characters, style presets, model registry, providers, settings, batches. */
@@ -136,6 +137,7 @@ const ModelInput = z.object({
   type: z.enum(MODEL_TYPES),
   priceUnit: z.enum(PRICE_UNITS),
   price: z.coerce.number().min(0).max(1000),
+  priceOutput: z.coerce.number().min(0).max(1000).default(0),
   enabled: z.coerce.boolean().default(false),
   maxDuration: z.coerce.number().min(0).max(120).default(0),
   qualityRating: z.coerce.number().min(1).max(10).default(5),
@@ -198,13 +200,10 @@ export async function toggleModel(
   if (!model) return { ok: false, message: "Không tìm thấy mô hình." };
 
   // Enabling a model with no price is how a "free" video quietly becomes an
-  // expensive one. Refuse until the operator fills the rate card in.
-  if (enabled && model.provider !== "mock" && model.price <= 0) {
-    return {
-      ok: false,
-      message:
-        "Hãy nhập giá thực tế của mô hình này trước khi bật, nếu không phần ước tính chi phí sẽ sai.",
-    };
+  // expensive one. The rule itself lives in spend-guard so it is unit tested.
+  if (enabled) {
+    const verdict = canEnableModel(model);
+    if (!verdict.allowed) return { ok: false, message: verdict.reason };
   }
 
   await prisma.modelRegistry.update({ where: { id }, data: { enabled } });

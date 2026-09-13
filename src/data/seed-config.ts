@@ -163,6 +163,8 @@ export interface SeedModel {
   enabled: boolean;
   priceUnit: "per_second" | "per_image" | "per_1k_chars" | "per_1k_tokens" | "per_job";
   price: number;
+  /** Text models only: output tokens are billed at a different rate. */
+  priceOutput?: number;
   supportsTextToVideo?: boolean;
   supportsImageToVideo?: boolean;
   supportsReferenceImage?: boolean;
@@ -358,16 +360,75 @@ export const SEED_MODELS: SeedModel[] = [
   // ---- real vendors: disabled, price 0 until the operator fills them in ----
   {
     provider: "openai",
-    modelId: "gpt-text",
-    displayName: "OpenAI Text (chưa cấu hình)",
+    modelId: "gpt-4o-mini",
+    displayName: "OpenAI GPT-4o mini (nhap gia truoc khi bat)",
     type: "text",
     enabled: false,
     priceUnit: "per_1k_tokens",
     price: 0,
-    qualityRating: 9,
-    speedRating: 8,
+    priceOutput: 0,
+    qualityRating: 8,
+    speedRating: 9,
     consistencyRating: 8,
-    notes: "Milestone 2. Nhập giá thực tế trước khi bật.",
+    notes:
+      "Re, du tot cho kich ban ngan. Nhap gia input/output thuc te tu bang gia OpenAI truoc khi bat.",
+  },
+  {
+    provider: "openai",
+    modelId: "gpt-4o",
+    displayName: "OpenAI GPT-4o (nhap gia truoc khi bat)",
+    type: "text",
+    enabled: false,
+    priceUnit: "per_1k_tokens",
+    price: 0,
+    priceOutput: 0,
+    qualityRating: 9,
+    speedRating: 7,
+    consistencyRating: 9,
+    notes: "Chat luong cao hon, dat hon. Nhap gia thuc te truoc khi bat.",
+  },
+  {
+    provider: "deepseek",
+    modelId: "deepseek-chat",
+    displayName: "DeepSeek Chat (nhap gia truoc khi bat)",
+    type: "text",
+    enabled: false,
+    priceUnit: "per_1k_tokens",
+    price: 0,
+    priceOutput: 0,
+    qualityRating: 8,
+    speedRating: 8,
+    consistencyRating: 7,
+    notes: "Tuong thich OpenAI API. Nhap gia thuc te truoc khi bat.",
+  },
+  {
+    provider: "groq",
+    modelId: "llama-3.3-70b-versatile",
+    displayName: "Groq Llama 3.3 70B (nhap gia truoc khi bat)",
+    type: "text",
+    enabled: false,
+    priceUnit: "per_1k_tokens",
+    price: 0,
+    priceOutput: 0,
+    qualityRating: 7,
+    speedRating: 10,
+    consistencyRating: 7,
+    notes: "Rat nhanh, tuong thich OpenAI API. Nhap gia thuc te truoc khi bat.",
+  },
+  {
+    provider: "ollama",
+    modelId: "llama3.1",
+    displayName: "Ollama llama3.1 (chay cuc bo, MIEN PHI)",
+    type: "text",
+    enabled: false,
+    priceUnit: "per_1k_tokens",
+    price: 0,
+    priceOutput: 0,
+    qualityRating: 6,
+    speedRating: 5,
+    consistencyRating: 6,
+    notes:
+      "Chay tren may qua Ollama (http://localhost:11434). Khong can API key, chi phi luon 0 USD. Cach re nhat de thu Text AI that.",
   },
   {
     provider: "openai",
@@ -479,12 +540,45 @@ export const SEED_PROVIDERS: SeedProvider[] = [
   {
     name: "openai",
     displayName: "OpenAI",
-    types: ["text", "image", "voice"],
+    types: ["text"],
     enabled: false,
     apiKeyEnvVar: "OPENAI_API_KEY",
     priority: 10,
     fallbackPriority: 10,
-    notes: "Chưa tích hợp (Milestone 2).",
+    notes:
+      "Text AI da tich hop (Milestone 2 buoc 1). Image/Voice chua tich hop.",
+  },
+  {
+    name: "deepseek",
+    displayName: "DeepSeek",
+    types: ["text"],
+    enabled: false,
+    apiKeyEnvVar: "DEEPSEEK_API_KEY",
+    priority: 12,
+    fallbackPriority: 12,
+    notes: "Tuong thich OpenAI API. Text AI da tich hop.",
+  },
+  {
+    name: "groq",
+    displayName: "Groq",
+    types: ["text"],
+    enabled: false,
+    apiKeyEnvVar: "GROQ_API_KEY",
+    priority: 14,
+    fallbackPriority: 14,
+    notes: "Tuong thich OpenAI API, toc do rat cao. Text AI da tich hop.",
+  },
+  {
+    name: "ollama",
+    displayName: "Ollama (chay cuc bo, mien phi)",
+    types: ["text"],
+    enabled: false,
+    apiKeyEnvVar: "",
+    priority: 16,
+    fallbackPriority: 16,
+    notes:
+      "Chay model tren chinh may nay. Khong can API key, chi phi luon 0 USD. " +
+      "Cai dat: https://ollama.com roi chay 'ollama pull llama3.1'.",
   },
   {
     name: "google",

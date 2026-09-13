@@ -18,7 +18,8 @@
     "backup": "tsx scripts/backup.ts",
     "doctor": "tsx scripts/doctor.ts",
     "setup": "prisma generate && prisma db push && tsx scripts/seed.ts",
-    "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "compare:text": "tsx scripts/compare-text.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.1",

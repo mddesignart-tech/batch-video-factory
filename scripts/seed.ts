@@ -143,6 +143,7 @@ async function main(): Promise<void> {
         enabled: model.enabled,
         priceUnit: model.priceUnit,
         price: model.price,
+        priceOutput: model.priceOutput ?? 0,
         supportsTextToVideo: model.supportsTextToVideo ?? false,
         supportsImageToVideo: model.supportsImageToVideo ?? false,
         supportsReferenceImage: model.supportsReferenceImage ?? false,
@@ -163,7 +164,11 @@ async function main(): Promise<void> {
       // the operator's rate card.
       update: {
         ...(model.provider === "mock"
-          ? { price: model.price, enabled: model.enabled }
+          ? {
+              price: model.price,
+              priceOutput: model.priceOutput ?? 0,
+              enabled: model.enabled,
+            }
           : {}),
         displayName: model.displayName,
         supportsTextToVideo: model.supportsTextToVideo ?? false,

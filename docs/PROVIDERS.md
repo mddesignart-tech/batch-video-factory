@@ -4,12 +4,40 @@
 
 | Nhà cung cấp | Loại | Tình trạng |
 |---|---|---|
-| `mock` | text, image, video, voice, upscale, quality | **Hoạt động.** Bản duy nhất được tích hợp và kiểm thử. |
-| `openai` | text, image, voice | Chưa tích hợp (Milestone 2) |
-| `runway` | video | Chưa tích hợp (Milestone 2) |
-| `google` | text, image, video (Veo) | Chưa tích hợp (Milestone 3) |
+| `mock` | text, image, video, voice, upscale, quality | **Hoạt động, đã kiểm chứng đầy đủ.** |
+| `openai` | text | Code xong, **chưa chạy thật** (chưa có API key) |
+| `deepseek` | text | Code xong, chưa chạy thật |
+| `groq` | text | Code xong, chưa chạy thật |
+| `ollama` | text | Code xong, chưa chạy thật. **Chạy cục bộ, miễn phí.** |
+| `lmstudio` | text | Code xong, chưa chạy thật. Chạy cục bộ, miễn phí. |
+| `openrouter`, `together` | text | Code xong, chưa chạy thật |
+| `google` | video (Veo) | Chưa tích hợp (Milestone 3) |
+| `runway` | video | Chưa tích hợp (Milestone 2 bước 3) |
 | `kling` | video | Chưa tích hợp (Milestone 3) |
-| `elevenlabs` | voice | Chưa tích hợp (Milestone 2) |
+| `elevenlabs` | voice | Chưa tích hợp (Milestone 2 bước 4) |
+
+> **"Code xong, chưa chạy thật"** nghĩa là: lớp tích hợp đã viết và đã kiểm thử
+> bằng máy chủ giả lập chạy cục bộ, nhưng **chưa từng gọi một nhà cung cấp thật
+> nào**, vì chưa có API key nào được cấu hình. Không được coi là đã hoạt động
+> cho tới khi chạy thật thành công.
+
+## Cách rẻ nhất để thử Text AI thật: Ollama
+
+Ollama chạy model ngay trên máy này. Không cần API key, chi phí luôn **0 USD**,
+và nó đi qua đúng đường đi HTTP mà nhà cung cấp trả phí sẽ đi qua — nên nó kiểm
+chứng được tích hợp mà không tốn đồng nào.
+
+```powershell
+# 1. Cài từ https://ollama.com
+# 2. Tải model
+ollama pull llama3.1
+# 3. Trong ứng dụng: trang "Mô hình AI" -> bật "ollama/llama3.1"
+#    (model chạy cục bộ được phép bật dù giá = 0, vì thật sự miễn phí)
+# 4. Trang "Nhà cung cấp AI" -> Ollama -> chọn llama3.1 -> bấm xác nhận
+# 5. Đặt AI_MOCK_MODE=false trong .env rồi khởi động lại
+# 6. So sánh Mock và Real:
+npm run compare:text -- --provider ollama --model llama3.1
+```
 
 Các nhà cung cấp chưa tích hợp đã có chỗ trong bảng đăng ký để giao diện có thứ
 để cấu hình, nhưng chọn một trong số đó sẽ ném lỗi rõ ràng:

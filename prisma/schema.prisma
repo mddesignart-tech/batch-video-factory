@@ -90,6 +90,9 @@ model ModelRegistry {
   enabled                    Boolean  @default(true)
   priceUnit                  String
   price                      Float    @default(0)
+  // Text APIs bill input and output tokens at different rates, so a single
+  // price field cannot express them. Ignored (left 0) for every other type.
+  priceOutput                Float    @default(0)
   supportsTextToVideo        Boolean  @default(false)
   supportsImageToVideo       Boolean  @default(false)
   supportsReferenceImage     Boolean  @default(false)
@@ -308,6 +311,10 @@ model ProviderJob {
   projectId      String?
   sceneId        String?
   attempts       Int       @default(0)
+  // Reported by the provider. Null when the API returns no usage figures.
+  inputTokens    Int?
+  outputTokens   Int?
+  durationMs     Int?
   estimatedCost  Float     @default(0)
   actualCost     Float     @default(0)
   createdAt      DateTime  @default(now())

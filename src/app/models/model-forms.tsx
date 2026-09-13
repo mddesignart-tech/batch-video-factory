@@ -28,6 +28,7 @@ interface ModelData {
   displayName: string;
   type: string;
   price: number;
+  priceOutput: number;
   priceUnit: string;
   enabled: boolean;
   maxDuration: number;
@@ -86,13 +87,28 @@ function ModelFields({
         <Field label="Tên hiển thị">
           <Input name="displayName" defaultValue={model?.displayName} required />
         </Field>
-        <Field label="Giá (USD)" hint="Nhập đúng theo bảng giá của nhà cung cấp.">
+        <Field
+          label="Giá input (USD)"
+          hint="Với model text: giá cho 1k token ĐẦU VÀO. Nhập đúng theo bảng giá nhà cung cấp."
+        >
           <Input
             name="price"
             type="number"
             min={0}
             step="0.0001"
             defaultValue={model?.price ?? 0}
+          />
+        </Field>
+        <Field
+          label="Giá output (USD)"
+          hint="Chỉ dùng cho model text: giá cho 1k token ĐẦU RA, thường đắt hơn input. Loại khác để 0."
+        >
+          <Input
+            name="priceOutput"
+            type="number"
+            min={0}
+            step="0.0001"
+            defaultValue={model?.priceOutput ?? 0}
           />
         </Field>
         <Field label="Đơn vị tính giá">

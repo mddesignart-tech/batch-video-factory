@@ -44,8 +44,39 @@ export const KNOWN_PROVIDERS: Record<string, ModelType[]> = {
   elevenlabs: ["voice"],
 };
 
-/** Implemented and tested today. Everything else is Milestone 2 work. */
-export const IMPLEMENTED_PROVIDERS = new Set<string>(["mock"]);
+/**
+ * Implemented today. Text providers speak the OpenAI Chat Completions dialect,
+ * which covers OpenAI and the many services that mirror it, plus local runtimes.
+ * Image, video, voice and upscale remain mock-only - later milestones.
+ */
+export const IMPLEMENTED_PROVIDERS = new Set<string>([
+  "mock",
+  "openai",
+  "deepseek",
+  "groq",
+  "openrouter",
+  "together",
+  "google",
+  "ollama",
+  "lmstudio",
+]);
+
+/** Which slots a given provider can actually fill in THIS build. */
+export const IMPLEMENTED_TYPES: Record<string, ModelType[]> = {
+  mock: ["text", "image", "video", "voice", "upscale", "quality"],
+  openai: ["text"],
+  deepseek: ["text"],
+  groq: ["text"],
+  openrouter: ["text"],
+  together: ["text"],
+  google: ["text"],
+  ollama: ["text"],
+  lmstudio: ["text"],
+};
+
+export function isTypeImplemented(name: string, type: ModelType): boolean {
+  return (IMPLEMENTED_TYPES[name] ?? []).includes(type);
+}
 
 function notImplemented(name: string, type: ModelType): never {
   throw new ProviderError(
@@ -63,9 +94,28 @@ function notImplemented(name: string, type: ModelType): never {
  * for. That is what makes "cannot accidentally spend money" a property of the
  * system rather than a habit.
  */
-export function getTextProvider(name: string): TextProvider {
+/**
+ * Text is async because a real provider's config (key, base URL, price) lives
+ * in the database. The mock path still short-circuits before any of that.
+ *
+ * `model` is required: the registry row is where the price comes from, and a
+ * provider cannot be constructed without knowing which row applies.
+ */
+export async function getTextProvider(
+  name: string,
+  model: string,
+): Promise<TextProvider> {
   if (isMockMode() || name === "mock") return mockText;
-  return notImplemented(name, "text");
+
+  const { OPENAI_COMPATIBLE_PROVIDERS, buildTextConfig } = await import(
+    "./text-config"
+  );
+  if (!OPENAI_COMPATIBLE_PROVIDERS.has(name)) notImplemented(name, "text");
+
+  const { OpenAICompatibleTextProvider } = await import(
+    "./openai/openai-text-provider"
+  );
+  return new OpenAICompatibleTextProvider(await buildTextConfig(name, model));
 }
 
 export function getImageProvider(name: string): ImageProvider {

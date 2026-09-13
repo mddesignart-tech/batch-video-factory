@@ -10,7 +10,9 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { buildPrompt } from "@/lib/prompts";
 import { getTextProvider } from "@/providers/registry";
-import type { ScriptRequest } from "@/providers/types";
+import type { ProviderUsage, ScriptRequest } from "@/providers/types";
+import { assertCanSpend } from "./spend-guard";
+import { recordCost } from "./cost-tracker";
 import { assignSpendPriority, classifyScene } from "./complexity";
 
 /**
@@ -231,7 +233,7 @@ export interface GenerateScriptOptions {
 export async function generateScript(
   opts: GenerateScriptOptions,
 ): Promise<GenerateScriptResult> {
-  const provider = getTextProvider(opts.provider);
+  const provider = await getTextProvider(opts.provider, opts.model);
   const avoidAngles = await usedAngleKeys(opts.idiomId);
 
   // Rendered here, not inside the provider: the template is operator-editable
@@ -264,36 +266,131 @@ export async function generateScript(
   };
 
   const started = Date.now();
-  let script = parseScript(await provider.generateScript(request));
+
+  /**
+   * One guarded, recorded text call.
+   *
+   * Everything a paid request needs wrapped around it lives here so no call
+   * site can forget a piece: the spend gate before, the ProviderJob and cost
+   * ledger entry after, and the token counts the provider reported.
+   */
+  const call = async <T extends { usage: ProviderUsage }>(
+    purpose: string,
+    estimate: number,
+    run: () => Promise<T>,
+  ): Promise<T> => {
+    await assertCanSpend({
+      provider: opts.provider,
+      model: opts.model,
+      estimatedCost: estimate,
+    });
+
+    const key = sha256(
+      [
+        opts.projectId ?? opts.idiomId,
+        "text",
+        purpose,
+        opts.provider,
+        opts.model,
+        String(callCounter++),
+      ].join("|"),
+    );
+
+    const job = await prisma.providerJob.create({
+      data: {
+        provider: opts.provider,
+        model: opts.model,
+        kind: "text",
+        idempotencyKey: key,
+        status: "processing",
+        // The prompt is stored, the API key never is - it only ever exists in
+        // an Authorization header inside the client.
+        requestJson: JSON.stringify({ purpose, idiom: opts.idiom }),
+        projectId: opts.projectId ?? null,
+        estimatedCost: estimate,
+        attempts: 1,
+      },
+    });
+
+    try {
+      const result = await run();
+      const { usage } = result;
+
+      await prisma.providerJob.update({
+        where: { id: job.id },
+        data: {
+          status: "completed",
+          completedAt: new Date(),
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          durationMs: usage.durationMs,
+          actualCost: usage.actualCost,
+          responseJson: JSON.stringify({ model: usage.model }),
+        },
+      });
+
+      await recordCost({
+        projectId: opts.projectId ?? null,
+        category: "text",
+        provider: opts.provider,
+        model: usage.model,
+        amount: usage.actualCost,
+        note: purpose,
+      });
+
+      return result;
+    } catch (err) {
+      await prisma.providerJob.update({
+        where: { id: job.id },
+        data: {
+          status: "failed",
+          error: err instanceof Error ? err.message.slice(0, 500) : String(err),
+        },
+      });
+      throw err;
+    }
+  };
+
+  const estimate = (await provider.estimateScriptCost(request)).amount;
+
+  let { script } = await call("script", estimate, () =>
+    provider.generateScript(request),
+  );
   let duplicateAvoided = false;
 
   const dup = await checkDuplicate(opts.idiomId, script);
   if (dup.isDuplicate) {
     // Ask again, explicitly excluding every angle we have on record.
-    script = parseScript(
-      await provider.generateScript({
+    const retry = await call("script-dedupe", estimate, () =>
+      provider.generateScript({
         ...request,
         avoidAngles: [...new Set([...avoidAngles, ...dup.usedAngles])],
       }),
     );
+    script = retry.script;
     duplicateAvoided = true;
   }
 
-  let score = await provider.scoreScript(script, opts.model);
+  let { score } = await call("score", estimate / 3, () =>
+    provider.scoreScript(script, opts.model),
+  );
   let rewritten = false;
+
   if (scriptNeedsRewrite(score)) {
-    const retry = parseScript(
-      await provider.generateScript({
+    const retry = await call("script-rewrite", estimate, () =>
+      provider.generateScript({
         ...request,
         avoidAngles: [...avoidAngles, script.angleKey],
       }),
     );
-    const retryScore = await provider.scoreScript(retry, opts.model);
+    const retryScore = await call("score-rewrite", estimate / 3, () =>
+      provider.scoreScript(retry.script, opts.model),
+    );
     // Keep whichever version actually scored better - a rewrite is not
     // automatically an improvement.
-    if (total(retryScore) > total(score)) {
-      script = retry;
-      score = retryScore;
+    if (total(retryScore.score) > total(score)) {
+      script = retry.script;
+      score = retryScore.score;
     }
     rewritten = true;
   }
@@ -319,6 +416,9 @@ export async function generateScript(
     model: opts.model,
   };
 }
+
+/** Distinguishes repeated calls within one generation run in the job table. */
+let callCounter = 0;
 
 function total(score: ScriptScore): number {
   return (

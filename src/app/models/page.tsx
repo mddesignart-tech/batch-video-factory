@@ -80,7 +80,8 @@ export default async function ModelsPage() {
                   <tr>
                     <Th>Mô hình</Th>
                     <Th>Nhà cung cấp</Th>
-                    <Th className="text-right">Giá</Th>
+                    <Th className="text-right">Giá vào</Th>
+                    <Th className="text-right">Giá ra</Th>
                     <Th>Đơn vị</Th>
                     <Th className="text-right">Chất lượng</Th>
                     <Th className="text-right">Nhất quán</Th>
@@ -103,6 +104,9 @@ export default async function ModelsPage() {
                       <Td className="text-xs text-ink-400">{model.provider}</Td>
                       <Td className="text-right tabular-nums text-ink-200">
                         ${model.price}
+                      </Td>
+                      <Td className="text-right tabular-nums text-ink-400">
+                        {model.type === "text" ? `$${model.priceOutput}` : "-"}
                       </Td>
                       <Td className="text-[11px] text-ink-500">
                         {model.priceUnit}
@@ -152,6 +156,7 @@ export default async function ModelsPage() {
                             displayName: model.displayName,
                             type: model.type,
                             price: model.price,
+                            priceOutput: model.priceOutput,
                             priceUnit: model.priceUnit,
                             enabled: model.enabled,
                             maxDuration: model.maxDuration,
