@@ -4,6 +4,53 @@ Xếp theo thứ tự khuyến nghị.
 
 ---
 
+## ⛔ VIỆC ĐẦU TIÊN KHI MỞ LẠI: hai dòng trong .env
+
+Adapter Runway và Google Veo **đã viết xong và có test**, nhưng chưa gọi API
+lần nào vì thiếu key. Tự thêm vào tệp `.env` ở thư mục gốc, **đừng gửi qua
+chat**:
+
+```
+RUNWAY_API_KEY=...
+GOOGLE_AI_API_KEY=...
+```
+
+Chỉ cần `RUNWAY_API_KEY` là đủ để chạy bước tiếp theo.
+
+### Kế hoạch đã thống nhất
+
+1. **Test Runway trước** — rẻ nhất ($0,25 cho 5 giây), chuyên image-to-video,
+   không có luật ép thời lượng ẩn như Veo.
+2. Dùng đúng benchmark cũ: **Spill the beans cảnh 4**, keyframe
+   `images/5a55264f-00f0-4807-bb89-aec2d4a14c8a.png`, prompt motion của Test #2.
+3. So sánh với Sora-2 theo 6 tiêu chí đã dùng.
+
+### Lệnh cần nhớ
+
+```
+npm run video:benchmark                       # bảng giá mọi provider, miễn phí
+npm run project:status -- --idiom "Spill the beans"
+npm run video:test -- --scene 4 --dry-run     # kiểm tra, không gọi API
+npm run crop:check                            # đo vùng cắt 9:16
+```
+
+### Ngân sách
+
+Đã chi **$2,022494** / **$3,00** — còn **$0,977506**.
+Đủ cho Runway ($0,25) và Veo ($0,40), nhưng sau đó gần hết.
+Mọi script đều có cờ `--limit` chặn thật trước khi gọi API.
+
+---
+
+## ✅ Đã xong: Image AI thật (Milestone 2 bước 2)
+
+OpenAI `gpt-image-2` (tầng medium), $0,452760 cho 11 ảnh. Character Reference
+hoạt động: mọi cảnh đều nhận ảnh chuẩn của nhân vật có mặt trong cảnh đó.
+
+**Dừng tại đây theo yêu cầu.** Chưa bắt đầu Video AI hay Voice AI.
+
+---
+
 ## ✅ Đã xong: Text AI thật (Milestone 2 bước 1)
 
 Nhà cung cấp `groq`, model `openai/gpt-oss-120b`. Đã chạy thật, đã kiểm chứng,

@@ -1,7 +1,7 @@
 # Trạng thái dự án
 
 **Cập nhật:** 2026-09-13
-**Cột mốc hiện tại:** Milestone 2 — **Bước 1 (Text AI thật): ĐÃ NGHIỆM THU QUA GIAO DIỆN**
+**Cột mốc hiện tại:** Milestone 2 — **Bước 3 (Video AI): SORA-2 ĐÃ KIỂM CHỨNG. Adapter Veo + Runway đã viết, chờ API key để so sánh.**
 
 Tài liệu này ghi tình trạng **thực tế**. Tính năng chỉ được đánh dấu hoạt động
 khi đã chạy thật và được kiểm chứng, không phải khi đã viết xong mã.
@@ -14,7 +14,7 @@ khi đã chạy thật và được kiểm chứng, không phải khi đã viế
 |---|---|---|
 | Lint | `npm run lint` | ✅ 0 lỗi |
 | Kiểu dữ liệu | `npm run typecheck` | ✅ 0 lỗi (TS strict, không dùng `any`) |
-| Kiểm thử | `npm run test` | ✅ **224 test / 8 tệp, tất cả đạt** |
+| Kiểm thử | `npm run test` | ✅ **360 test / 14 tệp, tất cả đạt** |
 | Build production | `npm run build` | ✅ 16 route biên dịch thành công |
 | Chạy thật | `npm start` | ✅ Đã kiểm tra thủ công trên Windows 11 |
 
@@ -25,18 +25,17 @@ FFmpeg 6.1.1 (bản đi kèm ffmpeg-static, có libass + libx264).
 
 ## ⚠️ CHI PHÍ API THẬT
 
-**Đã chi: $0,014745** (14 request tới Groq trong toàn bộ quá trình kiểm thử).
+**Đã chi: $2,022494** / hạn mức **$3,00** — còn **$0,977506**.
 
-Hạn mức: **$0,50**. Còn lại: **$0,485**.
+| Loại | Số lần | Chi phí thật |
+|---|---|---|
+| Image AI (OpenAI `gpt-image-2:medium`) | 29 ảnh | $1,193640 |
+| **Video AI (OpenAI `sora-2:720x1280`)** | **2 clip × 4s** | **$0,800000** |
+| Text AI (Groq `openai/gpt-oss-120b`) | 24 lần | $0,028854 |
 
-Con số này là **tiền thật theo bảng giá trả phí của Groq**. Nếu tài khoản đang ở
-gói miễn phí thì Groq không thực sự trừ tiền — nhưng ứng dụng vẫn tính và ghi
-nhận theo giá, vì đó là cách duy nhất để ước tính và hạn mức có ý nghĩa.
+Đây là **tiền thật**. Voice AI vẫn hoàn toàn mock, $0,00.
 
-Image AI, Video AI, Voice AI **vẫn hoàn toàn là mock, chi phí $0,00**.
-
-`.env` đang ở `AI_MOCK_MODE=true` — chế độ an toàn. Đặt `false` để dùng
-Text AI thật.
+`.env` đang ở `AI_MOCK_MODE=true` — chế độ an toàn.
 
 ---
 
@@ -174,6 +173,179 @@ Cả hai đều qua toàn bộ kiểm tra cấu trúc. Khác biệt về nội d
 
 Kết luận: **Text AI thật cho chất lượng dùng được cho sản xuất.** Mock vẫn hữu
 ích để thử quy trình miễn phí.
+
+## Milestone 2 bước 2 — Image AI thật
+
+**Đã chạy thật với OpenAI và kiểm chứng bằng mắt.**
+
+### Đang dùng
+
+```
+Provider : openai
+Model    : gpt-image-2 (tầng medium)
+Giá      : ước tính $0,048/ảnh — thực tế đo được $0,041160/ảnh
+Kích thước: 1024x1536 (khổ dọc gần 9:16 nhất mà API chấp nhận)
+```
+
+Giá thực tế **tính từ số token API báo về** ($30 / 1M token đầu ra), không phải
+con số đoán. Giá ước tính chỉ dùng để kiểm tra hạn mức *trước* khi gọi — bắt
+buộc phải có, vì lúc đó chưa biết số token.
+
+### Vì sao chọn gpt-image-2
+
+Danh sách model lấy trực tiếp từ OpenAI cho thấy `gpt-image-1` mà bản seed ghi
+sẵn đã là đời cũ. `gpt-image-2` vừa mới hơn vừa **rẻ hơn** ($30 so với $40 mỗi
+1M token đầu ra). Đây đúng là lý do phải hỏi nhà cung cấp thay vì tin danh sách
+cũ.
+
+### Character Reference System
+
+Bảng `CharacterReference` thay cho mảng JSON: mỗi ảnh một dòng, nên duyệt/đổi/xoá
+từng ảnh được, và "ảnh chuẩn nào đang dùng" thành dữ liệu truy vấn được.
+
+Nhân vật có thêm `hair`, `facialFeatures`, `outfit`, `bodyProportions`,
+`accessories`, `colorPalette`, `version`. Mỗi trường vào prompt thành một mệnh đề
+riêng có nhãn — model ít chỗ diễn giải lại hơn hẳn một đoạn văn dài.
+
+`buildScenePrompt` xếp: hành động cảnh trước → mô tả nhân vật → **câu khoá thuộc
+tính cuối cùng**, nơi model đọc gần nhất và tuân thủ mạnh nhất.
+
+Ảnh cảnh gọi `/images/edits` kèm ảnh chuẩn đã duyệt. Đó là cách duy nhất cho model
+biết nhân vật *đã* trông như thế nào, thay vì vẽ lại từ chữ mỗi lần.
+
+### Quy tắc quan trọng nhất
+
+**Ảnh chuẩn đã duyệt không bao giờ bị thay tự động.** Mọi lần tạo mới chỉ sinh
+ứng viên `approved=false, isPrimary=false`. Có test riêng canh điều này.
+
+### Kết quả chạy thật
+
+```
+2 ảnh chuẩn (Max, Leo) + 9 ảnh cảnh từ 3 thành ngữ = 11 ảnh
+Max  : 9/9 cảnh đều nhận ảnh tham chiếu
+Leo  : 4/4 cảnh đều nhận ảnh tham chiếu
+Tổng : $0,452760
+```
+
+Kiểm tra bằng mắt qua 3 cảnh "Break a leg" và chéo sang "Piece of cake": tóc,
+khuôn mặt, hoodie vàng sọc trắng, quần jeans lật gấu, giày trắng của Max giữ
+nguyên; kính tròn, áo teal xắn tay, quần xám, giày nâu của Leo giữ nguyên;
+chênh lệch chiều cao Max–Leo cũng giữ đúng.
+
+---
+
+## Character Presence — sửa sau khi phát hiện ở bước Image AI
+
+**Vấn đề:** sự có mặt của nhân vật được suy ra từ việc ai có thoại. Nhân vật
+đứng im phản ứng trong khung hình không có lời nào, nên **không được gửi ảnh
+tham chiếu** và bị AI vẽ tự do.
+
+**Cách sửa:** tách một danh sách thành ba, lưu riêng trong `Scene`:
+
+| Trường | Trả lời câu hỏi | Dùng cho |
+|---|---|---|
+| `charactersPresentJson` | ai **được nhìn thấy** | tạo ảnh |
+| `speakingCharactersJson` | ai **có thoại** | tạo giọng |
+| `primaryCharactersJson` | cảnh **nói về ai** | thứ tự ưu tiên ảnh tham chiếu |
+
+Suy diễn chỉ đi một chiều: ai nói thì chắc chắn có mặt. **Không bao giờ ngược
+lại** — đó chính là suy diễn gây ra lỗi.
+
+Thứ tự ưu tiên khi nhà cung cấp giới hạn số ảnh tham chiếu: trọng tâm → người
+nói → còn lại. Nhân vật bị cắt khỏi danh sách ảnh **vẫn giữ nguyên hồ sơ chữ
+trong prompt**.
+
+**Tự sửa trước khi gọi API:** nếu mô tả cảnh nhắc tên một nhân vật không có
+trong `charactersPresent`, hệ thống bổ sung và ghi cảnh báo. Không âm thầm tạo
+ảnh với dữ liệu mâu thuẫn.
+
+**Kiểm chứng thật:** cảnh có Max + Leo + Mia, chỉ Max nói — cả ba đều được gửi
+ảnh tham chiếu và vẽ đúng mẫu. Mia im lặng vẫn đúng hình.
+
+### Khung hình và vùng cắt
+
+Ảnh là 1024x1536 (2:3), video là 1080x1920 (9:16). Ảnh **rộng hơn** khung video,
+nên bộ render phóng to phủ kín rồi cắt **hai bên trái/phải** khoảng 8% mỗi bên;
+toàn bộ chiều cao được giữ. Trực giác thường đoán ngược lại.
+
+Prompt yêu cầu giữ nhân vật trong 84% chiều ngang ở giữa. Storyboard có lớp phủ
+hiển thị đúng vùng bị cắt.
+
+---
+
+## Chế độ chất lượng ảnh — chốt V1
+
+**Mọi chế độ đều chỉ tự vẽ MỘT ảnh.** Không chế độ nào âm thầm trả tiền cho ảnh
+thứ hai.
+
+| Chế độ | Hành vi |
+|---|---|
+| ECONOMY | 1 ảnh, model tiết kiệm, không tự vẽ lại |
+| BALANCED | 1 ảnh, model tốt/giá hợp lý, tự vẽ lại tối đa 1 lần khi ảnh hỏng rõ |
+| QUALITY | 1 ảnh bằng model chất lượng cao. Người dùng bấm **"Tạo phương án khác"** để có ứng viên thứ 2 và tự chọn |
+| CUSTOM | người dùng tự chọn provider/model |
+
+Ước tính chi phí **chỉ đếm ảnh hệ thống tự vẽ**. Ảnh người dùng chủ động tạo
+thêm là quyết định riêng của họ, không đưa vào dự báo — dự báo thừa sẽ làm hạn
+mức còn lại trông nhỏ hơn thực tế.
+
+Ảnh cũ không bị mất: mọi ảnh từng tạo đều còn trong bảng `Asset`, hiển thị thành
+dải ứng viên để chọn lại, miễn phí.
+
+---
+
+## Vùng cắt 9:16 — đo bằng số liệu
+
+`npm run crop:check` giải mã ảnh bằng ffmpeg và đo phần nội dung rơi vào dải bị
+cắt, tách riêng ba dải: mặt/đầu, tay/đạo cụ, chân/bàn.
+
+Phát hiện: cảnh **1–2 nhân vật nằm gọn** trong vùng an toàn; cảnh **3 nhân vật
+dàn ngang hết khung** và mất chi tiết hai bên. Đã thêm chỉ dẫn gom nhóm cho cảnh
+từ 3 nhân vật trở lên — đo lại cho thấy nội dung thu từ 0–100% về 4–96%.
+
+Lưu ý khi đọc kết quả: phép đo đếm **mọi** nội dung, kể cả mép tóc và mũi giày,
+nên nó là bộ lọc thận trọng chứ không phải số lỗi.
+
+---
+
+## Milestone 2 bước 3 — Video AI
+
+### Sora-2 đã kiểm chứng bằng 2 clip thật
+
+| | Test #1 | Test #2 |
+|---|---|---|
+| Character Identity | 10 | 7 |
+| Motion | 3 | 8 |
+| Artifacts | 8 | 7 |
+| Camera | 10 | 10 |
+| Composition | 6 | 9 |
+| Humor readability | 3 | 8 |
+
+**Kết luận:** identity và motion **đánh đổi trực tiếp** — prompt cho cử động
+nhiều thì model biến dạng nhiều hơn. Camera tĩnh tuyệt đối ở cả hai lần.
+$0,40 cho 4 giây → **$2,40 cho một video 6 cảnh**, đắt hơn toàn bộ ảnh và text
+cộng lại.
+
+**Chưa chốt Sora-2 làm mặc định cho BALANCED.**
+
+### Ba adapter video đã viết, chưa gọi API
+
+| Provider | Model | Giá 4s | Key | Đã chạy thật |
+|---|---|---|---|---|
+| openai | `sora-2:720x1280` | $0,40 | ✅ | ✅ 2 clip |
+| runway | `gen4_turbo:720x1280` | **$0,25** | ❌ | chưa |
+| google | `veo-3.1-lite...:720x1280` | $0,40 | ❌ | chưa |
+
+Hai ràng buộc về giá mà adapter đã tính sẵn, đừng tính lại bằng tay:
+
+- **Runway chỉ bán clip 5 hoặc 10 giây.** Cảnh 4 giây bị tính tiền 5 giây.
+- **Veo bị ép 8 giây** khi có ảnh keyframe hoặc dùng 1080p. Chưa kiểm chứng
+  được ảnh keyframe đầu tiên có tính là "reference image" hay không — adapter
+  giả định là CÓ, nên báo giá cao hơn thực tế thay vì thấp hơn hoá đơn.
+
+Xem bảng đầy đủ: `npm run video:benchmark`
+
+---
 
 ## Chưa làm (các bước sau)
 
