@@ -212,6 +212,70 @@ describe("script quality gating", () => {
   });
 });
 
+describe("giới hạn thời lượng cảnh từ provider thật", () => {
+  const base = {
+    idiom: "Break a leg",
+    title: "T",
+    hook: "H",
+    literalMisunderstanding: "",
+    setup: "",
+    escalation: "",
+    punchline: "P",
+    meaning: "M",
+    exampleSentence: "E",
+    durationTarget: 27,
+    closingCTA: "",
+    angleKey: "a",
+  };
+
+  it("cắt cảnh quá dài xuống 6 giây - mỗi cảnh là một lần tạo video AI", () => {
+    // Groq thật đã trả về cảnh 7 giây trong một lần chạy thực tế.
+    const out = withDerivedRouting({
+      ...base,
+      scenes: [7, 12, 4].map((duration, i) => ({
+        sceneNumber: i + 1,
+        duration,
+        visualDescription: "x",
+        dialogue: "",
+        narration: "",
+        subtitle: "",
+        camera: "",
+        characterAction: "",
+        soundEffect: "",
+        imagePrompt: "",
+        videoPrompt: "",
+        complexity: "LOW" as const,
+        spendPriority: "NORMAL" as const,
+        characters: [],
+      })),
+    });
+    expect(out.scenes.map((s) => s.duration)).toEqual([6, 6, 4]);
+  });
+
+  it("nâng cảnh quá ngắn lên 2 giây", () => {
+    const out = withDerivedRouting({
+      ...base,
+      scenes: [1, 1.5, 3].map((duration, i) => ({
+        sceneNumber: i + 1,
+        duration,
+        visualDescription: "x",
+        dialogue: "",
+        narration: "",
+        subtitle: "",
+        camera: "",
+        characterAction: "",
+        soundEffect: "",
+        imagePrompt: "",
+        videoPrompt: "",
+        complexity: "LOW" as const,
+        spendPriority: "NORMAL" as const,
+        characters: [],
+      })),
+    });
+    expect(out.scenes.map((s) => s.duration)).toEqual([2, 2, 3]);
+  });
+});
+
 describe("scene complexity classification", () => {
   it("rates a static explanation card as LOW", () => {
     const result = classifyScene({

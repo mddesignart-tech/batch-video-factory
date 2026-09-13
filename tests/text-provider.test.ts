@@ -274,6 +274,39 @@ describe("thử lại có giới hạn", () => {
     expect(requestCount).toBe(MAX_ATTEMPTS);
   });
 
+  it("lỗi SAU khi đã bị tính phí vẫn mang theo chi phí - nếu không tiền sẽ biến mất", async () => {
+    // Phản hồi rỗng và phản hồi bị cắt đều xảy ra SAU khi nhà cung cấp đã tính
+    // tiền. Ném lỗi mà không kèm usage là đánh mất khoản chi thật.
+    reset({
+      status: 200,
+      body: {
+        model: "stub-model",
+        choices: [{ message: { content: "" }, finish_reason: "length" }],
+        usage: { prompt_tokens: 500, completion_tokens: 40 },
+      },
+    });
+
+    let caught: unknown;
+    try {
+      await chatCompletion(config(), {
+        messages: [{ role: "user", content: "hi" }],
+        temperature: 0,
+        jsonMode: false,
+        purpose: "test",
+      });
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ProviderError);
+    const usage = (caught as InstanceType<typeof ProviderError>).usage;
+    expect(usage).toBeDefined();
+    expect(usage?.inputTokens).toBe(500);
+    expect(usage?.outputTokens).toBe(40);
+    // 500 vào x $0.01/1k + 40 ra x $0.03/1k = $0.0062
+    expect(usage?.actualCost).toBeCloseTo(0.0062, 6);
+  });
+
   it("báo lỗi rõ ràng khi phản hồi bị cắt do chạm giới hạn token", async () => {
     reset({
       status: 200,

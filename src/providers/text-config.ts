@@ -96,6 +96,14 @@ async function resolveApiKey(providerName: string): Promise<string> {
 export async function buildTextConfig(
   providerName: string,
   modelId: string,
+  /**
+   * Whether the model must be switched on.
+   *
+   * True for anything that generates. False for listing models, which needs
+   * only the base URL and key - refusing there would make it impossible to
+   * discover a model before enabling it, which is backwards.
+   */
+  requireEnabled = true,
 ): Promise<OpenAICompatibleConfig> {
   if (!OPENAI_COMPATIBLE_PROVIDERS.has(providerName)) {
     throw new TextConfigError(
@@ -116,7 +124,7 @@ export async function buildTextConfig(
       `Không tìm thấy model ${providerName}/${modelId} trong bảng Mô hình AI.`,
     );
   }
-  if (!model.enabled) {
+  if (requireEnabled && !model.enabled) {
     throw new TextConfigError(
       `Model ${providerName}/${modelId} đang bị tắt. Bật nó trong trang Mô hình AI.`,
     );

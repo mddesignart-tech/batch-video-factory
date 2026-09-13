@@ -6,6 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { isMockMode } from "@/lib/env";
 import { errorMessage } from "@/lib/utils";
 import {
+  discoverTextModels,
+  type ModelDiscovery,
+} from "@/services/model-discovery";
+import {
   confirmProvider,
   revokeProvider,
   setSpendCap,
@@ -182,6 +186,19 @@ export async function updateSpendCap(formData: FormData): Promise<ActionResult> 
     ok: true,
     message: `Đã đặt hạn mức chi tiêu API thật là $${parsed.data.cap.toFixed(2)}.`,
   };
+}
+
+/**
+ * Ask a provider for its live model list.
+ *
+ * Free on every OpenAI-compatible API, so it needs no spend gate. It exists
+ * because model names are the provider's data, not ours - Groq retired a model
+ * we had seeded and the first real call 404'd.
+ */
+export async function listProviderModels(
+  provider: string,
+): Promise<ModelDiscovery> {
+  return discoverTextModels(provider);
 }
 
 function round6(value: number): number {

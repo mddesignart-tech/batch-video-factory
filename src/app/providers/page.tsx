@@ -14,6 +14,7 @@ import { VI_PROVIDER_STATUS, type ProviderStatus } from "@/domain/enums";
 import { formatDateVi } from "@/lib/utils";
 import { ProviderCard } from "./provider-forms";
 import { SpendGate } from "@/components/spend-gate";
+import { ModelDiscoveryPanel } from "@/components/model-discovery-panel";
 import { spendStatus } from "@/services/spend-guard";
 
 export const dynamic = "force-dynamic";
@@ -162,6 +163,10 @@ export default async function ProvidersPage() {
                   priority={provider.priority}
                   fallbackPriority={provider.fallbackPriority}
                 />
+
+                {provider.types.includes("text") && provider.name !== "mock" ? (
+                  <ModelDiscoveryPanel provider={provider.name} />
+                ) : null}
 
                 <SpendGate
                   provider={provider.name}

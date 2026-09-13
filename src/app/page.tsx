@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
   EmptyState,
@@ -21,6 +22,7 @@ import { VI_PROJECT_STATUS, VI_QUALITY_MODE } from "@/domain/enums";
 import type { ProjectStatus, QualityMode } from "@/domain/enums";
 import { costSummary } from "@/services/cost-tracker";
 import { queueStats } from "@/jobs/queue";
+import { spendStatus } from "@/services/spend-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +43,9 @@ export default async function DashboardPage() {
   const [
     today,
     month,
+    all,
+    spend,
+    estimatedPending,
     queue,
     todayCount,
     failedCount,
@@ -49,6 +54,16 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     costSummary("today"),
     costSummary("month"),
+    costSummary("all"),
+    spendStatus(),
+    // Forecast still outstanding: projects that have an estimate but have not
+    // finished. Deliberately not added to any spend figure.
+    prisma.project
+      .aggregate({
+        where: { status: { notIn: ["completed", "failed"] } },
+        _sum: { estimatedCost: true },
+      })
+      .then((r) => r._sum.estimatedCost ?? 0),
     queueStats(),
     prisma.project.count({ where: { createdAt: { gte: startOfDay } } }),
     prisma.project.count({ where: { status: "failed" } }),
@@ -89,12 +104,22 @@ export default async function DashboardPage() {
           value={failedCount}
           tone={failedCount > 0 ? "danger" : "neutral"}
         />
-        <Stat label="Chi phí hôm nay" value={formatUSD(today.total)} />
-        <Stat label="Chi phí tháng này" value={formatUSD(month.total)} />
         <Stat
-          label="Chi phí TB / video"
-          value={formatUSD(month.averageCostPerVideo)}
-          hint="Tính trên video hoàn thành trong tháng"
+          label="API thật hôm nay"
+          value={formatUSD(today.actualApiCost)}
+          hint="Tiền thật đã trả cho nhà cung cấp"
+          tone={today.actualApiCost > 0 ? "warn" : "ok"}
+        />
+        <Stat
+          label="API thật tháng này"
+          value={formatUSD(month.actualApiCost)}
+          hint="Tiền thật đã trả cho nhà cung cấp"
+          tone={month.actualApiCost > 0 ? "warn" : "ok"}
+        />
+        <Stat
+          label="Mock tháng này"
+          value={formatUSD(month.mockCost)}
+          hint={`${month.mockCalls} lượt gọi mock - luôn miễn phí`}
         />
         <Stat
           label="Dung lượng media"
@@ -102,6 +127,55 @@ export default async function DashboardPage() {
           hint={`${idiomsAvailable} thành ngữ chưa dùng`}
         />
       </div>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Chi phí: ba con số khác nhau</CardTitle>
+          <CardDescription>
+            Đừng nhầm lẫn giữa tiền thật, dự báo và số mô phỏng.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-3">
+          <div>
+            <p className="text-[11px] tracking-wide text-ink-500 uppercase">
+              Chi phí API thật
+            </p>
+            <p
+              className={`mt-1 text-xl font-semibold tabular-nums ${
+                all.actualApiCost > 0 ? "text-warn-500" : "text-ok-500"
+              }`}
+            >
+              {formatUSD(all.actualApiCost)}
+            </p>
+            <p className="mt-1 text-[11px] text-ink-500">
+              Tiền thật đã trả cho nhà cung cấp. Hạn mức {formatUSD(spend.cap)},
+              còn {formatUSD(spend.remaining)}.
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] tracking-wide text-ink-500 uppercase">
+              Chi phí ước tính
+            </p>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-ink-300">
+              {formatUSD(estimatedPending)}
+            </p>
+            <p className="mt-1 text-[11px] text-ink-500">
+              Dự báo cho các dự án chưa render xong. Chưa phải tiền.
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] tracking-wide text-ink-500 uppercase">
+              Chi phí mock
+            </p>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-ink-400">
+              {formatUSD(all.mockCost)}
+            </p>
+            <p className="mt-1 text-[11px] text-ink-500">
+              {all.mockCalls} lượt gọi mock. Luôn bằng 0 — không tốn đồng nào.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

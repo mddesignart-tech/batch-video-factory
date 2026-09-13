@@ -199,6 +199,15 @@ export async function usedAngleKeys(idiomId: string): Promise<string[]> {
   return rows.map((r) => r.angleKey.split("::")[1] ?? "").filter(Boolean);
 }
 
+/**
+ * Hard limits on one generated scene.
+ *
+ * A scene is a single AI video call: under two seconds there is nothing to see,
+ * over six the motion degrades and the cost climbs with it.
+ */
+export const MIN_SCENE_SECONDS = 2;
+export const MAX_SCENE_SECONDS = 6;
+
 // ------------------------------------------------------------- generation ---
 
 export interface GenerateScriptResult {
@@ -460,8 +469,16 @@ export function withDerivedRouting(script: ScriptDoc): ScriptDoc {
   const roles = ["hook", "literal", "escalation", "punchline", "meaning", "example"];
   let elapsed = 0;
   const scenes = script.scenes.map((scene, index) => {
+    // Clamp the scene length the model asked for.
+    //
+    // Every scene is ONE AI video generation, and quality falls off sharply past
+    // about six seconds. The mock writer clamps itself; a real model does not -
+    // Groq returned 7s scenes on a real run - and the Zod schema allows up to 12
+    // deliberately, so that a provider stretching slightly is repaired rather
+    // than rejected outright.
+    const duration = Math.min(MAX_SCENE_SECONDS, Math.max(MIN_SCENE_SECONDS, scene.duration));
     const { complexity } = classifyScene({
-      duration: scene.duration,
+      duration,
       visualDescription: scene.visualDescription,
       characterAction: scene.characterAction,
       camera: scene.camera,
@@ -479,8 +496,8 @@ export function withDerivedRouting(script: ScriptDoc): ScriptDoc {
       complexity,
       role,
     });
-    elapsed += scene.duration;
-    return { ...scene, complexity, spendPriority: priority };
+    elapsed += duration;
+    return { ...scene, duration, complexity, spendPriority: priority };
   });
   return { ...script, scenes };
 }

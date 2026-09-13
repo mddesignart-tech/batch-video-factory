@@ -320,10 +320,48 @@ describe("cost tracking", () => {
     expect(project?.actualCost).toBeCloseTo(0.25, 4);
   });
 
-  it("summarises by category", async () => {
+  it("tách bạch chi phí thật, ước tính và mock", async () => {
+    // Ba khoản trên cùng một dự án, mỗi khoản một loại.
+    await recordCost({
+      projectId,
+      category: "video",
+      provider: "runway",
+      model: "runway-video",
+      amount: 0.5,
+    });
+
     const summary = await costSummary("all");
-    expect(summary.byCategory.video).toBeGreaterThan(0);
-    expect(summary.total).toBeGreaterThan(0);
+
+    // byCategory và actualApiCost chỉ đếm tiền THẬT.
+    expect(summary.byCategory.video).toBeCloseTo(0.5, 6);
+    expect(summary.actualApiCost).toBeCloseTo(0.5, 6);
+
+    // Mock được báo TÁCH RIÊNG: dù dòng mock có mang số tiền nào đi nữa (ở đây
+    // fixture cố tình đặt 0.25), nó KHÔNG được cộng vào tiền thật.
+    expect(summary.mockCalls).toBeGreaterThan(0);
+    expect(summary.mockCost).toBeGreaterThan(0);
+    expect(summary.actualApiCost).toBeCloseTo(0.5, 6);
+    expect(summary.byCategory.video).toBeCloseTo(0.5, 6);
+
+    // Ước tính không bao giờ bị cộng vào tiền thật.
+    expect(summary.estimatedCost).toBeGreaterThan(0);
+    expect(summary.actualApiCost).toBeLessThan(summary.estimatedCost);
+  });
+
+  it("giữ được khoản chi nhỏ hơn một xu", async () => {
+    // Làm tròn 4 chữ số sẽ biến khoản này thành 0 và đánh mất chi phí thật.
+    await recordCost({
+      projectId,
+      category: "text",
+      provider: "groq",
+      model: "tiny",
+      amount: 0.000045,
+    });
+    const row = await prisma.costEntry.findFirst({
+      where: { model: "tiny" },
+      select: { amount: true },
+    });
+    expect(row?.amount).toBeCloseTo(0.000045, 8);
   });
 
   it("starts the week on Monday", () => {

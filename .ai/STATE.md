@@ -1,7 +1,7 @@
 # Trạng thái dự án
 
 **Cập nhật:** 2026-09-13
-**Cột mốc hiện tại:** Milestone 2 — **Bước 1 (Text AI thật): ĐÃ CHẠY THẬT VÀ KIỂM CHỨNG**
+**Cột mốc hiện tại:** Milestone 2 — **Bước 1 (Text AI thật): ĐÃ NGHIỆM THU QUA GIAO DIỆN**
 
 Tài liệu này ghi tình trạng **thực tế**. Tính năng chỉ được đánh dấu hoạt động
 khi đã chạy thật và được kiểm chứng, không phải khi đã viết xong mã.
@@ -14,7 +14,7 @@ khi đã chạy thật và được kiểm chứng, không phải khi đã viế
 |---|---|---|
 | Lint | `npm run lint` | ✅ 0 lỗi |
 | Kiểu dữ liệu | `npm run typecheck` | ✅ 0 lỗi (TS strict, không dùng `any`) |
-| Kiểm thử | `npm run test` | ✅ **220 test / 8 tệp, tất cả đạt** |
+| Kiểm thử | `npm run test` | ✅ **224 test / 8 tệp, tất cả đạt** |
 | Build production | `npm run build` | ✅ 16 route biên dịch thành công |
 | Chạy thật | `npm start` | ✅ Đã kiểm tra thủ công trên Windows 11 |
 
@@ -25,15 +25,50 @@ FFmpeg 6.1.1 (bản đi kèm ffmpeg-static, có libass + libx264).
 
 ## ⚠️ CHI PHÍ API THẬT
 
-**Đã chi: khoảng $0.0067** (6 request tới Groq trong quá trình kiểm thử).
+**Đã chi: $0,014745** (14 request tới Groq trong toàn bộ quá trình kiểm thử).
 
-Hạn mức: **$0.50**. Còn lại: **khoảng $0.493**.
+Hạn mức: **$0,50**. Còn lại: **$0,485**.
 
 Con số này là **tiền thật theo bảng giá trả phí của Groq**. Nếu tài khoản đang ở
 gói miễn phí thì Groq không thực sự trừ tiền — nhưng ứng dụng vẫn tính và ghi
 nhận theo giá, vì đó là cách duy nhất để ước tính và hạn mức có ý nghĩa.
 
-Image AI, Video AI, Voice AI **vẫn hoàn toàn là mock, chi phí $0.00**.
+Image AI, Video AI, Voice AI **vẫn hoàn toàn là mock, chi phí $0,00**.
+
+`.env` đang ở `AI_MOCK_MODE=true` — chế độ an toàn. Đặt `false` để dùng
+Text AI thật.
+
+---
+
+## Nghiệm thu qua giao diện (2026-09-13)
+
+Ba dự án được tạo **hoàn toàn qua UI** như người dùng thật, với
+`AI_MOCK_MODE=false`:
+
+| Thành ngữ | Cảnh | Thời lượng | Chi phí thật |
+|---|---|---|---|
+| Break a leg | 5 | 27,0s | $0,0023 |
+| Spill the beans | 6 | 27,0s | $0,0058 |
+| Piece of cake | 6 | 23,0s | $0,0019 |
+
+Luồng đã đi qua: UI → chọn idiom → tạo project → AIRouter → TextProvider thật →
+script → kiểm tra JSON → storyboard → chấm điểm → sổ chi phí → dashboard.
+
+Image/Video/Voice giữ nguyên mock trong suốt quá trình.
+
+### Các mục an toàn đã kiểm chứng
+
+| Mục | Kết quả |
+|---|---|
+| Router KHÔNG âm thầm dùng mock khi ở chế độ thật | ĐẠT — cả 3 dự án đều ghi `provider=groq` |
+| Provider thật lỗi → UI báo rõ provider/model/lý do | ĐẠT — *"Không tìm thấy model... provider=groq, code=model_not_found"* |
+| Không giả vờ thành công bằng mock | ĐẠT — lỗi được ném ra, không có fallback ngầm |
+| API key không xuất hiện trong log | ĐẠT — quét 59 dòng LogEntry + 34 ProviderJob, không có key, không có chuỗi `gsk_` |
+| Không tạo request trả phí trùng lặp | ĐẠT — 34 khoá idempotency đều duy nhất |
+| Dashboard phân biệt 3 loại chi phí | ĐẠT — API thật / ước tính / mock hiển thị riêng |
+| Kịch bản 4–6 cảnh, không bị cắt | ĐẠT — 5/6/6 cảnh, mọi cảnh 2–6 giây |
+| Lấy danh sách model từ provider thật | ĐẠT — liệt kê 7 model Groq, cảnh báo model lỗi thời |
+| Tổng chi phí ≤ $0,50 | ĐẠT — $0,014745 |
 
 ---
 
@@ -192,6 +227,15 @@ Không có lỗi nào đang mở.
 | `.gitignore` có `data/` nên nuốt luôn `src/data/` là mã nguồn | Neo về gốc repo: `/data/` |
 | Dùng `require()` để tránh circular import | Không cần — `script-service` đã được import tĩnh sẵn |
 
+### Đã phát hiện khi NGHIỆM THU QUA UI
+
+| Vấn đề | Cách xử lý |
+|---|---|
+| **Chi phí làm tròn 4 chữ số** nên khoản $0,000045 bị ghi thành $0 — cộng dồn nhiều lần gọi nhỏ sẽ sai lệch | Sổ chi phí và hạn mức chuyển sang 6 chữ số |
+| **Lỗi "phản hồi rỗng" không mang theo chi phí** — cùng loại lỗ hổng với truncation: đã bị tính tiền nhưng sổ không ghi | Dựng `ChatResult` trước khi kiểm tra nội dung, mọi lỗi sau đó đều đính `usage` |
+| **Text AI thật trả về cảnh 7 giây** — vượt giới hạn 6s mà mỗi lần tạo video AI chịu được. Mock tự giới hạn, provider thật thì không | Cắt về 2–6 giây trong `withDerivedRouting`, kèm test |
+| Lấy danh sách model lại đòi model phải đang bật — không thể khám phá model trước khi bật nó | `buildTextConfig` nhận cờ `requireEnabled` |
+
 ### Đã phát hiện khi CHẠY THẬT (những lỗi mà test giả lập không bắt được)
 
 | Vấn đề | Cách xử lý |
@@ -223,21 +267,25 @@ trước khi phát hành cho người khác dùng.
 
 Xem [NEXT_TASKS.md](NEXT_TASKS.md).
 
-**Milestone 2 bước 1 đã xong.** Không tự động chuyển sang bước 2 (Image AI) —
-chờ người dùng xác nhận.
+**Milestone 2 bước 1 đã nghiệm thu xong.** Không tự động chuyển sang bước 2
+(Image AI) — chờ người dùng xác nhận.
 
 Cấu hình hiện tại:
 
 ```
-Provider : groq (đã bật, đã xác nhận)
+Provider : groq (bật, đã xác nhận)
 Model    : openai/gpt-oss-120b
 Giá      : $0.00015 / 1k token vào, $0.00075 / 1k token ra
-Hạn mức  : $0.50, còn khoảng $0.493
-.env     : AI_MOCK_MODE=true  ← vẫn đang ở chế độ mock cho an toàn
+Hạn mức  : $0.50, đã chi $0.014745, còn $0.485255
+.env     : AI_MOCK_MODE=true  ← chế độ an toàn
 ```
 
-Để dùng Text AI thật trong ứng dụng: đặt `AI_MOCK_MODE=false` trong `.env`
-rồi khởi động lại. Để quay về miễn phí: đặt lại `true`.
+Để dùng Text AI thật: đặt `AI_MOCK_MODE=false` trong `.env` rồi khởi động
+lại. Để quay về miễn phí: đặt lại `true`.
 
 > Giá đang dùng là theo bảng giá Groq tại thời điểm cấu hình. Hãy đối chiếu lại
 > tại https://groq.com/pricing nếu con số ước tính trông không đúng.
+>
+> Trước khi thêm model mới, bấm **"Hỏi nhà cung cấp"** trong trang Nhà cung cấp
+> AI để lấy tên model đang thực sự khả dụng — Groq đã gỡ một model mà chúng ta
+> seed sẵn, và đó là nguyên nhân lỗi 404 ở lần chạy thật đầu tiên.

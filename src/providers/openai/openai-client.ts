@@ -214,15 +214,9 @@ export async function chatCompletion(
       const json = (await response.json()) as ChatCompletionResponse;
       const content = json.choices?.[0]?.message?.content ?? "";
 
-      if (content.trim().length === 0) {
-        throw new ProviderError(
-          "Nhà cung cấp trả về nội dung rỗng.",
-          config.providerName,
-          true,
-          "empty_response",
-        );
-      }
-
+      // Build the result BEFORE validating the content. Everything that throws
+      // from here on has already been billed by the provider, so each throw must
+      // carry the usage figures or that spend disappears from the ledger.
       const result: ChatResult = {
         content,
         inputTokens: json.usage?.prompt_tokens ?? null,
@@ -231,6 +225,22 @@ export async function chatCompletion(
         model: json.model ?? model,
         finishReason: json.choices?.[0]?.finish_reason ?? null,
       };
+
+      if (content.trim().length === 0) {
+        // Reasoning models hit this when the token ceiling is consumed before
+        // any visible output is produced. The provider charges for it anyway.
+        const truncated = result.finishReason === "length";
+        throw new ProviderError(
+          truncated
+            ? `Phản hồi rỗng vì chạm giới hạn ${config.maxOutputTokens} token ` +
+              `trước khi kịp sinh nội dung. Hãy tăng maxOutputTokens.`
+            : "Nhà cung cấp trả về nội dung rỗng.",
+          config.providerName,
+          true,
+          "empty_response",
+          usageFrom(result, config),
+        );
+      }
 
       await logger.info({
         event: "provider.text_completed",

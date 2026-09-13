@@ -14,6 +14,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { formatDateVi, formatUSD } from "@/lib/utils";
 import { costSummary, type CostPeriod } from "@/services/cost-tracker";
+import { spendStatus } from "@/services/spend-guard";
 import { COST_CATEGORY_LABELS } from "@/services/cost-estimator";
 import type { CostCategory } from "@/domain/enums";
 
@@ -27,13 +28,13 @@ const PERIODS: { key: CostPeriod; label: string }[] = [
 ];
 
 export default async function CostsPage() {
-  const [today, week, month, all, recent, byProvider] = await Promise.all([
+  const [today, week, month, all, spend, recent, byProvider] = await Promise.all([
     costSummary("today"),
     costSummary("week"),
     costSummary("month"),
     costSummary("all"),
+    spendStatus(),
     prisma.costEntry.findMany({
-      where: { estimated: false },
       orderBy: { createdAt: "desc" },
       take: 60,
       include: { project: { select: { title: true } } },
@@ -63,12 +64,37 @@ export default async function CostsPage() {
         {PERIODS.map((period) => (
           <Stat
             key={period.key}
-            label={period.label}
-            value={formatUSD(summaries[period.key].total)}
+            label={`${period.label} (API thật)`}
+            value={formatUSD(summaries[period.key].actualApiCost)}
             hint={`${summaries[period.key].videosGenerated} video`}
-            tone={period.key === "month" ? "brand" : "neutral"}
+            tone={summaries[period.key].actualApiCost > 0 ? "warn" : "ok"}
           />
         ))}
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat
+          label="Chi phí API THẬT"
+          value={formatUSD(all.actualApiCost)}
+          hint="Tiền thật đã trả"
+          tone={all.actualApiCost > 0 ? "warn" : "ok"}
+        />
+        <Stat
+          label="Chi phí ƯỚC TÍNH"
+          value={formatUSD(all.estimatedCost)}
+          hint="Dự báo, chưa phải tiền"
+        />
+        <Stat
+          label="Chi phí MOCK"
+          value={formatUSD(all.mockCost)}
+          hint={`${all.mockCalls} lượt gọi, luôn miễn phí`}
+        />
+        <Stat
+          label="Hạn mức còn lại"
+          value={formatUSD(spend.remaining)}
+          hint={`Trần ${formatUSD(spend.cap)}`}
+          tone={spend.remaining <= 0 ? "danger" : "brand"}
+        />
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -177,6 +203,7 @@ export default async function CostsPage() {
                   <Th>Nhà cung cấp</Th>
                   <Th>Mô hình</Th>
                   <Th>Loại</Th>
+                  <Th>Tiền thật?</Th>
                   <Th className="text-right">Chi phí</Th>
                 </tr>
               </thead>
@@ -199,6 +226,15 @@ export default async function CostsPage() {
                     </Td>
                     <Td className="text-[11px] text-ink-500">
                       {entry.isRetry ? "tạo lại" : "lần đầu"}
+                    </Td>
+                    <Td className="text-[11px]">
+                      {entry.estimated ? (
+                        <span className="text-ink-500">ước tính</span>
+                      ) : entry.provider === "mock" ? (
+                        <span className="text-ink-400">mock ($0)</span>
+                      ) : (
+                        <span className="text-warn-500">TIỀN THẬT</span>
+                      )}
                     </Td>
                     <Td className="text-right tabular-nums text-ink-100">
                       {formatUSD(entry.amount)}

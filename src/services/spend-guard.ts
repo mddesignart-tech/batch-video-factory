@@ -84,7 +84,8 @@ export async function totalRealSpend(): Promise<number> {
     where: { estimated: false, provider: { not: "mock" } },
     _sum: { amount: true },
   });
-  return round(agg._sum.amount ?? 0);
+  // Six decimals: see cost-tracker. Rounding to four loses sub-cent calls.
+  return round(agg._sum.amount ?? 0, 6);
 }
 
 export interface SpendStatus {
@@ -104,7 +105,7 @@ export async function spendStatus(): Promise<SpendStatus> {
   return {
     spent,
     cap,
-    remaining: round(Math.max(0, cap - spent)),
+    remaining: round(Math.max(0, cap - spent), 6),
     confirmedProviders: confirmed,
   };
 }
@@ -236,7 +237,7 @@ export async function assertCanSpend(opts: {
       );
     }
 
-    const projected = round(status.spent + Math.max(0, opts.estimatedCost));
+    const projected = round(status.spent + Math.max(0, opts.estimatedCost), 6);
     if (projected > status.cap) {
       throw new SpendCapExceededError(
         `Đã chi $${status.spent.toFixed(4)} cho API thật. Yêu cầu này ước tính ` +
