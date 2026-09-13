@@ -11,6 +11,7 @@ import {
   PageHeader,
 } from "@/components/ui";
 import { prisma } from "@/lib/prisma";
+import { sceneCharacters } from "@/domain/scene-characters";
 import { parseJson, formatUSD } from "@/lib/utils";
 import {
   VI_PROJECT_STATUS,
@@ -56,11 +57,16 @@ export default async function ProjectDetailPage({
   });
   if (!project) notFound();
 
-  const [videoModels, jobs] = await Promise.all([
+  const [videoModels, imageModels, allCharacters, jobs] = await Promise.all([
     prisma.modelRegistry.findMany({
       where: { type: "video", enabled: true },
       orderBy: [{ provider: "asc" }, { price: "asc" }],
     }),
+    prisma.modelRegistry.findMany({
+      where: { type: "image" },
+      orderBy: [{ enabled: "desc" }, { price: "asc" }],
+    }),
+    prisma.character.findMany({ select: { id: true, name: true } }),
     prisma.job.findMany({
       where: { projectId: id },
       orderBy: { createdAt: "desc" },
@@ -153,6 +159,7 @@ export default async function ProjectDetailPage({
                 routingMode: scene.routingMode,
                 videoProvider: scene.videoProvider,
                 videoModel: scene.videoModel,
+                imageProvider: scene.imageProvider,
                 imageModel: scene.imageModel,
                 voiceModel: scene.voiceModel,
                 estimatedCost: scene.estimatedCost,
@@ -164,7 +171,9 @@ export default async function ProjectDetailPage({
                 status: scene.status,
                 approved: scene.approved,
                 skipped: scene.skipped,
-                characters: parseJson<string[]>(scene.characterIdsJson, []),
+                charactersPresent: sceneCharacters(scene).present,
+                speakingCharacters: sceneCharacters(scene).speaking,
+                primaryCharacters: sceneCharacters(scene).primary,
                 errorMessage: scene.errorMessage,
               }))}
               routingByScene={Object.fromEntries(
@@ -193,6 +202,15 @@ export default async function ProjectDetailPage({
                 price: m.price,
                 priceUnit: m.priceUnit,
               }))}
+              imageModels={imageModels.map((m) => ({
+                provider: m.provider,
+                modelId: m.modelId,
+                displayName: m.displayName,
+                price: m.price,
+                enabled: m.enabled,
+              }))}
+              allCharacters={allCharacters}
+              qualityMode={project.qualityMode}
             />
           )}
         </div>

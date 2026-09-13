@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Ban, Check, Image as ImageIcon, Mic, Video } from "lucide-react";
+import { ImageReview, type ImageModelChoice } from "./image-review";
 import {
   Badge,
   Card,
@@ -56,6 +57,7 @@ export interface SceneView {
   routingMode: string;
   videoProvider: string | null;
   videoModel: string | null;
+  imageProvider: string | null;
   imageModel: string | null;
   voiceModel: string | null;
   estimatedCost: number;
@@ -67,9 +69,16 @@ export interface SceneView {
   status: string;
   approved: boolean;
   skipped: boolean;
-  characters: string[];
+  /** Everyone visible in frame - the list that drives image generation. */
+  charactersPresent: string[];
+  /** Only those with a line. Drives voice, not images. */
+  speakingCharacters: string[];
+  /** The focus of the shot. First in line for a reference image. */
+  primaryCharacters: string[];
   errorMessage: string | null;
 }
+
+export type { ImageModelChoice };
 
 export interface RoutingView {
   image: string | null;
@@ -106,12 +115,19 @@ export function Storyboard({
   scenes,
   routingByScene,
   videoModels,
+  imageModels,
+  allCharacters,
+  qualityMode,
 }: {
   projectId: string;
   idiomPhrase: string;
   scenes: SceneView[];
   routingByScene: Record<number, RoutingView>;
   videoModels: ModelOption[];
+  imageModels: ImageModelChoice[];
+  allCharacters: { id: string; name: string }[];
+  /** Project quality mode, which decides whether alternatives are offered. */
+  qualityMode: string;
 }) {
   const [selectedId, setSelectedId] = useState(scenes[0]?.id ?? "");
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -205,11 +221,14 @@ export function Storyboard({
                     className="aspect-[9/16] w-full object-cover"
                   />
                 ) : selected.imagePath ? (
-                  <img
-                    src={`/api/media/${selected.imagePath}`}
-                    alt={`Cảnh ${selected.sceneNumber}`}
-                    className="aspect-[9/16] w-full object-cover"
-                  />
+                  <div className="relative">
+                    <img
+                      src={`/api/media/${selected.imagePath}`}
+                      alt={`Cảnh ${selected.sceneNumber}`}
+                      className="aspect-[2/3] w-full object-contain"
+                    />
+                    <CropOverlay />
+                  </div>
                 ) : (
                   <div className="flex aspect-[9/16] w-full flex-col items-center justify-center gap-2 text-center text-xs text-ink-600">
                     <Video className="h-8 w-8" />
@@ -239,8 +258,16 @@ export function Storyboard({
               <PreviewRow label="Máy quay" value={selected.camera} />
               <PreviewRow label="Âm thanh" value={selected.soundEffect} />
               <PreviewRow
-                label="Nhân vật"
-                value={selected.characters.join(", ") || "-"}
+                label="Trong khung hình"
+                value={selected.charactersPresent.join(", ") || "-"}
+              />
+              <PreviewRow
+                label="Có thoại"
+                value={selected.speakingCharacters.join(", ") || "không ai"}
+              />
+              <PreviewRow
+                label="Trọng tâm"
+                value={selected.primaryCharacters.join(", ") || "-"}
               />
             </div>
 
@@ -278,6 +305,22 @@ export function Storyboard({
                 {selected.errorMessage}
               </div>
             ) : null}
+
+            <ImageReview
+              sceneId={selected.id}
+              sceneNumber={selected.sceneNumber}
+              imagePath={selected.imagePath}
+              imageProvider={selected.imageProvider}
+              imageModel={selected.imageModel}
+              approved={selected.approved}
+              models={imageModels}
+              characters={allCharacters.filter((c) =>
+                selected.charactersPresent.includes(c.name),
+              )}
+              allowsAlternative={
+                qualityMode === "QUALITY" || qualityMode === "CUSTOM"
+              }
+            />
           </div>
 
           {/* RIGHT: scene settings */}
@@ -519,6 +562,36 @@ export function Storyboard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Shows what the 9:16 crop will remove.
+ *
+ * The image is 2:3, which is wider than the video, so the renderer trims about
+ * 8% off each side. Seeing that before approving an image is cheaper than
+ * discovering a sliced-off hand after the video is rendered.
+ */
+function CropOverlay() {
+  const side = `${((1 - 1080 / 1280) / 2) * 100}%`;
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      <div
+        className="absolute inset-y-0 left-0 bg-black/55"
+        style={{ width: side }}
+      />
+      <div
+        className="absolute inset-y-0 right-0 bg-black/55"
+        style={{ width: side }}
+      />
+      <div
+        className="absolute inset-y-0 border-x border-dashed border-brand-400/70"
+        style={{ left: side, right: side }}
+      />
+      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-black/70 px-1.5 py-0.5 text-[9px] text-ink-300">
+        vùng giữ lại khi cắt 9:16
+      </span>
+    </div>
   );
 }
 
