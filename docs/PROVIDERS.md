@@ -21,6 +21,60 @@
 > nào**, vì chưa có API key nào được cấu hình. Không được coi là đã hoạt động
 > cho tới khi chạy thật thành công.
 
+## Cách nhanh nhất để thử Text AI thật: Groq
+
+Groq có gói miễn phí, tương thích OpenAI API, và không phải tải GB nào.
+
+### 1. Lấy API key
+
+Đăng ký tại https://console.groq.com (không cần thẻ tín dụng), vào mục
+**API Keys** và tạo một key mới.
+
+### 2. Tự dán key vào `.env`
+
+Mở tệp `.env` ở thư mục gốc dự án và điền:
+
+```
+GROQ_API_KEY=gsk_...key_cua_ban...
+```
+
+> **Tự tay dán key, đừng gửi cho ai.** Key không bao giờ được ghi vào log, không
+> lọt vào gói JavaScript của trình duyệt, và chỉ xuất hiện trong header
+> `Authorization` của request.
+
+### 3. Nhập giá và bật model
+
+Tra bảng giá hiện hành tại https://groq.com/pricing, đổi sang đơn vị **USD cho
+1000 token**, rồi chạy:
+
+```powershell
+npm run provider:enable -- --provider groq --model llama-3.3-70b-versatile `
+  --price-in <gia_input> --price-out <gia_output>
+```
+
+Hoặc nhập trong trang **Mô hình AI** rồi xác nhận ở trang **Nhà cung cấp AI**.
+
+> **Về gói miễn phí của Groq:** nếu tài khoản đang ở gói miễn phí thì Groq
+> **không trừ tiền thật**. Nhưng ứng dụng vẫn cần một mức giá để ước tính chi phí
+> và để hạn mức chi tiêu có ý nghĩa. Vì vậy con số "đã chi" hiển thị trong ứng
+> dụng là **giá trị đã tiêu thụ quy đổi theo bảng giá trả phí**, không phải hoá
+> đơn thật. Nếu sau này tài khoản chuyển sang trả phí, lớp bảo vệ đã sẵn sàng và
+> con số trở thành tiền thật.
+
+### 4. Chuyển sang chế độ thật và so sánh
+
+```powershell
+# Sửa .env: AI_MOCK_MODE=false, rồi khởi động lại ứng dụng
+npm run compare:text -- --provider groq --model llama-3.3-70b-versatile
+```
+
+### Quay lại chế độ mock
+
+Đặt lại `AI_MOCK_MODE=true` trong `.env` và khởi động lại. Toàn bộ ứng dụng lập
+tức quay về dùng mock.
+
+---
+
 ## Cách rẻ nhất để thử Text AI thật: Ollama
 
 Ollama chạy model ngay trên máy này. Không cần API key, chi phí luôn **0 USD**,
