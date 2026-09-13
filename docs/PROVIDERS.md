@@ -27,17 +27,64 @@ Ollama chạy model ngay trên máy này. Không cần API key, chi phí luôn *
 và nó đi qua đúng đường đi HTTP mà nhà cung cấp trả phí sẽ đi qua — nên nó kiểm
 chứng được tích hợp mà không tốn đồng nào.
 
+### Cài đặt
+
 ```powershell
-# 1. Cài từ https://ollama.com
-# 2. Tải model
+winget install Ollama.Ollama
+# hoặc tải trình cài từ https://ollama.com
+```
+
+Mở PowerShell **mới** sau khi cài, rồi tải model:
+
+```powershell
 ollama pull llama3.1
-# 3. Trong ứng dụng: trang "Mô hình AI" -> bật "ollama/llama3.1"
-#    (model chạy cục bộ được phép bật dù giá = 0, vì thật sự miễn phí)
-# 4. Trang "Nhà cung cấp AI" -> Ollama -> chọn llama3.1 -> bấm xác nhận
-# 5. Đặt AI_MOCK_MODE=false trong .env rồi khởi động lại
-# 6. So sánh Mock và Real:
+```
+
+Model nặng khoảng 4,7 GB nên lần tải đầu khá lâu. Máy cần tối thiểu 8 GB RAM.
+
+Model nhẹ hơn nếu máy yếu (chất lượng kém hơn, nhưng vẫn kiểm chứng được tích
+hợp): `ollama pull llama3.2` (2 GB) hoặc `ollama pull qwen2.5:3b` (1,9 GB).
+Nhớ thêm model tương ứng vào trang Mô hình AI.
+
+### Bật trong ứng dụng
+
+Cách nhanh (dòng lệnh):
+
+```powershell
+npm run provider:enable -- --provider ollama --model llama3.1
+```
+
+Hoặc qua giao diện:
+
+1. Trang **Mô hình AI** → bật `ollama/llama3.1`
+   (model chạy cục bộ được phép bật dù giá = 0, vì thật sự miễn phí)
+2. Trang **Nhà cung cấp AI** → Ollama → chọn `llama3.1` → bấm xác nhận
+
+### Chuyển sang chế độ thật
+
+Sửa `.env`:
+
+```
+AI_MOCK_MODE=false
+```
+
+Khởi động lại ứng dụng, rồi so sánh Mock và Real:
+
+```powershell
 npm run compare:text -- --provider ollama --model llama3.1
 ```
+
+### Quay lại chế độ mock
+
+Đặt lại `AI_MOCK_MODE=true` trong `.env` và khởi động lại. Toàn bộ ứng dụng
+lập tức quay về dùng mock, không cần sửa gì khác.
+
+### Lưu ý về chất lượng
+
+Model chạy cục bộ 8B tham số **yếu hơn đáng kể** so với model thương mại. Dùng nó
+để kiểm chứng rằng tích hợp hoạt động — request, token, JSON, retry, ghi chi phí
+— chứ không phải để đánh giá chất lượng nội dung cuối cùng. Nếu kịch bản nó viết
+không hay bằng mock, đó là chuyện bình thường và không có nghĩa là tích hợp sai.
 
 Các nhà cung cấp chưa tích hợp đã có chỗ trong bảng đăng ký để giao diện có thứ
 để cấu hình, nhưng chọn một trong số đó sẽ ném lỗi rõ ràng:

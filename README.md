@@ -95,6 +95,7 @@ thao tác riêng biệt, và thao tác thứ hai bị chặn nếu vượt ngân
 | `npm run doctor` | Kiểm tra môi trường |
 | `npm run backup` | Sao lưu `data/` sang `backups/` |
 | `npm run cleanup` | Dọn tệp tạm (thêm `--dry-run` để xem trước) |
+| `npm run provider:enable` | Bật + cho phép một Text AI thật |
 | `npm run compare:text` | So sánh kịch bản Mock và Text AI thật |
 | `npm run verify` | lint + typecheck + test + build |
 
