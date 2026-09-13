@@ -11,9 +11,11 @@ next-env.d.ts
 .env.local
 .env.*.local
 
-# local data: SQLite database, generated media, backups
-data/
-backups/
+# local data: SQLite database, generated media, backups.
+# Anchored with a leading slash so these match only at the repo root - a bare
+# "data/" would also swallow src/data/, which is source code.
+/data/
+/backups/
 *.db
 *.db-journal
 *.db-wal
