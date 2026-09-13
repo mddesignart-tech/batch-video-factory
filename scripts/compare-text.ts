@@ -158,6 +158,27 @@ async function run(
     });
 
     const impl = await getTextProvider(provider, model);
+
+    // Every paid call goes through the same gate and the same ledger as the app
+    // does. A comparison script that bypassed them would under-report spending
+    // and could slip past the cap - exactly the hole this project exists to
+    // close.
+    const { assertCanSpend } = await import("../src/services/spend-guard");
+    const { recordCost } = await import("../src/services/cost-tracker");
+    const estimate = await impl.estimateScriptCost({
+      idiom: idiom.phrase,
+      meaning: idiom.meaning,
+      literalMeaning: idiom.literalMeaning,
+      exampleSentence: idiom.exampleSentence,
+      targetDuration: 27,
+      stylePrompt,
+      characters: charList,
+      avoidAngles: [],
+      model,
+      systemPrompt,
+    });
+    await assertCanSpend({ provider, model, estimatedCost: estimate.amount });
+
     const { script, usage } = await impl.generateScript({
       idiom: idiom.phrase,
       meaning: idiom.meaning,
@@ -171,7 +192,27 @@ async function run(
       systemPrompt,
     });
 
-    const { score } = await impl.scoreScript(script, model);
+    await recordCost({
+      category: "text",
+      provider,
+      model: usage.model,
+      amount: usage.actualCost,
+      note: "compare:script",
+    });
+
+    await assertCanSpend({ provider, model, estimatedCost: estimate.amount / 3 });
+    const { score, usage: scoreUsage } = await impl.scoreScript(script, model);
+    await recordCost({
+      category: "text",
+      provider,
+      model: scoreUsage.model,
+      amount: scoreUsage.actualCost,
+      note: "compare:score",
+    });
+
+    const totalCost = usage.actualCost + scoreUsage.actualCost;
+    const totalIn = (usage.inputTokens ?? 0) + (scoreUsage.inputTokens ?? 0);
+    const totalOut = (usage.outputTokens ?? 0) + (scoreUsage.outputTokens ?? 0);
 
     return {
       label,
@@ -184,9 +225,9 @@ async function run(
         learningValue: score.learningValue,
         visualFeasibility: score.visualFeasibility,
       },
-      cost: usage.actualCost,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
+      cost: totalCost,
+      inputTokens: usage.inputTokens === null ? null : totalIn,
+      outputTokens: usage.outputTokens === null ? null : totalOut,
       durationMs: Date.now() - started,
       sample: {
         title: script.title,

@@ -4,59 +4,73 @@ Xếp theo thứ tự khuyến nghị.
 
 ---
 
-## 1. Nối Text AI thật ← nên làm trước
+## ✅ Đã xong: Text AI thật (Milestone 2 bước 1)
 
-Rẻ nhất, ít rủi ro nhất, và kiểm chứng toàn bộ đường đi của tầng provider thật.
+Nhà cung cấp `groq`, model `openai/gpt-oss-120b`. Đã chạy thật, đã kiểm chứng,
+đã ghi nhận chi phí. Chi tiết trong [STATE.md](STATE.md).
 
-- [ ] Viết `src/providers/openai/openai-text-provider.ts` theo interface
-      `TextProvider`
-- [ ] Gửi `req.systemPrompt` (đã được render sẵn từ `prompts/script.txt`)
-- [ ] Đăng ký trong `src/providers/registry.ts` và thêm vào
-      `IMPLEMENTED_PROVIDERS`
-- [ ] Nhập giá thật trong trang Mô hình AI
-- [ ] Đặt `AI_MOCK_MODE=false`, tạo **một** dự án với ngân sách $1
-- [ ] Đối chiếu chi phí thực tế với ước tính trong trang Chi phí
-- [ ] Chỉ khi chạy thật thành công mới cập nhật `.ai/STATE.md`
+Cấu hình hiện tại:
 
-Cần chú ý: `parseScript()` đã xử lý sẵn các kiểu JSON hỏng thường gặp. Nếu mô
-hình vẫn trả về thứ không đọc được, hãy thêm trường hợp vào `repairJson()` kèm
-một test, đừng nới lỏng lược đồ Zod.
+```
+Provider : groq (bật, đã xác nhận)
+Model    : openai/gpt-oss-120b
+Giá      : $0.00015 vào / $0.00075 ra (mỗi 1k token)
+Hạn mức  : $0.50, đã chi ~$0.0067
+.env     : AI_MOCK_MODE=true  ← vẫn ở chế độ mock cho an toàn
+```
 
----
-
-## 2. Nối Image AI thật
-
-- [ ] `ImageProvider` cho OpenAI Image hoặc Google
-- [ ] Truyền ảnh tham chiếu nhân vật khi mô hình hỗ trợ
-- [ ] Kiểm tra tính nhất quán nhân vật giữa các cảnh trong cùng một video
-- [ ] Nhập giá thật, đặt cờ năng lực cho đúng
+Bật Text AI thật: đặt `AI_MOCK_MODE=false` trong `.env`, khởi động lại.
 
 ---
 
-## 3. Nối Video AI thật (Runway)
+## 2. Image AI thật ← bước tiếp theo, CHỜ XÁC NHẬN
+
+Ảnh keyframe. Đây là công cụ giữ nhất quán nhân vật mạnh nhất, nên đáng làm
+trước Video AI.
+
+- [ ] Viết `ImageProvider` cho OpenAI Image hoặc Google
+- [ ] Truyền ảnh tham chiếu nhân vật khi model hỗ trợ
+- [ ] Kiểm tra nhân vật có giữ nguyên ngoại hình giữa các cảnh không
+- [ ] Nhập giá thật, đặt đúng cờ năng lực
+- [ ] Nâng hạn mức chi tiêu nếu cần (ảnh đắt hơn text đáng kể)
+
+Ước chừng chi phí thử nghiệm: **$1–3**.
+
+Lưu ý rút ra từ bước 1: đừng tin danh sách model trong tài liệu nhà cung cấp —
+hãy gọi endpoint liệt kê model của họ trước, vì tên model thay đổi thường xuyên
+(`llama-3.3-70b-versatile` đã bị Groq gỡ trong lúc làm bước này).
+
+---
+
+## 3. Video AI thật (Runway)
+
+Đắt nhất, làm sau cùng trong nhóm hình ảnh.
 
 - [ ] `VideoProvider` cho Runway
-- [ ] Xử lý mô hình bất đồng bộ: create then poll then download
-- [ ] Xác nhận `ProviderJob` thực sự ngăn được việc trả tiền hai lần: cố tình
-      giết tiến trình giữa lúc đang tạo, khởi động lại, và kiểm tra rằng lần
-      thử lại **nối lại** job cũ thay vì mua cái mới
-- [ ] Kiểm thử với ngân sách nhỏ trước
+- [ ] Mô hình bất đồng bộ: create → poll → download
+- [ ] **Kiểm chứng chống tính phí hai lần cho thật**: cố tình giết tiến trình
+      giữa lúc đang tạo, khởi động lại, xác nhận lần thử lại **nối lại** job cũ
+      thay vì mua cái mới
+- [ ] Thử với ngân sách nhỏ trước
+
+Ước chừng: **$3–10**.
 
 ---
 
-## 4. Nối Voice AI thật
+## 4. Voice AI thật
 
 - [ ] `VoiceProvider` cho ElevenLabs hoặc OpenAI
 - [ ] Gán giọng cố định cho từng nhân vật
-- [ ] Kiểm tra thời lượng giọng đọc khớp với thời lượng cảnh; nếu lệch, điều
-      chỉnh tốc độ đọc thay vì cắt cụt
+- [ ] Kiểm tra thời lượng giọng khớp thời lượng cảnh; lệch thì chỉnh tốc độ đọc
+      thay vì cắt cụt
+
+Ước chừng: **dưới $1**.
 
 ---
 
 ## Việc nhỏ, không phụ thuộc nhà cung cấp
 
-- [ ] Nút sinh metadata YouTube trong trang dự án (tầng provider đã có hàm, chỉ
-      thiếu nút và chỗ lưu vào `youtubeMetaJson`)
+- [ ] Nút sinh metadata YouTube (provider đã có hàm, chỉ thiếu nút và chỗ lưu)
 - [ ] Trang sửa mẫu prompt (`src/lib/prompts.ts` đã hỗ trợ ghi đè từ DB)
 - [ ] Tải ảnh tham chiếu nhân vật (cột `referenceImages` đã có)
 - [ ] Chọn nhạc nền cho dự án (hàm render đã hỗ trợ trộn nhạc)
@@ -66,15 +80,15 @@ một test, đừng nới lỏng lược đồ Zod.
 
 ## Việc kỹ thuật
 
-- [ ] Ghi nhận `historicalSuccessRate` thật từ kết quả chạy (hiện luôn là 1;
-      router đã dùng trường này, chỉ chưa có ai cập nhật nó)
+- [ ] Ghi nhận `historicalSuccessRate` thật từ kết quả chạy (router đã dùng
+      trường này, chỉ chưa có ai cập nhật nó)
 - [ ] Chuyển từ `prisma db push` sang `prisma migrate` trước khi phát hành
-- [ ] Cân nhắc tách worker ra tiến trình riêng nếu sau này chạy trên VPS
+- [ ] Cân nhắc thêm nút "kiểm tra kết nối" gọi endpoint liệt kê model của nhà
+      cung cấp — rẻ, và bắt được đúng loại lỗi tên model đã gặp ở bước 1
 
 ---
 
 ## Không làm bây giờ
 
 Redis, Docker bắt buộc, microservice, tải lên YouTube tự động, phân tích hiệu
-quả video. Chưa có cái nào giải quyết vấn đề đang tồn tại, và mỗi cái đều thêm
-một thứ có thể hỏng.
+quả video.

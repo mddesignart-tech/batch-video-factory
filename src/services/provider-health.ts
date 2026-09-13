@@ -32,7 +32,10 @@ export interface ProviderHealth {
 }
 
 export function deriveStatus(
-  config: Pick<ProviderConfig, "name" | "enabled" | "apiKeyEnc" | "status">,
+  config: Pick<
+    ProviderConfig,
+    "name" | "enabled" | "apiKeyEnc" | "status" | "apiKeyEnvVar"
+  >,
   online: boolean,
 ): ProviderStatus {
   // Mock mode makes every provider slot answerable locally, so nothing is
@@ -40,7 +43,8 @@ export function deriveStatus(
   if (isMockMode()) return config.name === "mock" ? "connected" : "disabled";
   if (!config.enabled) return "disabled";
   if (!isProviderImplemented(config.name)) return "unavailable";
-  const hasKey = config.apiKeyEnc !== null || hasEnvKey(config.name);
+  const hasKey =
+    config.apiKeyEnc !== null || hasEnvKey(config.name, config.apiKeyEnvVar);
   if (!hasKey) return "missing_key";
   if (!online) return "unavailable";
   if (config.status === "rate_limited") return "rate_limited";
@@ -68,7 +72,8 @@ export async function listProviderHealth(): Promise<ProviderHealth[]> {
       name: config.name,
       displayName: config.displayName,
       enabled: config.enabled,
-      apiConfigured: config.apiKeyEnc !== null || hasEnvKey(config.name),
+      apiConfigured:
+        config.apiKeyEnc !== null || hasEnvKey(config.name, config.apiKeyEnvVar),
       implemented: isProviderImplemented(config.name),
       status,
       types: parseJson<string[]>(config.types, []),

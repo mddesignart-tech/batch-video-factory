@@ -544,6 +544,49 @@ describe("hạn mức chi tiêu (spend guard)", () => {
     expect(await totalRealSpend()).toBeCloseTo(before, 4);
   });
 
+  it("GIỮ lịch sử chi phí khi dự án bị xoá - tiền đã tiêu không được biến mất", async () => {
+    // Nếu CostEntry cascade theo Project thì xoá dự án sẽ hoàn lại hạn mức một
+    // cách sai trái, và người dùng có thể tiêu vượt bằng cách xoá dự án cũ.
+    const idiom = await prisma.idiom.create({
+      data: {
+        phrase: "Spend guard fixture",
+        slug: "spend-guard-fixture-" + Date.now(),
+        meaning: "x",
+        literalMeaning: "x",
+        exampleSentence: "x",
+        category: "Funny Expressions",
+      },
+    });
+    const project = await prisma.project.create({
+      data: { idiomId: idiom.id, title: "Sẽ bị xoá", maxBudget: 1 },
+    });
+    await prisma.costEntry.create({
+      data: {
+        projectId: project.id,
+        category: "text",
+        provider: "stub",
+        model: "stub-model",
+        amount: 0.02,
+        estimated: false,
+      },
+    });
+
+    const before = await totalRealSpend();
+    await prisma.project.delete({ where: { id: project.id } });
+    const after = await totalRealSpend();
+
+    // Dòng chi phí vẫn còn, chỉ mất liên kết tới dự án.
+    expect(after).toBeCloseTo(before, 6);
+    const orphan = await prisma.costEntry.findFirst({
+      where: { provider: "stub", amount: 0.02 },
+    });
+    expect(orphan).not.toBeNull();
+    expect(orphan?.projectId).toBeNull();
+
+    await prisma.costEntry.deleteMany({ where: { provider: "stub", amount: 0.02 } });
+    await prisma.idiom.delete({ where: { id: idiom.id } });
+  });
+
   it("báo cáo trạng thái chi tiêu cho giao diện", async () => {
     const status = await spendStatus();
     expect(status.cap).toBe(0.5);

@@ -1,7 +1,7 @@
 # Trạng thái dự án
 
 **Cập nhật:** 2026-09-13
-**Cột mốc hiện tại:** Milestone 2 — **Bước 1 (Text AI thật): CODE XONG, CHƯA CHẠY THẬT**
+**Cột mốc hiện tại:** Milestone 2 — **Bước 1 (Text AI thật): ĐÃ CHẠY THẬT VÀ KIỂM CHỨNG**
 
 Tài liệu này ghi tình trạng **thực tế**. Tính năng chỉ được đánh dấu hoạt động
 khi đã chạy thật và được kiểm chứng, không phải khi đã viết xong mã.
@@ -14,7 +14,7 @@ khi đã chạy thật và được kiểm chứng, không phải khi đã viế
 |---|---|---|
 | Lint | `npm run lint` | ✅ 0 lỗi |
 | Kiểu dữ liệu | `npm run typecheck` | ✅ 0 lỗi (TS strict, không dùng `any`) |
-| Kiểm thử | `npm run test` | ✅ **219 test / 8 tệp, tất cả đạt** |
+| Kiểm thử | `npm run test` | ✅ **220 test / 8 tệp, tất cả đạt** |
 | Build production | `npm run build` | ✅ 16 route biên dịch thành công |
 | Chạy thật | `npm start` | ✅ Đã kiểm tra thủ công trên Windows 11 |
 
@@ -23,13 +23,17 @@ FFmpeg 6.1.1 (bản đi kèm ffmpeg-static, có libass + libx264).
 
 ---
 
-## ⚠️ ĐIỀU QUAN TRỌNG NHẤT
+## ⚠️ CHI PHÍ API THẬT
 
-**Chưa có một đồng nào được chi cho API AI.** Tổng chi phí API thật: **$0.00**.
+**Đã chi: khoảng $0.0067** (6 request tới Groq trong quá trình kiểm thử).
 
-Text AI thật đã được **viết xong và kiểm thử bằng máy chủ giả lập**, nhưng
-**chưa từng gọi một nhà cung cấp thật nào**, vì chưa có API key nào được cấu
-hình. Xem mục "Chưa làm".
+Hạn mức: **$0.50**. Còn lại: **khoảng $0.493**.
+
+Con số này là **tiền thật theo bảng giá trả phí của Groq**. Nếu tài khoản đang ở
+gói miễn phí thì Groq không thực sự trừ tiền — nhưng ứng dụng vẫn tính và ghi
+nhận theo giá, vì đó là cách duy nhất để ước tính và hạn mức có ý nghĩa.
+
+Image AI, Video AI, Voice AI **vẫn hoàn toàn là mock, chi phí $0.00**.
 
 ---
 
@@ -83,39 +87,58 @@ Chi tiết đầy đủ xem lịch sử Git (commit `docs: add README, docs/ and
 
 ### Đã kiểm chứng bằng cách nào
 
-**Máy chủ giả lập OpenAI API chạy cục bộ trong test** (`tests/text-provider.test.ts`,
-34 test). Nó kiểm chứng toàn bộ đường đi HTTP với chi phí **$0.00**:
+**1. Máy chủ giả lập chạy cục bộ** (`tests/text-provider.test.ts`, 35 test,
+chi phí $0.00): dạng request, đọc token, key nằm đúng header, 429 → thử lại,
+401 → **chỉ gọi 1 lần**, 500 liên tục → dừng đúng 3 lần, phản hồi bị cắt, phản
+hồi rỗng, tính tiền theo token, JSON bọc code fence / có lời dẫn, mọi nhánh của
+hạn mức chi tiêu, và lịch sử chi phí không bị xoá theo dự án.
 
-- gửi đúng dạng request, đọc đúng token
-- API key nằm trong header, không lọt vào body
-- 429 → thử lại rồi thành công
-- 401 → **chỉ gọi 1 lần**, không thử lại
-- 500 liên tục → dừng đúng sau 3 lần
-- phản hồi bị cắt (`finish_reason: length`) → báo lỗi rõ
-- phản hồi rỗng → báo lỗi
-- tính tiền theo token nhà cung cấp báo về (1000 vào + 1000 ra = $0.04 với giá thử)
-- không có token → chi phí $0, không bịa
-- JSON bọc code fence / có lời dẫn → sửa được
-- JSON hỏng hẳn → báo lỗi rõ, không crash
-- hạn mức: chặn khi chưa xác nhận, chặn khi vượt, cho qua khi hợp lệ
-- xác nhận có phạm vi theo từng model, không lan sang model khác
-- chi phí mock và chi phí ước tính **không** tính vào hạn mức
+**2. Gọi API thật tới Groq** (`npm run compare:text`) — nhà cung cấp
+`groq`, model `openai/gpt-oss-120b`:
 
-**Giao diện đã kiểm tra thủ công trên trình duyệt**: cổng xác nhận hiển thị đủ
-8 chỉ số, 3 cảnh báo đúng (giá 0, model đang tắt, Mock Mode đang bật), và khi
-bấm xác nhận thì **từ chối** với lý do "Chưa nhập giá cho model này".
+| Tiêu chí | Mock | Groq thật |
+|---|---|---|
+| JSON đúng schema | ĐẠT | **ĐẠT** |
+| Số cảnh (cần 4–6) | 6 | **6** |
+| Tổng thời lượng (cần 20–35s) | 26,9s | **27,0s** |
+| Mỗi cảnh 2–6 giây | ĐẠT | **ĐẠT** |
+| Đủ prompt ảnh | ĐẠT | **ĐẠT** |
+| Đủ prompt video | ĐẠT | **ĐẠT** |
+| Có giải thích nghĩa | ĐẠT | **ĐẠT** |
+| Có câu ví dụ | ĐẠT | **ĐẠT** |
+| TB từ/phụ đề (nên ≤ 12) | 6,2 | **6,8** |
+| Điểm tự chấm | 7/9/9/9/7 | **8/7/9/9/8** |
+| Token | – | 1647 vào / 3447 ra |
+| Chi phí thật | $0,000000 | **$0,002832** |
 
-### CHƯA làm — chưa gọi API thật lần nào
+**3. Workflow thật đầy đủ** (`npm run workflow:test`) — Text AI thật, media
+vẫn mock: thành ngữ → dự án → kịch bản → kiểm tra JSON → lưu SQLite →
+storyboard → chấm điểm → định tuyến media → ước tính 3 chế độ.
 
-- [ ] **Chưa có API key nào được cấu hình** → không thể chạy bước 10 và 11 trong
-      yêu cầu (test workflow thật, so sánh Mock vs Real với dữ liệu thật)
-- [ ] Chưa xác minh nhà cung cấp thật nào hoạt động đúng như tài liệu
-- [ ] Chưa đo được chất lượng tiếng Anh / độ hài hước của model thật
-- [ ] Chưa xác minh `response_format: json_object` hoạt động với từng nhà cung cấp
+Router chọn đúng `groq/openai/gpt-oss-120b` (rẻ hơn mock 10 lần nên thắng về
+giá trị). Nhánh **viết lại kịch bản một lần** đã thực sự kích hoạt trong một lần
+chạy: 4 request (script, score, script-rewrite, score-rewrite), tổng $0,0049,
+mọi request đều được ghi token + thời gian + chi phí vào bảng `ProviderJob`.
 
-Công cụ `npm run compare:text` đã sẵn sàng; chỉ cần cắm key vào là chạy được.
+**4. Giao diện** đã kiểm tra thủ công: cổng xác nhận hiện đủ 8 chỉ số và 3 cảnh
+báo đúng; bấm xác nhận khi model chưa có giá thì **bị từ chối**.
 
----
+### Chất lượng nội dung: Mock so với Groq thật
+
+Cả hai đều qua toàn bộ kiểm tra cấu trúc. Khác biệt về nội dung:
+
+- **Groq thật** viết tiếng Anh tự nhiên hơn và bám sát thành ngữ hơn. Ví dụ với
+  "Piece of cake": *"Max brings a cake to the exam!"* → *"Leo shows the paper is
+  easy, not edible."* Đây là trò đùa hình ảnh thật, quốc tế, hiểu được không cần
+  âm thanh.
+- **Mock** dùng khuôn mẫu cố định nên lời thoại lặp lại giữa các thành ngữ.
+- Giải thích nghĩa của Groq chính xác: *"Piece of cake means something is very
+  easy."*
+- Groq tự đặt thời lượng cảnh và độ phức tạp hợp lý, đủ prompt ảnh/video cho các
+  bước sau.
+
+Kết luận: **Text AI thật cho chất lượng dùng được cho sản xuất.** Mock vẫn hữu
+ích để thử quy trình miễn phí.
 
 ## Chưa làm (các bước sau)
 
@@ -169,6 +192,18 @@ Không có lỗi nào đang mở.
 | `.gitignore` có `data/` nên nuốt luôn `src/data/` là mã nguồn | Neo về gốc repo: `/data/` |
 | Dùng `require()` để tránh circular import | Không cần — `script-service` đã được import tĩnh sẵn |
 
+### Đã phát hiện khi CHẠY THẬT (những lỗi mà test giả lập không bắt được)
+
+| Vấn đề | Cách xử lý |
+|---|---|
+| **Danh sách biến môi trường viết cứng** khiến provider mới luôn bị coi là "thiếu API key" → router bỏ qua Groq và âm thầm chọn mock dù key đã có | `hasEnvKey()` giờ đọc `apiKeyEnvVar` từ bảng provider, fallback `TÊN_API_KEY` |
+| **Xoá dự án làm mất lịch sử chi phí thật** (`CostEntry` cascade theo `Project`) → hạn mức được "hoàn lại" sai, có thể tiêu vượt bằng cách xoá dự án cũ | Đổi quan hệ sang `onDelete: SetNull`; thêm test chống tái diễn |
+| **Chi phí bị mất khi request thất bại sau khi đã bị tính tiền** (phản hồi bị cắt, JSON không đọc được) | `ProviderError` mang theo `usage`; sổ ghi nhận cả lần thất bại, ghi rõ "thất bại nhưng vẫn bị tính phí" |
+| Giới hạn 2500 token output làm kịch bản 6 cảnh bị cắt giữa chừng | Đo thực tế rồi nâng lên 6000; cơ chế phát hiện cắt đã báo đúng lỗi |
+| `provider:enable` chỉ bật model, quên bật cả provider → router vẫn không thấy | Bật cả `ProviderConfig` |
+| Tên model `llama-3.3-70b-versatile` đã bị Groq gỡ bỏ | Lấy danh sách thật từ `/v1/models`, cập nhật seed thành `openai/gpt-oss-120b`, `gpt-oss-20b`, `qwen3.8-27b` |
+| Script so sánh gọi provider trực tiếp, **bỏ qua hạn mức và không ghi sổ** | Bắt nó đi qua `assertCanSpend` + `recordCost` như ứng dụng |
+
 ---
 
 ## Tình trạng lược đồ
@@ -188,14 +223,21 @@ trước khi phát hành cho người khác dùng.
 
 Xem [NEXT_TASKS.md](NEXT_TASKS.md).
 
-**Việc chặn hiện tại: cần một API key.** Ba lựa chọn, xếp theo chi phí:
+**Milestone 2 bước 1 đã xong.** Không tự động chuyển sang bước 2 (Image AI) —
+chờ người dùng xác nhận.
 
-1. **Ollama chạy cục bộ — $0.00.** Cài từ https://ollama.com, chạy
-   `ollama pull llama3.1`, bật model `ollama/llama3.1` trong trang Mô hình AI.
-   Kiểm chứng được toàn bộ đường đi thật mà không tốn đồng nào.
-2. **Groq / DeepSeek** — rất rẻ, tương thích OpenAI API.
-3. **OpenAI `gpt-4o-mini`** — chất lượng tốt, vẫn rẻ.
+Cấu hình hiện tại:
 
-Với lựa chọn nào cũng phải: nhập giá thật trong trang Mô hình AI → bật model →
-bấm xác nhận trong trang Nhà cung cấp AI → đặt `AI_MOCK_MODE=false` → chạy
-`npm run compare:text`.
+```
+Provider : groq (đã bật, đã xác nhận)
+Model    : openai/gpt-oss-120b
+Giá      : $0.00015 / 1k token vào, $0.00075 / 1k token ra
+Hạn mức  : $0.50, còn khoảng $0.493
+.env     : AI_MOCK_MODE=true  ← vẫn đang ở chế độ mock cho an toàn
+```
+
+Để dùng Text AI thật trong ứng dụng: đặt `AI_MOCK_MODE=false` trong `.env`
+rồi khởi động lại. Để quay về miễn phí: đặt lại `true`.
+
+> Giá đang dùng là theo bảng giá Groq tại thời điểm cấu hình. Hãy đối chiếu lại
+> tại https://groq.com/pricing nếu con số ước tính trông không đúng.

@@ -410,7 +410,13 @@ describe("offline mode", () => {
 });
 
 describe("provider status derivation", () => {
-  const config = { name: "runway", enabled: true, apiKeyEnc: null, status: "connected" };
+  const config = {
+    name: "runway",
+    enabled: true,
+    apiKeyEnc: null,
+    status: "connected",
+    apiKeyEnvVar: "RUNWAY_API_KEY",
+  };
 
   it("reports mock as connected and everything else disabled in mock mode", () => {
     expect(deriveStatus({ ...config, name: "mock" }, true)).toBe("connected");

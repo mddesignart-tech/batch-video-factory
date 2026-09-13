@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { buildPrompt } from "@/lib/prompts";
 import { getTextProvider } from "@/providers/registry";
-import type { ProviderUsage, ScriptRequest } from "@/providers/types";
+import { ProviderError, type ProviderUsage, type ScriptRequest } from "@/providers/types";
 import { assertCanSpend } from "./spend-guard";
 import { recordCost } from "./cost-tracker";
 import { assignSpendPriority, classifyScene } from "./complexity";
@@ -340,13 +340,34 @@ export async function generateScript(
 
       return result;
     } catch (err) {
+      // A call can fail after the provider has already charged for it - a
+      // truncated reply, or output we could not parse. Record that spend, or
+      // the ledger under-counts real money and the cap stops protecting.
+      const spent =
+        err instanceof ProviderError ? err.usage : undefined;
+
       await prisma.providerJob.update({
         where: { id: job.id },
         data: {
           status: "failed",
           error: err instanceof Error ? err.message.slice(0, 500) : String(err),
+          inputTokens: spent?.inputTokens ?? null,
+          outputTokens: spent?.outputTokens ?? null,
+          durationMs: spent?.durationMs ?? null,
+          actualCost: spent?.actualCost ?? 0,
         },
       });
+
+      if (spent && spent.actualCost > 0) {
+        await recordCost({
+          projectId: opts.projectId ?? null,
+          category: "text",
+          provider: opts.provider,
+          model: spent.model,
+          amount: spent.actualCost,
+          note: `${purpose} (thất bại nhưng vẫn bị tính phí)`,
+        });
+      }
       throw err;
     }
   };

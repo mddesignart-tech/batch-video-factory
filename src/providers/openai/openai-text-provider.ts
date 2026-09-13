@@ -18,6 +18,7 @@ import { logger } from "@/lib/logger";
 import { parseScript, repairJson } from "@/services/script-service";
 import {
   chatCompletion,
+  usageFrom,
   type ChatMessage,
   type ChatResult,
   type OpenAICompatibleConfig,
@@ -95,10 +96,23 @@ export class OpenAICompatibleTextProvider implements TextProvider {
       purpose: "script",
     });
 
-    // parseScript applies the repair-then-revalidate path from Milestone 1: a
-    // fenced block, a prose preamble or a trailing comma is fixed and retried
-    // once before anything is allowed to fail.
-    return { script: parseScript(result.content), usage: this.usageOf(result) };
+    const usage = this.usageOf(result);
+    try {
+      // parseScript applies the repair-then-revalidate path from Milestone 1: a
+      // fenced block, a prose preamble or a trailing comma is fixed and retried
+      // once before anything is allowed to fail.
+      return { script: parseScript(result.content), usage };
+    } catch (err) {
+      // The call was billed even though its output is unusable. Attach the cost
+      // so the caller records it rather than losing it.
+      throw new ProviderError(
+        err instanceof Error ? err.message : String(err),
+        this.config.providerName,
+        true,
+        "invalid_json",
+        usage,
+      );
+    }
   }
 
   async scoreScript(
@@ -197,19 +211,7 @@ export class OpenAICompatibleTextProvider implements TextProvider {
    * to invent a charge we cannot substantiate.
    */
   private usageOf(result: ChatResult): ProviderUsage {
-    const input = result.inputTokens ?? 0;
-    const output = result.outputTokens ?? 0;
-    const actualCost = round6(
-      (input / 1000) * this.config.pricePer1kInput +
-        (output / 1000) * this.config.pricePer1kOutput,
-    );
-    return {
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      durationMs: result.durationMs,
-      actualCost,
-      model: result.model,
-    };
+    return usageFrom(result, this.config);
   }
 }
 

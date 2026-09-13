@@ -233,6 +233,15 @@ export class ProviderError extends Error {
     readonly provider: string,
     readonly retryable: boolean = true,
     readonly code: string = "provider_error",
+    /**
+     * What the failed call still consumed.
+     *
+     * Some failures happen AFTER the provider has already billed us - a reply
+     * that came back truncated, or valid JSON we could not parse. Dropping the
+     * error without recording that spend would silently under-count real money
+     * and let the cap be exceeded. Present only when the provider reported it.
+     */
+    readonly usage?: ProviderUsage,
   ) {
     super(message);
     this.name = "ProviderError";

@@ -327,6 +327,9 @@ model ProviderJob {
 
 // -------------------------------------------------------- cost + telemetry ---
 
+// The accounting ledger. Note the relation below is SetNull, not Cascade:
+// deleting a project must NOT erase money that was really spent. Cascading here
+// would quietly refund the spend cap and let it be exceeded.
 model CostEntry {
   id        String   @id @default(uuid())
   projectId String?
@@ -341,7 +344,7 @@ model CostEntry {
   note      String   @default("")
   createdAt DateTime @default(now())
 
-  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
   @@index([category])

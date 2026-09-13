@@ -83,6 +83,7 @@ async function main(): Promise<void> {
       data: { enabled: false },
     });
     console.log(`Da thu hoi quyen va tat model ${key}.`);
+    console.log(`(Provider ${provider} van bat - tat rieng trong trang Nha cung cap AI neu can.)`);
     return;
   }
 
@@ -119,6 +120,14 @@ async function main(): Promise<void> {
     where: { id: refreshed.id },
     data: { enabled: true },
   });
+
+  // The provider row must be enabled too, or availableProviderNames() filters it
+  // out and the router never sees the model we just switched on.
+  await prisma.providerConfig.updateMany({
+    where: { name: provider },
+    data: { enabled: true, status: "connected" },
+  });
+
   await writeConfirmed([...(await confirmed()), key]);
 
   console.log(`\nDa bat va cho phep goi API that: ${key}`);

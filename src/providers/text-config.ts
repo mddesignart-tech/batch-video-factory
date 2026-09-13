@@ -40,7 +40,15 @@ export const OPENAI_COMPATIBLE_PROVIDERS = new Set([
   "lmstudio",
 ]);
 
-export const DEFAULT_MAX_OUTPUT_TOKENS = 2500;
+/**
+ * Output ceiling per call.
+ *
+ * Measured, not guessed: a 6-scene script with full image and video prompts for
+ * every scene came back truncated at 2500 tokens on the first real run. 6000
+ * leaves comfortable headroom. It also caps the pre-flight estimate, so raising
+ * it makes estimates more conservative - the safe direction.
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 6000;
 export const DEFAULT_TIMEOUT_MS = 90_000;
 
 export class TextConfigError extends Error {

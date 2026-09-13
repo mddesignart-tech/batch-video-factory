@@ -1,4 +1,4 @@
-import { ProviderError } from "@/providers/types";
+import { ProviderError, type ProviderUsage } from "@/providers/types";
 import { logger } from "@/lib/logger";
 
 /**
@@ -246,12 +246,15 @@ export async function chatCompletion(
       // A truncated response is almost certainly invalid JSON. Say so clearly
       // rather than letting the parser fail with something cryptic.
       if (result.finishReason === "length") {
+        // The provider already billed for this call, so the error carries what
+        // it consumed. Throwing without that would lose real spend.
         throw new ProviderError(
           `Phản hồi bị cắt vì chạm giới hạn ${config.maxOutputTokens} token. ` +
             `Hãy tăng maxOutputTokens hoặc rút ngắn prompt.`,
           config.providerName,
           false,
           "truncated",
+          usageFrom(result, config),
         );
       }
 
@@ -288,6 +291,32 @@ export async function chatCompletion(
         true,
         "exhausted",
       );
+}
+
+/**
+ * Cost of a call from what the provider reported.
+ *
+ * Shared by the success path and the post-billing failure paths so a truncated
+ * or unparseable reply is still accounted for.
+ */
+export function usageFrom(
+  result: ChatResult,
+  config: OpenAICompatibleConfig,
+): ProviderUsage {
+  const input = result.inputTokens ?? 0;
+  const output = result.outputTokens ?? 0;
+  return {
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    durationMs: result.durationMs,
+    actualCost:
+      Math.round(
+        ((input / 1000) * config.pricePer1kInput +
+          (output / 1000) * config.pricePer1kOutput) *
+          1e6,
+      ) / 1e6,
+    model: result.model,
+  };
 }
 
 /** Read an error body without ever letting a parse failure mask the real error. */
