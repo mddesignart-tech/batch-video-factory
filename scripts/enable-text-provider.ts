@@ -1,7 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 
 /**
- * Switch a text provider on for real use, from the command line.
+ * Switch a model on for real use, from the command line.
+ *
+ * Works for any model type. Text models are priced per 1k input and output
+ * tokens; image models are priced per image, so they take --price instead.
  *
  * Does exactly what the two admin pages do - enter prices, enable the model,
  * confirm the provider/model pair - but scriptable, so a setup can be repeated
@@ -11,6 +14,7 @@ import { PrismaClient } from "@prisma/client";
  *   npx tsx scripts/enable-text-provider.ts --provider ollama --model llama3.1
  *   npx tsx scripts/enable-text-provider.ts --provider openai --model gpt-4o-mini \
  *        --price-in 0.00015 --price-out 0.0006
+ *   npx tsx scripts/enable-text-provider.ts --provider openai --model gpt-image-1:medium  *        --price 0.063
  *   npx tsx scripts/enable-text-provider.ts --provider ollama --model llama3.1 --revoke
  *
  * It refuses to confirm a paid model with no price, exactly like the UI does:
@@ -87,7 +91,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const priceIn = arg("price-in");
+  // Image and video models bill per unit of output, so they carry one price in
+  // `price`; text bills input and output at different rates and needs both.
+  const perUnit = model.type !== "text";
+  const priceIn = arg(perUnit ? "price" : "price-in");
   const priceOut = arg("price-out");
   const isFree = LOCAL_FREE.has(provider);
 
@@ -131,8 +138,16 @@ async function main(): Promise<void> {
   await writeConfirmed([...(await confirmed()), key]);
 
   console.log(`\nDa bat va cho phep goi API that: ${key}`);
-  console.log(`  Gia input : $${refreshed.price} / 1k token`);
-  console.log(`  Gia output: $${refreshed.priceOutput} / 1k token`);
+  console.log(`  Loai      : ${refreshed.type}`);
+  if (perUnit) {
+    console.log(`  Gia uoc tinh: $${refreshed.price} / ${refreshed.priceUnit}`);
+    if (refreshed.priceOutput > 0) {
+      console.log(`  Gia that    : $${refreshed.priceOutput} / 1M token ra (tinh tu token API bao ve)`);
+    }
+  } else {
+    console.log(`  Gia input : $${refreshed.price} / 1k token`);
+    console.log(`  Gia output: $${refreshed.priceOutput} / 1k token`);
+  }
   if (isFree) {
     console.log(`  Ghi chu   : chay cuc bo, chi phi that luon $0.00`);
   }

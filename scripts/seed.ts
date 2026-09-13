@@ -63,6 +63,12 @@ async function main(): Promise<void> {
         personality: character.personality,
         visualPrompt: character.visualPrompt,
         negativePrompt: character.negativePrompt,
+        hair: character.hair,
+        facialFeatures: character.facialFeatures,
+        outfit: character.outfit,
+        bodyProportions: character.bodyProportions,
+        accessories: character.accessories,
+        colorPalette: character.colorPalette,
         voiceProvider: "mock",
         voiceId: character.voiceId,
         seed: character.seed,
@@ -74,6 +80,12 @@ async function main(): Promise<void> {
         personality: character.personality,
         visualPrompt: character.visualPrompt,
         negativePrompt: character.negativePrompt,
+        hair: character.hair,
+        facialFeatures: character.facialFeatures,
+        outfit: character.outfit,
+        bodyProportions: character.bodyProportions,
+        accessories: character.accessories,
+        colorPalette: character.colorPalette,
       },
     });
   }
@@ -148,6 +160,10 @@ async function main(): Promise<void> {
         supportsImageToVideo: model.supportsImageToVideo ?? false,
         supportsReferenceImage: model.supportsReferenceImage ?? false,
         supportsCharacterReference: model.supportsCharacterReference ?? false,
+        supportsInputFidelity: model.supportsInputFidelity ?? false,
+        lastVerifiedAt: model.lastVerifiedAt
+          ? new Date(model.lastVerifiedAt)
+          : null,
         supportsAudio: model.supportsAudio ?? false,
         supports1080p: model.supports1080p ?? false,
         supportsUpscale: model.supportsUpscale ?? false,
@@ -175,6 +191,10 @@ async function main(): Promise<void> {
         supportsImageToVideo: model.supportsImageToVideo ?? false,
         supportsReferenceImage: model.supportsReferenceImage ?? false,
         supportsCharacterReference: model.supportsCharacterReference ?? false,
+        supportsInputFidelity: model.supportsInputFidelity ?? false,
+        lastVerifiedAt: model.lastVerifiedAt
+          ? new Date(model.lastVerifiedAt)
+          : null,
         supportsAudio: model.supportsAudio ?? false,
         supports1080p: model.supports1080p ?? false,
         supportsUpscale: model.supportsUpscale ?? false,

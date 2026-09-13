@@ -47,11 +47,14 @@ export const KNOWN_PROVIDERS: Record<string, ModelType[]> = {
 /**
  * Implemented today. Text providers speak the OpenAI Chat Completions dialect,
  * which covers OpenAI and the many services that mirror it, plus local runtimes.
- * Image, video, voice and upscale remain mock-only - later milestones.
+ * Image generation is OpenAI only. Video has three adapters - OpenAI (Sora),
+ * Google (Veo) and Runway - each speaking its own dialect. Voice and upscale
+ * remain mock-only.
  */
 export const IMPLEMENTED_PROVIDERS = new Set<string>([
   "mock",
   "openai",
+  "runway",
   "deepseek",
   "groq",
   "openrouter",
@@ -64,12 +67,13 @@ export const IMPLEMENTED_PROVIDERS = new Set<string>([
 /** Which slots a given provider can actually fill in THIS build. */
 export const IMPLEMENTED_TYPES: Record<string, ModelType[]> = {
   mock: ["text", "image", "video", "voice", "upscale", "quality"],
-  openai: ["text"],
+  openai: ["text", "image", "video"],
+  runway: ["video"],
   deepseek: ["text"],
   groq: ["text"],
   openrouter: ["text"],
   together: ["text"],
-  google: ["text"],
+  google: ["text", "video"],
   ollama: ["text"],
   lmstudio: ["text"],
 };
@@ -118,14 +122,55 @@ export async function getTextProvider(
   return new OpenAICompatibleTextProvider(await buildTextConfig(name, model));
 }
 
-export function getImageProvider(name: string): ImageProvider {
+/**
+ * Image is async for the same reason text is: key, endpoint and price all come
+ * from the database. `model` carries the quality tier as a suffix, which is how
+ * one API model with three prices becomes three routable registry rows.
+ */
+export async function getImageProvider(
+  name: string,
+  model: string,
+): Promise<ImageProvider> {
   if (isMockMode() || name === "mock") return mockImage;
-  return notImplemented(name, "image");
+
+  const { IMAGE_PROVIDERS, buildImageConfig } = await import("./image-config");
+  if (!IMAGE_PROVIDERS.has(name)) notImplemented(name, "image");
+
+  const { OpenAIImageProvider } = await import("./openai/openai-image-provider");
+  return new OpenAIImageProvider(await buildImageConfig(name, model));
 }
 
-export function getVideoProvider(name: string): VideoProvider {
+/**
+ * Video is async for the same reasons as the others: key, endpoint and price
+ * all come from the database. `model` carries the output size as a suffix,
+ * which is how one API model priced by resolution becomes several routable
+ * registry rows.
+ */
+export async function getVideoProvider(
+  name: string,
+  model: string,
+): Promise<VideoProvider> {
   if (isMockMode() || name === "mock") return mockVideo;
-  return notImplemented(name, "video");
+
+  const { VIDEO_PROVIDERS, buildVideoConfig } = await import("./video-config");
+  if (!VIDEO_PROVIDERS.has(name)) notImplemented(name, "video");
+
+  const config = await buildVideoConfig(name, model);
+
+  // Each vendor speaks a different dialect - multipart vs JSON data URI vs
+  // long-running operation - so they get one adapter each rather than a single
+  // class full of branches.
+  if (name === "runway") {
+    const { RunwayVideoProvider } = await import("./runway/runway-video-provider");
+    return new RunwayVideoProvider(config);
+  }
+  if (name === "google") {
+    const { GoogleVideoProvider } = await import("./google/google-video-provider");
+    return new GoogleVideoProvider(config);
+  }
+
+  const { OpenAIVideoProvider } = await import("./openai/openai-video-provider");
+  return new OpenAIVideoProvider(config);
 }
 
 export function getVoiceProvider(name: string): VoiceProvider {

@@ -44,14 +44,40 @@ model Idiom {
   @@index([difficulty])
 }
 
+/// The canonical identity of a recurring character.
+///
+/// Character consistency is the single hardest problem in this niche: an AI that
+/// redraws Max with different hair in scene 3 makes the video look broken no
+/// matter how good each frame is. Everything here exists to be pasted verbatim
+/// into every prompt rather than re-invented per scene.
 model Character {
   id              String   @id @default(uuid())
   name            String   @unique
   description     String
   personality     String
+
+  // ---- canonical appearance: copied into every prompt, never regenerated ----
   visualPrompt    String
   negativePrompt  String   @default("")
-  referenceImages String   @default("[]")
+  /// Face shape, eyes, nose, expression tendencies.
+  facialFeatures  String   @default("")
+  /// Colour, length, style. The most commonly drifted attribute.
+  hair            String   @default("")
+  /// Everyday clothing. Changes only when a scene explicitly calls for it.
+  outfit          String   @default("")
+  /// Height relative to the other characters, build, head-to-body ratio.
+  bodyProportions String   @default("")
+  accessories     String   @default("")
+  /// Dominant colours, so a scene cannot silently recolour the character.
+  colorPalette    String   @default("")
+
+  /// Bumped whenever the canonical description changes, so images generated
+  /// against an older description can be told apart from current ones.
+  version         Int      @default(1)
+
+  /// Style preset this character was designed for. Null = project default.
+  stylePresetId   String?
+
   voiceProvider   String   @default("mock")
   voiceId         String   @default("mock-male-us")
   seed            Int?
@@ -59,6 +85,42 @@ model Character {
   enabled         Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  references CharacterReference[]
+
+  @@index([enabled])
+}
+
+/// One reference image for a character.
+///
+/// Stored as rows rather than a JSON array so a single image can be promoted,
+/// approved, or deleted without rewriting the whole set, and so the approved
+/// master is a queryable fact rather than a convention.
+model CharacterReference {
+  id          String   @id @default(uuid())
+  characterId String
+  /// Path relative to the data root. The file itself never lives in SQLite.
+  filePath    String
+  /// "upload" when a human supplied it, "generated" when an AI did.
+  source      String   @default("upload")
+  /// Exactly one primary per character: the master image prompts refer to.
+  isPrimary   Boolean  @default(false)
+  /// A generated master must be approved by a human before it becomes primary.
+  approved    Boolean  @default(false)
+  provider    String   @default("")
+  model       String   @default("")
+  prompt      String   @default("")
+  /// Character version this image was generated against.
+  characterVersion Int @default(1)
+  width       Int      @default(0)
+  height      Int      @default(0)
+  bytes       Int      @default(0)
+  notes       String   @default("")
+  createdAt   DateTime @default(now())
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, isPrimary])
 }
 
 model StylePreset {
@@ -97,6 +159,11 @@ model ModelRegistry {
   supportsImageToVideo       Boolean  @default(false)
   supportsReferenceImage     Boolean  @default(false)
   supportsCharacterReference Boolean  @default(false)
+  // Some image models accept an "input_fidelity" hint that asks them to
+  // preserve faces and clothing from the reference images; others reject the
+  // parameter outright with a 400. Which is which is the vendor's business and
+  // changes per model, so it is data here rather than a table in code.
+  supportsInputFidelity      Boolean  @default(false)
   supportsAudio              Boolean  @default(false)
   supports1080p              Boolean  @default(false)
   supportsUpscale            Boolean  @default(false)
@@ -105,6 +172,9 @@ model ModelRegistry {
   speedRating                Int      @default(5)
   consistencyRating          Int      @default(5)
   historicalSuccessRate      Float    @default(1)
+  /// When a human last checked this row against the vendor's own pricing and
+  /// model list. Null means never verified - treat the price as a guess.
+  lastVerifiedAt             DateTime?
   notes                      String   @default("")
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
@@ -189,7 +259,18 @@ model Scene {
   videoPrompt       String   @default("")
   complexity        String   @default("LOW")
   spendPriority     String   @default("NORMAL")
-  characterIdsJson  String   @default("[]")
+  /// Everyone VISIBLE in the frame, whether they speak or not.
+  ///
+  /// This is the list that drives image generation. It exists separately from
+  /// the speaking list because a character who reacts in the background still
+  /// has to be drawn on-model, and deriving presence from dialogue silently
+  /// dropped exactly those characters.
+  charactersPresentJson   String   @default("[]")
+  /// Only those with a spoken line. Drives voice generation, not images.
+  speakingCharactersJson  String   @default("[]")
+  /// The focus of the shot. First in line for a reference image when the
+  /// provider limits how many can be sent.
+  primaryCharactersJson   String   @default("[]")
   routingMode       String   @default("AUTO")
   imageProvider     String?
   imageModel        String?

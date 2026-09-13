@@ -14,6 +14,15 @@ export interface SeedCharacter {
   personality: string;
   visualPrompt: string;
   negativePrompt: string;
+  // The attributes an image model drifts on. Stored as separate fields rather
+  // than one paragraph so each becomes its own labelled clause in the prompt,
+  // which leaves far less room for reinterpretation.
+  hair: string;
+  facialFeatures: string;
+  outfit: string;
+  bodyProportions: string;
+  accessories: string;
+  colorPalette: string;
   voiceId: string;
   seed: number;
   notes: string;
@@ -35,6 +44,15 @@ export const SEED_CHARACTERS: SeedCharacter[] = [
     negativePrompt:
       "realistic human photo, extra fingers, deformed hands, changing hair colour, changing outfit, " +
       "scary features, text artifacts, watermark, blurry face",
+    hair: "short messy dark brown hair, slightly spiky at the front",
+    facialFeatures:
+      "round face, large round expressive eyes, small nose, wide eager smile, light warm skin",
+    outfit:
+      "bright yellow hoodie with a single white chest stripe, blue jeans, white sneakers",
+    bodyProportions:
+      "slightly oversized head, short and stocky, noticeably shorter than Leo",
+    accessories: "",
+    colorPalette: "bright yellow, denim blue, white",
     voiceId: "mock-male-us",
     seed: 110022,
     notes:
@@ -53,9 +71,42 @@ export const SEED_CHARACTERS: SeedCharacter[] = [
     negativePrompt:
       "realistic human photo, extra fingers, deformed hands, missing glasses, changing shirt colour, " +
       "scary features, text artifacts, watermark, blurry face",
+    hair: "neat short black hair with a clean side part",
+    facialFeatures:
+      "oval face, calm narrow eyes behind round glasses, medium brown skin, small knowing smile",
+    outfit:
+      "teal button-up shirt with rolled sleeves, dark grey trousers, brown leather shoes",
+    bodyProportions: "slim, upright posture, clearly taller than Max",
+    accessories: "round thin-rimmed glasses",
+    colorPalette: "teal, dark grey, brown",
     voiceId: "mock-male-uk",
     seed: 220033,
     notes: "Luôn đeo kính tròn và mặc áo sơ mi xanh teal.",
+  },
+  {
+    name: "Mia",
+    description:
+      "Nhân vật phụ. Người ngoài cuộc chứng kiến tình huống và phản ứng, thường không có thoại.",
+    personality:
+      "Observant, easily amused, reacts with her whole face. Usually watches rather than speaks.",
+    visualPrompt:
+      "Mia: young adult female cartoon character, shoulder-length curly auburn hair, " +
+      "large green eyes, fair skin with freckles, coral red t-shirt under a denim jacket, " +
+      "dark green skirt, yellow trainers, small and lively, expressive eyebrows",
+    negativePrompt:
+      "realistic human photo, extra fingers, deformed hands, straight hair, changing hair colour, " +
+      "scary features, text artifacts, watermark, blurry face",
+    hair: "shoulder-length curly auburn hair",
+    facialFeatures:
+      "heart-shaped face, large green eyes, freckles across the nose, quick amused smile",
+    outfit: "coral red t-shirt, open denim jacket, dark green skirt, yellow trainers",
+    bodyProportions: "petite, shortest of the three, light build",
+    accessories: "",
+    colorPalette: "coral red, denim blue, dark green, auburn",
+    voiceId: "mock-female-us",
+    seed: 330044,
+    notes:
+      "Thường chỉ đứng phản ứng, không có thoại - đúng trường hợp mà danh sách nhân vật cũ hay bỏ sót.",
   },
 ];
 
@@ -169,6 +220,10 @@ export interface SeedModel {
   supportsImageToVideo?: boolean;
   supportsReferenceImage?: boolean;
   supportsCharacterReference?: boolean;
+  /** Image models only: accepts the input_fidelity hint on /images/edits. */
+  supportsInputFidelity?: boolean;
+  /** ISO date a human last checked price and availability against the vendor. */
+  lastVerifiedAt?: string;
   supportsAudio?: boolean;
   supports1080p?: boolean;
   supportsUpscale?: boolean;
@@ -361,31 +416,31 @@ export const SEED_MODELS: SeedModel[] = [
   {
     provider: "openai",
     modelId: "gpt-4o-mini",
-    displayName: "OpenAI GPT-4o mini (nhap gia truoc khi bat)",
+    displayName: "OpenAI GPT-4o mini",
     type: "text",
     enabled: false,
     priceUnit: "per_1k_tokens",
-    price: 0,
-    priceOutput: 0,
+    price: 0.00015,
+    priceOutput: 0.0006,
     qualityRating: 8,
     speedRating: 9,
     consistencyRating: 8,
     notes:
-      "Re, du tot cho kich ban ngan. Nhap gia input/output thuc te tu bang gia OpenAI truoc khi bat.",
+      "Re, du tot cho kich ban ngan. DOI CHIEU LAI gia tai openai.com/api/pricing truoc khi bat.",
   },
   {
     provider: "openai",
     modelId: "gpt-4o",
-    displayName: "OpenAI GPT-4o (nhap gia truoc khi bat)",
+    displayName: "OpenAI GPT-4o",
     type: "text",
     enabled: false,
     priceUnit: "per_1k_tokens",
-    price: 0,
-    priceOutput: 0,
+    price: 0.0025,
+    priceOutput: 0.01,
     qualityRating: 9,
     speedRating: 7,
     consistencyRating: 9,
-    notes: "Chat luong cao hon, dat hon. Nhap gia thuc te truoc khi bat.",
+    notes: "Chat luong cao hon, dat hon. DOI CHIEU LAI gia truoc khi bat.",
   },
   {
     provider: "deepseek",
@@ -460,74 +515,255 @@ export const SEED_MODELS: SeedModel[] = [
     notes:
       "Chay tren may qua Ollama (http://localhost:11434). Khong can API key, chi phi luon 0 USD. Cach re nhat de thu Text AI that.",
   },
+  // The Images API bills output tokens, and a different number of them per
+  // quality tier, so one API model becomes several registry rows: `price` is
+  // the per-image estimate the spend cap is checked against before the call,
+  // and `priceOutput` ($ per 1M output tokens) turns the reply's own token
+  // count into the exact cost afterwards. The ":low" style suffix is stripped
+  // before the request; see splitModelTier.
+  //
+  // Prices verified against developers.openai.com/api/docs/pricing on
+  // 2026-09-13. Re-check them there before enabling - they are the operator's
+  // data to maintain, not constants in code.
   {
     provider: "openai",
-    modelId: "gpt-image",
-    displayName: "OpenAI Image (chưa cấu hình)",
+    modelId: "gpt-image-2:low",
+    displayName: "GPT Image 2 — tiết kiệm",
     type: "image",
     enabled: false,
     priceUnit: "per_image",
-    price: 0,
+    price: 0.013,
+    priceOutput: 30,
     supportsReferenceImage: true,
+    supportsCharacterReference: true,
+    supports1080p: true,
+    qualityRating: 7,
+    speedRating: 9,
+    consistencyRating: 8,
+    notes: "Tang re nhat cua model moi nhat. Uoc tinh ~$0.013/anh 1024x1536.",
+  },
+  {
+    provider: "openai",
+    modelId: "gpt-image-2:medium",
+    displayName: "GPT Image 2 — cân bằng",
+    type: "image",
+    enabled: false,
+    priceUnit: "per_image",
+    price: 0.048,
+    priceOutput: 30,
+    supportsReferenceImage: true,
+    supportsCharacterReference: true,
+    supports1080p: true,
+    qualityRating: 9,
+    speedRating: 7,
+    consistencyRating: 9,
+    notes:
+      "Mac dinh cho che do BALANCED. Moi hon va re hon gpt-image-1 ($30 so voi $40 moi 1M token ra).",
+  },
+  {
+    provider: "openai",
+    modelId: "gpt-image-2:high",
+    displayName: "GPT Image 2 — chất lượng cao",
+    type: "image",
+    enabled: false,
+    priceUnit: "per_image",
+    price: 0.187,
+    priceOutput: 30,
+    supportsReferenceImage: true,
+    supportsCharacterReference: true,
+    supports1080p: true,
+    qualityRating: 10,
+    speedRating: 5,
+    consistencyRating: 10,
+    notes: "Dat gap ~4 lan muc medium. Chi dung khi that su can.",
+  },
+  {
+    provider: "openai",
+    modelId: "gpt-image-1-mini:medium",
+    displayName: "GPT Image 1 mini — rẻ nhất",
+    type: "image",
+    enabled: false,
+    priceUnit: "per_image",
+    price: 0.013,
+    priceOutput: 8,
+    supportsReferenceImage: true,
+    supports1080p: true,
+    qualityRating: 5,
+    speedRating: 10,
+    consistencyRating: 6,
+    notes: "Re nhat ($8 moi 1M token ra). Dung de thu nghiem, chat luong thap hon.",
+  },
+  {
+    provider: "openai",
+    modelId: "gpt-image-1:medium",
+    displayName: "GPT Image 1 — cân bằng (đời cũ)",
+    type: "image",
+    enabled: false,
+    priceUnit: "per_image",
+    price: 0.063,
+    priceOutput: 40,
+    supportsReferenceImage: true,
+    supportsCharacterReference: true,
     supports1080p: true,
     qualityRating: 8,
     speedRating: 7,
+    consistencyRating: 9,
+    supportsInputFidelity: true,
+    notes:
+      "Doi truoc, dat hon gpt-image-2. Bu lai: chap nhan input_fidelity=high nen giu khuon mat nhan vat chac hon.",
+  },
+  // Sora, priced per second AND per resolution, so each resolution is its own
+  // registry row - the ":720x1280" suffix is stripped before the API call.
+  // Prices verified against developers.openai.com/api/docs/pricing 2026-09-13.
+  //
+  // maxDuration is NOT verified: the docs did not state the allowed values
+  // clearly, so the API is left as the authority. A rejected duration is a
+  // free 400, not a wasted generation.
+  {
+    provider: "openai",
+    modelId: "sora-2:720x1280",
+    displayName: "Sora 2 — dọc 720x1280",
+    type: "video",
+    enabled: false,
+    priceUnit: "per_second",
+    price: 0.1,
+    supportsTextToVideo: true,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    maxDuration: 12,
+    qualityRating: 8,
+    speedRating: 7,
+    consistencyRating: 8,
+    lastVerifiedAt: "2026-09-13",
+    notes:
+      "Khung doc 9:16 dung chuan. Anh keyframe PHAI dung 720x1280 - he thong tu cat truoc khi gui.",
+  },
+  {
+    provider: "openai",
+    modelId: "sora-2-pro:720x1280",
+    displayName: "Sora 2 Pro — dọc 720x1280",
+    type: "video",
+    enabled: false,
+    priceUnit: "per_second",
+    price: 0.3,
+    supportsTextToVideo: true,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    maxDuration: 12,
+    qualityRating: 9,
+    speedRating: 5,
+    consistencyRating: 9,
+    lastVerifiedAt: "2026-09-13",
+    notes: "Dat gap 3 lan sora-2 o cung do phan giai.",
+  },
+  {
+    provider: "openai",
+    modelId: "sora-2-pro:1080x1920",
+    displayName: "Sora 2 Pro — dọc 1080x1920",
+    type: "video",
+    enabled: false,
+    priceUnit: "per_second",
+    price: 0.7,
+    supportsTextToVideo: true,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    supports1080p: true,
+    maxDuration: 12,
+    qualityRating: 10,
+    speedRating: 4,
+    consistencyRating: 9,
+    lastVerifiedAt: "2026-09-13",
+    notes:
+      "Dung do phan giai cuoi cua video, khong phai cat lai. Dat nhat: $0.70/giay.",
+  },
+  // ---- Google Veo 3.1, via the Gemini API ----
+  // Prices verified against ai.google.dev/gemini-api/docs/pricing 2026-09-13.
+  //
+  // UNVERIFIED and important: the docs say 1080p AND reference-image runs are
+  // forced to 8 seconds. If a single first-frame image counts as a reference
+  // image, every keyframe clip costs double the per-second figure below. The
+  // adapter assumes it does and estimates 8s, which errs toward over-quoting.
+  {
+    provider: "google",
+    modelId: "veo-3.1-lite-generate-preview:720x1280",
+    displayName: "Veo 3.1 Lite — dọc 720p",
+    type: "video",
+    enabled: false,
+    priceUnit: "per_second",
+    price: 0.05,
+    supportsTextToVideo: true,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    maxDuration: 8,
+    qualityRating: 7,
+    speedRating: 8,
     consistencyRating: 7,
-    notes: "Milestone 2. Nhập giá thực tế trước khi bật.",
+    lastVerifiedAt: "2026-09-13",
+    notes:
+      "Re nhat trong cac model video that. 9:16 goc. Co the bi ep 8 giay khi dung anh keyframe.",
   },
   {
     provider: "google",
-    modelId: "veo-video",
-    displayName: "Google Veo (chưa cấu hình)",
+    modelId: "veo-3.1-fast-generate-preview:720x1280",
+    displayName: "Veo 3.1 Fast — dọc 720p",
     type: "video",
     enabled: false,
     priceUnit: "per_second",
-    price: 0,
+    price: 0.1,
     supportsTextToVideo: true,
     supportsImageToVideo: true,
     supportsReferenceImage: true,
-    supportsAudio: true,
+    maxDuration: 8,
+    qualityRating: 8,
+    speedRating: 8,
+    consistencyRating: 8,
+    lastVerifiedAt: "2026-09-13",
+    notes: "Cung gia moi giay voi Sora-2 nhung co the bi ep 8 giay.",
+  },
+  {
+    provider: "google",
+    modelId: "veo-3.1-generate-preview:1080x1920",
+    displayName: "Veo 3.1 Standard — dọc 1080p",
+    type: "video",
+    enabled: false,
+    priceUnit: "per_second",
+    price: 0.4,
+    supportsTextToVideo: true,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
     supports1080p: true,
     maxDuration: 8,
-    qualityRating: 9,
-    speedRating: 6,
-    consistencyRating: 8,
-    notes: "Milestone 3. Nhập giá thực tế trước khi bật.",
+    qualityRating: 10,
+    speedRating: 5,
+    consistencyRating: 9,
+    lastVerifiedAt: "2026-09-13",
+    notes:
+      "1080p goc, khong phai phong to. Bat buoc 8 giay nen mot canh ton $3.20.",
   },
+
+  // ---- Runway, gen4_turbo ----
+  // 5 credits/second at $0.01/credit = $0.05/second, verified against
+  // docs.dev.runwayml.com/guides/pricing 2026-09-13.
+  //
+  // UNVERIFIED: Runway sells 5- and 10-second clips. A 4-second scene is
+  // therefore billed as 5, which the adapter reflects in its estimate.
   {
     provider: "runway",
-    modelId: "runway-video",
-    displayName: "Runway (chưa cấu hình)",
+    modelId: "gen4_turbo:720x1280",
+    displayName: "Runway Gen-4 Turbo — dọc 720x1280",
     type: "video",
     enabled: false,
     priceUnit: "per_second",
-    price: 0,
-    supportsTextToVideo: true,
+    price: 0.05,
     supportsImageToVideo: true,
     supportsReferenceImage: true,
-    supports1080p: true,
     maxDuration: 10,
     qualityRating: 8,
-    speedRating: 7,
-    consistencyRating: 7,
-    notes: "Milestone 2. Nhập giá thực tế trước khi bật.",
-  },
-  {
-    provider: "kling",
-    modelId: "kling-video",
-    displayName: "Kling (chưa cấu hình)",
-    type: "video",
-    enabled: false,
-    priceUnit: "per_second",
-    price: 0,
-    supportsTextToVideo: true,
-    supportsImageToVideo: true,
-    supports1080p: true,
-    maxDuration: 10,
-    qualityRating: 7,
-    speedRating: 6,
-    consistencyRating: 7,
-    notes: "Milestone 3. Nhập giá thực tế trước khi bật.",
+    speedRating: 9,
+    consistencyRating: 8,
+    lastVerifiedAt: "2026-09-13",
+    notes:
+      "Chi co image-to-video, bat buoc phai co keyframe. Thoi luong chi 5s hoac 10s.",
   },
   {
     provider: "elevenlabs",
