@@ -5,6 +5,7 @@ import {
   type ScriptDoc,
   type ScriptScore,
 } from "@/domain/script";
+import { randomUUID } from "node:crypto";
 import { sha256 } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
@@ -294,6 +295,16 @@ export async function generateScript(
       estimatedCost: estimate,
     });
 
+    // Unique per attempt, deliberately.
+    //
+    // Unlike scene media - where generation.ts looks this key up and reuses a
+    // finished job rather than paying twice - regenerating a script is a
+    // deliberate, user-initiated act whose entire purpose is to get a DIFFERENT
+    // result. Deduplicating it would make "regenerate" silently do nothing.
+    //
+    // The counter alone was not enough: it resets to 0 with the process, so the
+    // first regeneration in a new process collided with the first one in the
+    // previous process and the whole call crashed on the unique constraint.
     const key = sha256(
       [
         opts.projectId ?? opts.idiomId,
@@ -302,6 +313,7 @@ export async function generateScript(
         opts.provider,
         opts.model,
         String(callCounter++),
+        randomUUID(),
       ].join("|"),
     );
 

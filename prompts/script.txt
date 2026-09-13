@@ -42,10 +42,61 @@ RULES:
   visual style and the character sheets verbatim, so the characters look the
   same in every shot.
 
+CHARACTER LISTS - read this carefully, it is the most common mistake.
+
+Every scene carries three separate lists. They are NOT the same list.
+
+  "charactersPresent"
+    EVERY character visible anywhere in the frame. Include a character who:
+      - says nothing
+      - stands or sits behind another character
+      - only reacts, rolls their eyes, face-palms or laughs
+      - walks past or enters the shot
+      - holds, carries or hands over a prop
+      - is only partly in frame (an arm, a shoulder, the back of a head)
+    If a viewer would SEE them, they belong in this list.
+    Do NOT list only the characters who speak. A character drawn without
+    being listed here comes out looking like a different person.
+
+  "speakingCharacters"
+    Only characters with an actual spoken line in "dialogue". Often shorter
+    than charactersPresent. May be empty for a silent visual beat.
+
+  "primaryCharacters"
+    The one or two characters the shot is actually about - whoever the camera
+    is on. Usually one name.
+
+Include a character only when the scene genuinely needs them. Two characters
+carry most of these jokes. Do not add every available character to every scene:
+each extra character costs another reference image and crowds the frame. A
+third character should appear only where their reaction is part of the gag.
+
+Consistency rules you must satisfy:
+  - Everyone in speakingCharacters must also be in charactersPresent.
+  - Everyone in primaryCharacters must also be in charactersPresent.
+  - Every character named in "visualDescription", "characterAction" or
+    "imagePrompt" must also be in charactersPresent.
+
+Example of a scene where one character speaks and two are visible:
+  "visualDescription": "Max panics at the door while Leo watches, arms folded.",
+  "dialogue": "Max: \"I can't break a leg!\"",
+  "charactersPresent": ["Max", "Leo"],
+  "speakingCharacters": ["Max"],
+  "primaryCharacters": ["Max"]
+
+FRAMING - the image model renders a 2:3 portrait frame, which is WIDER than
+the 9:16 video. The renderer scales to cover and centre-crops, so about 8% is
+cut from the LEFT and 8% from the RIGHT; the full height is kept. So:
+  - Keep every character, face, hand and important prop away from the left and
+    right edges - inside the middle 84% of the width.
+  - Do not spread two characters to opposite edges; keep them closer together.
+  - Write imagePrompt for a vertical composition.
+
 Set "complexity" per scene from how hard it is to generate:
-  LOW    - one character, little motion, simple background
-  MEDIUM - one or two characters, moderate motion or an important expression
-  HIGH   - two characters interacting, hands, props, or slapstick motion
+  LOW    - one character present, little motion, simple background
+  MEDIUM - two characters present, moderate motion or an important expression
+  HIGH   - two or more characters interacting, hands, props, slapstick motion
+  (count charactersPresent, not speakingCharacters)
 
 Set "spendPriority" per scene:
   HIGH   - the first 3 seconds and the punchline
@@ -85,7 +136,9 @@ Return ONE valid JSON object and nothing else. No markdown fence, no commentary.
       "videoPrompt": "string",
       "complexity": "LOW | MEDIUM | HIGH",
       "spendPriority": "LOW | NORMAL | HIGH",
-      "characters": ["string"]
+      "charactersPresent": ["string"],
+      "speakingCharacters": ["string"],
+      "primaryCharacters": ["string"]
     }
   ]
 }

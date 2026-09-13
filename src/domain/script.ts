@@ -8,23 +8,101 @@ import { COMPLEXITIES, SPEND_PRIORITIES } from "./enums";
  * (see src/services/script-service.ts). It is never allowed to fail silently.
  */
 
-export const SceneSchema = z.object({
-  sceneNumber: z.number().int().positive(),
-  duration: z.number().min(1).max(12),
-  visualDescription: z.string().min(1),
-  dialogue: z.string().default(""),
-  narration: z.string().default(""),
-  subtitle: z.string().default(""),
-  camera: z.string().default(""),
-  characterAction: z.string().default(""),
-  soundEffect: z.string().default(""),
-  imagePrompt: z.string().default(""),
-  videoPrompt: z.string().default(""),
-  complexity: z.enum(COMPLEXITIES).default("LOW"),
-  spendPriority: z.enum(SPEND_PRIORITIES).default("NORMAL"),
-  characters: z.array(z.string()).default([]),
+/**
+ * Who is in a scene, split three ways.
+ *
+ * One list could not carry this. A character standing in the background with no
+ * line still has to be drawn on-model, so presence has to be stated rather than
+ * inferred from dialogue - inferring it is exactly what dropped Leo's reference
+ * image from scenes he was visibly in.
+ */
+const CharacterListsSchema = z.object({
+  /** Everyone visible in frame: speaking, reacting, passing through, partly in shot. */
+  charactersPresent: z.array(z.string()).default([]),
+  /** Only those with a spoken line. */
+  speakingCharacters: z.array(z.string()).default([]),
+  /** The focus of the shot. First in line for a reference image. */
+  primaryCharacters: z.array(z.string()).default([]),
+});
+
+const BaseSceneSchema = z
+  .object({
+    sceneNumber: z.number().int().positive(),
+    duration: z.number().min(1).max(12),
+    visualDescription: z.string().min(1),
+    dialogue: z.string().default(""),
+    narration: z.string().default(""),
+    subtitle: z.string().default(""),
+    camera: z.string().default(""),
+    characterAction: z.string().default(""),
+    soundEffect: z.string().default(""),
+    imagePrompt: z.string().default(""),
+    videoPrompt: z.string().default(""),
+    complexity: z.enum(COMPLEXITIES).default("LOW"),
+    spendPriority: z.enum(SPEND_PRIORITIES).default("NORMAL"),
+    /** The old single list. Accepted so an older model reply still parses. */
+    characters: z.array(z.string()).optional(),
+  })
+  .merge(CharacterListsSchema);
+
+/**
+ * Fill in whichever lists the model left out.
+ *
+ * A model that answers with only the old `characters` field, or that fills in
+ * `speakingCharacters` but forgets `charactersPresent`, must still produce a
+ * usable scene. The rule is one-directional: anyone who speaks or is primary is
+ * necessarily present, so presence is the union. Never the reverse - that is
+ * the inference that caused the bug.
+ */
+export const SceneSchema = BaseSceneSchema.transform((scene) => {
+  const legacy = scene.characters ?? [];
+  const present = dedupe([
+    ...scene.charactersPresent,
+    ...scene.speakingCharacters,
+    ...scene.primaryCharacters,
+    ...legacy,
+  ]);
+  const speaking = dedupe(
+    scene.speakingCharacters.length > 0
+      ? scene.speakingCharacters
+      : // No speaking list and no dialogue means nobody speaks; with dialogue,
+        // the legacy list is the best evidence we have of who said it.
+        scene.dialogue.trim().length > 0
+        ? legacy
+        : [],
+  ).filter((name) => present.includes(name));
+
+  const primary = dedupe(
+    scene.primaryCharacters.length > 0
+      ? scene.primaryCharacters
+      : speaking.length > 0
+        ? speaking
+        : present.slice(0, 1),
+  ).filter((name) => present.includes(name));
+
+  return {
+    ...scene,
+    charactersPresent: present,
+    speakingCharacters: speaking,
+    primaryCharacters: primary,
+    characters: present,
+  };
 });
 export type SceneDoc = z.infer<typeof SceneSchema>;
+
+function dedupe(names: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of names) {
+    const name = raw.trim();
+    if (name.length === 0) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
 
 export const ScriptSchema = z.object({
   idiom: z.string().min(1),

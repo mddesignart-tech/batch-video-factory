@@ -246,6 +246,9 @@ describe("giới hạn thời lượng cảnh từ provider thật", () => {
         videoPrompt: "",
         complexity: "LOW" as const,
         spendPriority: "NORMAL" as const,
+        charactersPresent: [],
+        speakingCharacters: [],
+        primaryCharacters: [],
         characters: [],
       })),
     });
@@ -269,6 +272,9 @@ describe("giới hạn thời lượng cảnh từ provider thật", () => {
         videoPrompt: "",
         complexity: "LOW" as const,
         spendPriority: "NORMAL" as const,
+        charactersPresent: [],
+        speakingCharacters: [],
+        primaryCharacters: [],
         characters: [],
       })),
     });
