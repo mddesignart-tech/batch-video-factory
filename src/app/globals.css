@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+/*
+  Dark-first admin theme.
+
+  A video tool is used while looking at video thumbnails and previews, so the
+  chrome stays dark and low-contrast and lets the media carry the colour. All
+  colour lives in these tokens so a light variant is a token swap, not a rewrite.
+*/
+
+@theme {
+  --color-ink-950: #0a0b0f;
+  --color-ink-900: #101218;
+  --color-ink-850: #14171f;
+  --color-ink-800: #1a1e28;
+  --color-ink-700: #252a37;
+  --color-ink-600: #333a4c;
+  --color-ink-500: #4a5468;
+  --color-ink-400: #6b7688;
+  --color-ink-300: #97a1b3;
+  --color-ink-200: #c3cad6;
+  --color-ink-100: #e6eaf1;
+
+  --color-brand-500: #f59e0b;
+  --color-brand-400: #fbbf24;
+  --color-brand-600: #d97706;
+
+  --color-accent-500: #38bdf8;
+  --color-accent-600: #0284c7;
+
+  --color-ok-500: #34d399;
+  --color-ok-600: #059669;
+  --color-warn-500: #fbbf24;
+  --color-danger-500: #f87171;
+  --color-danger-600: #dc2626;
+
+  --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbars that do not fight the dark chrome. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-ink-900);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-700);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-600);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent-500);
+  outline-offset: 2px;
+}
+
+/* Native controls inherit the dark palette instead of rendering white. */
+input,
+select,
+textarea,
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color-scheme: dark;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
