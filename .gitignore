@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+
+# next
+.next/
+out/
+next-env.d.ts
+
+# env - NEVER commit real keys
+.env
+.env.local
+.env.*.local
+
+# local data: SQLite database, generated media, backups
+data/
+backups/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# generated media / temp
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.srt
+*.ass
+!public/**/*.mp4
+
+# tooling
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+coverage/
+.vitest/
