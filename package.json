@@ -22,7 +22,16 @@
     "compare:text": "tsx scripts/compare-text.ts",
     "provider:enable": "tsx scripts/enable-text-provider.ts",
     "workflow:test": "tsx scripts/workflow-test.ts",
-    "verify:billing": "tsx scripts/verify-failure-billing.ts"
+    "verify:billing": "tsx scripts/verify-failure-billing.ts",
+    "preflight:openai": "tsx scripts/preflight-openai.ts",
+    "image:test": "tsx scripts/image-test.ts",
+    "presence:test": "tsx scripts/presence-test.ts",
+    "scenes:regenerate": "tsx scripts/regenerate-scenes.ts",
+    "crop:check": "tsx scripts/crop-check.ts",
+    "project:status": "tsx scripts/project-status.ts",
+    "video:prompt": "tsx scripts/prepare-video-prompt.ts",
+    "video:test": "tsx scripts/video-test.ts",
+    "video:benchmark": "tsx scripts/video-benchmark.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.1",
