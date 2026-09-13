@@ -1,0 +1,13 @@
+{{stylePrompt}}
+
+SCENE: {{visualDescription}}
+
+CHARACTERS PRESENT (match these exactly):
+{{characters}}
+
+FRAMING: vertical 9:16 composition, subject centred, head room at the top, the
+lower third of the frame kept clear and uncluttered for burned-in subtitles.
+
+NEGATIVE: {{negativePrompt}}, photorealistic human likeness of a real person,
+text, captions, watermark, logo, extra fingers, deformed hands, changed hair or
+clothing colour, horror, gore, cluttered background.

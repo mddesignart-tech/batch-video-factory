@@ -1,0 +1,28 @@
+Turn this script into a shot list for AI video generation.
+
+SCRIPT:
+{{script}}
+
+VISUAL STYLE (repeat verbatim in every prompt):
+{{stylePrompt}}
+
+CHARACTER SHEETS (repeat verbatim whenever the character is on screen):
+{{characters}}
+
+For each scene produce:
+  imagePrompt - a single still keyframe. Describe subject, pose, expression,
+                background, framing. Vertical 9:16, subject centred, lower third
+                left clear for subtitles.
+  videoPrompt - the same scene in motion. Add the action, the camera move and
+                the intended pacing. Ask for smooth natural motion and
+                consistent character design across the shot.
+  camera      - one short phrase, e.g. "snap zoom to a reaction close-up"
+  soundEffect - one short phrase, e.g. "rimshot"
+
+Rules:
+- Never invent a new appearance for a character. Copy the character sheet.
+- Keep each scene to a single continuous shot; do not describe cuts within one.
+- No text, captions, logos or watermarks in the generated image - subtitles are
+  burned in later by FFmpeg.
+
+Return a JSON array, one object per scene, keyed by sceneNumber.

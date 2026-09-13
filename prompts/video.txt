@@ -1,0 +1,17 @@
+{{stylePrompt}}
+
+SCENE: {{visualDescription}}
+ACTION: {{characterAction}}
+CAMERA: {{camera}}
+DURATION: {{duration}} seconds
+
+CHARACTERS PRESENT (match these exactly, do not redesign them):
+{{characters}}
+
+MOTION: smooth natural movement, exaggerated cartoon timing, expressive faces.
+The character design must stay identical from the first frame to the last.
+
+FRAMING: vertical 9:16, subject centred, lower third kept clear for subtitles.
+
+NEGATIVE: {{negativePrompt}}, morphing faces, flickering identity, warped hands,
+text, captions, watermark, logo, camera shake, horror, gore.

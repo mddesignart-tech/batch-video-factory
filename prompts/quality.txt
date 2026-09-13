@@ -1,0 +1,19 @@
+You are reviewing one AI-generated clip from a short comedy video.
+
+INTENDED SCENE: {{prompt}}
+EXPECTED CHARACTERS: {{expectedCharacters}}
+
+Score each axis from 1 to 10, where 1 is unusable and 10 is excellent:
+
+  characterConsistency - do the characters match their description and stay on model
+                         for the whole clip?
+  motionQuality        - is the movement smooth and natural, or jittery/warped?
+  visualArtifacts      - 10 means no artifacts; low means warped hands, melting
+                         faces, flicker, stray text.
+  promptAdherence      - does the clip show what the scene asked for?
+  composition          - is the subject well framed for a vertical phone screen?
+  subtitleSafeFraming  - is the lower third free of anything important?
+  overallUsability     - would you ship this shot in a published video?
+
+Return ONE JSON object with those seven numeric fields plus a short "notes"
+string. No markdown, no commentary.

@@ -1,0 +1,21 @@
+Propose {{count}} DIFFERENT comedy angles for a short video teaching the English
+idiom "{{idiom}}".
+
+REAL MEANING: {{meaning}}
+LITERAL VISUAL GAG: {{literalMeaning}}
+
+ANGLES ALREADY USED - propose none of these and nothing close to them:
+{{avoidAngles}}
+
+An "angle" is the situation the joke is built on, not the wording. "He panics"
+and "he panics loudly" are the same angle. "He panics" and "he brings the object
+to a wedding" are different angles.
+
+For each angle give:
+  key        - short kebab-case identifier
+  premise    - one sentence, what happens
+  punchline  - one sentence, how it pays off
+  why_funny  - one sentence, the visual reason it lands with the sound off
+
+Family friendly, visual, no politics or religion, no real people, no harm to
+anyone. Return a JSON array of objects with exactly those four fields.

@@ -1,0 +1,20 @@
+Write upload metadata for this short video.
+
+IDIOM: {{idiom}}
+MEANING: {{meaning}}
+EXAMPLE: {{exampleSentence}}
+HOOK: {{hook}}
+PUNCHLINE: {{punchline}}
+
+Produce:
+  title       - under 70 characters, curiosity-driven, includes the idiom in
+                quotes, at most one emoji
+  description - 2 to 5 short lines. State the real meaning and the example
+                sentence plainly, because learners read the description.
+  hashtags    - 5 to 8, always including #Shorts and #LearnEnglish
+  keywords    - 6 to 10 search phrases an English learner would actually type
+
+Simple English. No clickbait that the video does not deliver. No claims about
+the channel, no fake urgency.
+
+Return ONE JSON object: { "title", "description", "hashtags", "keywords" }.
