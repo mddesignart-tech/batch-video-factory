@@ -1,0 +1,382 @@
+// Funny Idioms Video Factory - V1 schema
+//
+// Portability note (SQLite -> PostgreSQL):
+//  * No Prisma `enum` blocks: SQLite does not support them. Enum-like columns are
+//    `String` and validated in TypeScript via src/domain/enums.ts + Zod.
+//  * No `Json` scalar: SQLite does not support it. JSON payloads live in `String`
+//    columns suffixed `Json` and are parsed through Zod at the edges.
+//  * No binary blobs: media lives on disk, the DB only stores relative paths.
+//  Migrating to Postgres = change the datasource provider and (optionally) swap
+//  the String enum columns for native enums. No application code has to move.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- content ---
+
+model Idiom {
+  id              String    @id @default(uuid())
+  phrase          String
+  slug            String    @unique
+  meaning         String
+  literalMeaning  String
+  exampleSentence String
+  category        String
+  difficulty      String    @default("Beginner")
+  region          String    @default("General")
+  notes           String    @default("")
+  status          String    @default("unused")
+  timesUsed       Int       @default(0)
+  lastUsedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  projects Project[]
+
+  @@index([status])
+  @@index([category])
+  @@index([difficulty])
+}
+
+model Character {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  description     String
+  personality     String
+  visualPrompt    String
+  negativePrompt  String   @default("")
+  referenceImages String   @default("[]")
+  voiceProvider   String   @default("mock")
+  voiceId         String   @default("mock-male-us")
+  seed            Int?
+  notes           String   @default("")
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model StylePreset {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  slug            String   @unique
+  positivePrompt  String
+  negativePrompt  String
+  lightingStyle   String
+  cameraLanguage  String
+  visualTone      String
+  aspectRatio     String   @default("9:16")
+  preferredModels String   @default("[]")
+  isDefault       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  projects Project[]
+}
+
+// --------------------------------------------------------------- registry ---
+
+model ModelRegistry {
+  id                         String   @id @default(uuid())
+  provider                   String
+  modelId                    String
+  displayName                String
+  type                       String
+  enabled                    Boolean  @default(true)
+  priceUnit                  String
+  price                      Float    @default(0)
+  supportsTextToVideo        Boolean  @default(false)
+  supportsImageToVideo       Boolean  @default(false)
+  supportsReferenceImage     Boolean  @default(false)
+  supportsCharacterReference Boolean  @default(false)
+  supportsAudio              Boolean  @default(false)
+  supports1080p              Boolean  @default(false)
+  supportsUpscale            Boolean  @default(false)
+  maxDuration                Int      @default(0)
+  qualityRating              Int      @default(5)
+  speedRating                Int      @default(5)
+  consistencyRating          Int      @default(5)
+  historicalSuccessRate      Float    @default(1)
+  notes                      String   @default("")
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@unique([provider, modelId])
+  @@index([type, enabled])
+}
+
+model ProviderConfig {
+  id               String    @id @default(uuid())
+  name             String    @unique
+  displayName      String
+  types            String    @default("[]")
+  enabled          Boolean   @default(true)
+  apiKeyEnc        String?
+  apiKeyMask       String?
+  apiKeyEnvVar     String    @default("")
+  baseUrl          String    @default("")
+  priority         Int       @default(100)
+  fallbackPriority Int       @default(100)
+  status           String    @default("disabled")
+  lastCheckedAt    DateTime?
+  notes            String    @default("")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+// --------------------------------------------------------------- projects ---
+
+model Project {
+  id              String   @id @default(uuid())
+  idiomId         String
+  batchId         String?
+  title           String
+  status          String   @default("draft")
+  qualityMode     String   @default("BALANCED")
+  routerStrategy  String   @default("AUTO")
+  stylePresetId   String?
+  targetDuration  Int      @default(25)
+  aspectRatio     String   @default("9:16")
+  language        String   @default("en")
+  scriptJson      String?
+  scriptHash      String?
+  angleKey        String?
+  scriptScoreJson String?
+  youtubeMetaJson String?
+  estimatedCost   Float    @default(0)
+  actualCost      Float    @default(0)
+  maxBudget       Float    @default(10)
+  finalVideoPath  String?
+  subtitlePath    String?
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  idiom       Idiom        @relation(fields: [idiomId], references: [id])
+  stylePreset StylePreset? @relation(fields: [stylePresetId], references: [id])
+  batch       Batch?       @relation(fields: [batchId], references: [id])
+  scenes      Scene[]
+  assets      Asset[]
+  costs       CostEntry[]
+  jobs        Job[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([batchId])
+}
+
+model Scene {
+  id                String   @id @default(uuid())
+  projectId         String
+  sceneNumber       Int
+  duration          Float    @default(4)
+  visualDescription String   @default("")
+  dialogue          String   @default("")
+  narration         String   @default("")
+  subtitle          String   @default("")
+  camera            String   @default("")
+  characterAction   String   @default("")
+  soundEffect       String   @default("")
+  imagePrompt       String   @default("")
+  videoPrompt       String   @default("")
+  complexity        String   @default("LOW")
+  spendPriority     String   @default("NORMAL")
+  characterIdsJson  String   @default("[]")
+  routingMode       String   @default("AUTO")
+  imageProvider     String?
+  imageModel        String?
+  videoProvider     String?
+  videoModel        String?
+  voiceProvider     String?
+  voiceModel        String?
+  estimatedCost     Float    @default(0)
+  actualCost        Float    @default(0)
+  imagePath         String?
+  videoPath         String?
+  audioPath         String?
+  qualityScore      Float?
+  qualityJson       String?
+  retryCount        Int      @default(0)
+  status            String   @default("pending")
+  approved          Boolean  @default(false)
+  skipped           Boolean  @default(false)
+  errorMessage      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assets  Asset[]
+
+  @@unique([projectId, sceneNumber])
+  @@index([status])
+}
+
+model Asset {
+  id               String   @id @default(uuid())
+  projectId        String
+  sceneId          String?
+  kind             String
+  provider         String
+  model            String
+  prompt           String   @default("")
+  negativePrompt   String   @default("")
+  seed             Int?
+  status           String   @default("completed")
+  generationTimeMs Int      @default(0)
+  estimatedCost    Float    @default(0)
+  actualCost       Float    @default(0)
+  filePath         String
+  bytes            Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scene   Scene?  @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, kind])
+}
+
+// ------------------------------------------------------------------- jobs ---
+
+model Batch {
+  id             String   @id @default(uuid())
+  name           String
+  amount         Int      @default(5)
+  category       String?
+  difficulty     String?
+  stylePresetId  String?
+  qualityMode    String   @default("BALANCED")
+  targetDuration Int      @default(25)
+  voiceProvider  String   @default("mock")
+  voiceId        String   @default("mock-male-us")
+  maxBudget      Float    @default(40)
+  concurrency    Int      @default(2)
+  status         String   @default("queued")
+  estimatedCost  Float    @default(0)
+  actualCost     Float    @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  projects Project[]
+  jobs     Job[]
+}
+
+model Job {
+  id          String    @id @default(uuid())
+  type        String
+  payloadJson String    @default("{}")
+  status      String    @default("queued")
+  priority    Int       @default(100)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  nextRunAt   DateTime  @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  error       String?
+  resultJson  String?
+  projectId   String?
+  batchId     String?
+  sceneId     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  batch   Batch?   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextRunAt])
+  @@index([projectId])
+}
+
+// A record of every request handed to an external provider. This is what keeps us
+// from paying twice for one scene: before any retry or fallback we look for a live
+// ProviderJob and resume it instead of submitting a new paid generation.
+model ProviderJob {
+  id             String    @id @default(uuid())
+  provider       String
+  model          String
+  kind           String
+  externalId     String?
+  idempotencyKey String    @unique
+  status         String    @default("pending")
+  requestJson    String    @default("{}")
+  responseJson   String?
+  error          String?
+  projectId      String?
+  sceneId        String?
+  attempts       Int       @default(0)
+  estimatedCost  Float     @default(0)
+  actualCost     Float     @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+
+  @@index([status])
+  @@index([sceneId, kind])
+}
+
+// -------------------------------------------------------- cost + telemetry ---
+
+model CostEntry {
+  id        String   @id @default(uuid())
+  projectId String?
+  batchId   String?
+  sceneId   String?
+  category  String
+  provider  String
+  model     String
+  amount    Float
+  estimated Boolean  @default(false)
+  isRetry   Boolean  @default(false)
+  note      String   @default("")
+  createdAt DateTime @default(now())
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([category])
+}
+
+model LogEntry {
+  id            String   @id @default(uuid())
+  level         String   @default("info")
+  event         String
+  message       String   @default("")
+  provider      String?
+  model         String?
+  projectId     String?
+  sceneId       String?
+  jobId         String?
+  durationMs    Int?
+  estimatedCost Float?
+  actualCost    Float?
+  status        String?
+  dataJson      String?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([level])
+}
+
+// Duplicate prevention: one row per generated concept.
+model ConceptHistory {
+  id         String   @id @default(uuid())
+  idiomId    String
+  projectId  String?
+  angleKey   String
+  scriptHash String
+  summary    String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([idiomId])
+  @@index([scriptHash])
+}
+
+model Setting {
+  key       String   @id
+  valueJson String
+  updatedAt DateTime @updatedAt
+}
