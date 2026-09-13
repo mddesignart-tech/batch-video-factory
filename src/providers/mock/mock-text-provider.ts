@@ -191,12 +191,22 @@ export class MockTextProvider implements TextProvider {
         example: req.exampleSentence,
         literal: req.literalMeaning,
       });
-      const characters =
-        beat.role === "hook" || beat.role === "literal"
-          ? [max]
-          : [max, leo];
-
       const visualDescription = content.visual;
+
+      // Presence is stated, not inferred. The hook beat is the illustration of
+      // why: Leo delivers the line from off to the side while Max reacts, so
+      // both are on screen even though only one of them is "the subject".
+      const present =
+        beat.role === "literal" ? [max] : [max, leo];
+      // Speaking is read back out of the dialogue line, which is written as
+      // "Name: ...". Deriving presence from this is the bug; deriving speech
+      // from it is exactly right.
+      const speaking = present.filter((name) =>
+        content.dialogue.trim().toLowerCase().startsWith(`${name.toLowerCase()}:`),
+      );
+      const primary =
+        beat.role === "meaning" || beat.role === "example" ? [leo] : [max];
+      const characters = present;
       return {
         sceneNumber: index + 1,
         // Clamp to what a single AI video generation can actually produce well.
@@ -221,6 +231,9 @@ export class MockTextProvider implements TextProvider {
         ),
         complexity: beat.complexity,
         spendPriority: beat.spendPriority,
+        charactersPresent: present,
+        speakingCharacters: speaking,
+        primaryCharacters: primary,
         characters,
       };
     });

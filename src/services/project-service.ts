@@ -1,10 +1,11 @@
 import type { Project } from "@prisma/client";
 import type { QualityMode, RouterStrategy } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
+import { sceneCharacters } from "@/domain/scene-characters";
 import { logger } from "@/lib/logger";
 import { ensureProjectDirs } from "@/lib/paths";
 import { getSettings } from "@/lib/settings";
-import { parseJson, round } from "@/lib/utils";
+import { round } from "@/lib/utils";
 import { ScriptSchema, type ScriptDoc } from "@/domain/script";
 import { enqueue } from "@/jobs/queue";
 import { isMockMode } from "@/lib/env";
@@ -220,7 +221,9 @@ export async function persistScript(
         videoPrompt: scene.videoPrompt,
         complexity: scene.complexity,
         spendPriority: scene.spendPriority,
-        characterIdsJson: JSON.stringify(scene.characters),
+        charactersPresentJson: JSON.stringify(scene.charactersPresent),
+        speakingCharactersJson: JSON.stringify(scene.speakingCharacters),
+        primaryCharactersJson: JSON.stringify(scene.primaryCharacters),
       })),
     }),
   ]);
@@ -240,7 +243,7 @@ export async function buildPlannedScenes(
     duration: scene.duration,
     complexity: scene.complexity as "LOW" | "MEDIUM" | "HIGH",
     spendPriority: scene.spendPriority as "LOW" | "NORMAL" | "HIGH",
-    characterCount: parseJson<string[]>(scene.characterIdsJson, []).length || 1,
+    characterCount: sceneCharacters(scene).present.length || 1,
     speechText: speechTextFor(scene),
     manualImageProvider: scene.imageProvider,
     manualImageModel: scene.imageModel,

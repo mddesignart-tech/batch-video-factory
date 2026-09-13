@@ -115,6 +115,42 @@ export function qualityFloor(
 }
 
 /** Does this model physically support what the scene needs? */
+/**
+ * Why a model cannot serve this scene, in words.
+ *
+ * Mirrors `isCapable` in the same order. Kept next to it so a new capability
+ * check added there without a matching reason here is obvious in review.
+ */
+export function explainIncapable(model: ModelRegistry, ctx: RouteContext): string {
+  if (!model.enabled) return "model đang bị tắt trong bảng Mô hình AI";
+  if (model.type !== ctx.type) {
+    return `model thuộc loại "${model.type}", cảnh này cần "${ctx.type}"`;
+  }
+  if (!ctx.availableProviders.includes(model.provider)) {
+    return `nhà cung cấp "${model.provider}" chưa sẵn sàng (thiếu key, đang tắt, hoặc bị giới hạn tần suất)`;
+  }
+  if (ctx.type === "video") {
+    if (model.maxDuration > 0 && ctx.durationSeconds > model.maxDuration) {
+      return `cảnh dài ${ctx.durationSeconds}s nhưng model chỉ hỗ trợ tối đa ${model.maxDuration}s`;
+    }
+    if (ctx.needsReferenceImage && !model.supportsImageToVideo) {
+      return "cảnh cần image-to-video nhưng model không hỗ trợ";
+    }
+    if (ctx.needs1080p && !model.supports1080p) {
+      return "chế độ Chất lượng cao yêu cầu 1080p gốc, model này không có";
+    }
+    if (
+      ctx.consistencyRequired &&
+      ctx.characterCount >= 2 &&
+      !model.supportsCharacterReference &&
+      !model.supportsReferenceImage
+    ) {
+      return `cảnh có ${ctx.characterCount} nhân vật cần giữ nhất quán nhưng model không nhận ảnh tham chiếu`;
+    }
+  }
+  return "không đáp ứng yêu cầu của cảnh";
+}
+
 export function isCapable(model: ModelRegistry, ctx: RouteContext): boolean {
   if (!model.enabled) return false;
   if (model.type !== ctx.type) return false;
@@ -203,9 +239,18 @@ export function routeScene(
       (m) => m.provider === ctx.manualProvider && m.modelId === ctx.manualModel,
     );
     if (!pinned) {
+      // Say WHICH requirement the pinned model failed. "Not suitable" sends the
+      // operator hunting through a capability table; naming the mismatch turns
+      // a debugging session into a one-line fix.
+      const known = models.find(
+        (m) => m.provider === ctx.manualProvider && m.modelId === ctx.manualModel,
+      );
       throw new RoutingError(
-        `Không tìm thấy mô hình được chọn thủ công (${ctx.manualProvider}/${ctx.manualModel}) ` +
-          `hoặc mô hình đó không phù hợp với cảnh này.`,
+        known
+          ? `Mô hình được chọn thủ công (${ctx.manualProvider}/${ctx.manualModel}) ` +
+            `không dùng được cho cảnh này: ${explainIncapable(known, ctx)}`
+          : `Không tìm thấy mô hình được chọn thủ công ` +
+            `(${ctx.manualProvider}/${ctx.manualModel}) trong bảng Mô hình AI.`,
         "manual_not_found",
       );
     }

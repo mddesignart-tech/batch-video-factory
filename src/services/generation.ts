@@ -8,6 +8,12 @@ import { sha256 } from "@/lib/crypto";
 import { projectSubdir, toRelative, uuidFilename } from "@/lib/paths";
 import { parseJson, round, sleep } from "@/lib/utils";
 import {
+  referencePriority,
+  sceneCharacters,
+  type SceneCharacterLists,
+} from "@/domain/scene-characters";
+import { MAX_REFERENCES_SENT } from "@/providers/openai/openai-image-client";
+import {
   getImageProvider,
   getQualityProvider,
   getVideoProvider,
@@ -24,8 +30,16 @@ import {
   shouldGenerateKeyframe,
 } from "./cost-estimator";
 import { recordCost, spentOnProject } from "./cost-tracker";
+import { assertCanSpend } from "./spend-guard";
 import { availableProviderNames } from "./provider-health";
 import { targetForAspect } from "@/media/render";
+import {
+  buildNegativePrompt,
+  buildScenePrompt,
+  getCharacterSheetsByName,
+  referenceAbsolutePath,
+  type CharacterSheet,
+} from "./character-service";
 import { overallQualityScore, QualityReportSchema } from "@/domain/script";
 
 /**
@@ -97,7 +111,7 @@ function routeFor(
   manual: { provider?: string | null; model?: string | null },
 ): RouteDecision {
   const { scene, project } = ctx;
-  const characterCount = parseJson<string[]>(scene.characterIdsJson, []).length || 1;
+  const characterCount = sceneCharacters(scene).present.length || 1;
   return routeScene(ctx.models, {
     type,
     qualityMode: project.qualityMode as QualityMode,
@@ -107,7 +121,13 @@ function routeFor(
     durationSeconds: scene.duration,
     characterCount,
     consistencyRequired: type === "image" || type === "video",
-    needs1080p: type === "video",
+    // Native 1080p is a QUALITY-mode demand, not a property of video as such.
+    // The final render is 1080x1920 either way; a 720x1280 clip upscaled into
+    // it is an ordinary pipeline, and at Sora's prices insisting on native
+    // 1080p costs seven times as much per second for a 9:16 Short nobody
+    // watches full-screen. Requiring it unconditionally silently excluded every
+    // affordable video model.
+    needs1080p: type === "video" && project.qualityMode === "QUALITY",
     needsReferenceImage:
       type === "video" &&
       shouldGenerateKeyframe(
@@ -224,6 +244,22 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
       message: `Job ${kind} trước đó vẫn đang chạy, tiếp tục theo dõi thay vì tạo mới.`,
     });
   } else {
+    // The spend gate belongs here and only here.
+    //
+    // This is the single function allowed to start a paid generation, so this
+    // is the single place the app-wide cap can be enforced for every media
+    // type at once. It was previously checked only in script and character
+    // work, which meant scene images and videos - the expensive ones - could
+    // run past the cap entirely.
+    //
+    // It sits inside this branch on purpose: resuming a job that was already
+    // paid for must never be blocked by a cap the earlier charge helped reach.
+    await assertCanSpend({
+      provider: decision.provider,
+      model: decision.modelId,
+      estimatedCost: decision.estimatedCost,
+    });
+
     const created = await create();
     externalId = created.externalId;
     record = await prisma.providerJob.upsert({
@@ -397,8 +433,8 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
 
-  const characterCount =
-    parseJson<string[]>(scene.characterIdsJson, []).length || 1;
+  const lists = sceneCharacters(scene);
+  const characterCount = lists.present.length || 1;
   if (
     !shouldGenerateKeyframe(
       project.qualityMode as QualityMode,
@@ -419,25 +455,42 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
     uuidFilename(".png"),
   );
 
+  const shot = await buildSceneImageRequest(scene, project.stylePresetId);
+  if (shot.droppedByLimit.length > 0) {
+    await logger.warn({
+      event: "scene.references_dropped",
+      message:
+        `Nhà cung cấp chỉ nhận ${MAX_REFERENCES_SENT} ảnh tham chiếu nên ` +
+        `${shot.droppedByLimit.join(", ")} chỉ được mô tả bằng chữ.`,
+      data: { scene: scene.sceneNumber, dropped: shot.droppedByLimit },
+    });
+  }
+
   const { result, used } = await withFallback(ctx, decision, async (d) => {
-    const provider = getImageProvider(d.provider);
+    const provider = await getImageProvider(d.provider, d.modelId);
     return runProviderJob({
       ctx,
       kind: "image",
       decision: d,
-      prompt: scene.imagePrompt,
+      prompt: shot.prompt,
       outputPath,
       create: async () =>
         provider.createImage({
           projectId: project.id,
           sceneId: scene.id,
           model: d.modelId,
-          prompt: scene.imagePrompt,
-          negativePrompt: "",
+          prompt: shot.prompt,
+          negativePrompt: shot.negativePrompt,
           width: target.width,
           height: target.height,
-          seed: undefined,
-          referenceImages: [],
+          // A character's own seed only helps when exactly one character is in
+          // the shot; with two it biases the image toward whichever seed we
+          // picked, so we let the references carry the consistency instead.
+          seed:
+            shot.characters.length === 1
+              ? (shot.characters[0]?.seed ?? undefined)
+              : undefined,
+          referenceImages: shot.referenceImages,
           outputPath,
         }),
       poll: (id) => provider.getJobStatus(id),
@@ -445,7 +498,7 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
     });
   });
 
-  await saveAsset({ ctx, kind: "image", decision: used, prompt: scene.imagePrompt, asset: result });
+  await saveAsset({ ctx, kind: "image", decision: used, prompt: shot.prompt, asset: result });
   await prisma.scene.update({
     where: { id: scene.id },
     data: {
@@ -457,6 +510,264 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
     },
   });
   return result.filePath;
+}
+
+export interface SceneImageRequest {
+  prompt: string;
+  negativePrompt: string;
+  /** Absolute paths, already trimmed to what the provider will accept. */
+  referenceImages: string[];
+  /** Every character in frame, in reference-priority order. */
+  characters: CharacterSheet[];
+  /** Characters whose approved master is being sent with this request. */
+  referencedCharacters: string[];
+  /** In frame but with no approved master, so only described in words. */
+  unreferencedCharacters: string[];
+  /**
+   * Characters named in the scene text but missing from `charactersPresent`,
+   * which this call added back. Surfaced so the UI can say what it corrected.
+   */
+  repairedCharacters: string[];
+  /** In frame, but dropped from the reference list by the provider's cap. */
+  droppedByLimit: string[];
+  /** Listed by the script but never staged, so removed from this image. */
+  trimmedCharacters: string[];
+}
+
+/**
+ * Assemble everything a scene image needs to stay on-model.
+ *
+ * The text model writes `imagePrompt` describing the action, but it is not
+ * allowed to describe what the characters look like - that comes from the
+ * stored character sheets and the approved master images, every single time.
+ * Exported so the storyboard UI can show the operator the exact prompt that
+ * will be sent before any money is spent.
+ *
+ * Presence comes from `charactersPresent`, never from who has a line. A
+ * character reacting silently in the background is drawn just as often as the
+ * one talking, and needs their reference just as much.
+ */
+export async function buildSceneImageRequest(
+  scene: Pick<
+    Scene,
+    | "imagePrompt"
+    | "visualDescription"
+    | "camera"
+    | "characterAction"
+    | "charactersPresentJson"
+    | "speakingCharactersJson"
+    | "primaryCharactersJson"
+  >,
+  stylePresetId: string | null,
+  /** How many reference images the provider will accept. */
+  referenceLimit = MAX_REFERENCES_SENT,
+): Promise<SceneImageRequest> {
+  const stored = sceneCharacters(scene);
+  const sceneText = [
+    scene.visualDescription,
+    scene.imagePrompt,
+    scene.characterAction,
+  ].join(" ");
+
+  const { lists: repairedLists, repaired } = await repairSceneCharacters(
+    stored,
+    sceneText,
+  );
+  // Only the staging text decides who is drawn - the same text that becomes the
+  // subject of the prompt. Boilerplate listing every character by name would
+  // defeat the trim entirely, so imagePrompt is excluded here.
+  const { lists, trimmed } = trimUnusedCharacters(
+    repairedLists,
+    [scene.visualDescription, scene.characterAction].join(" "),
+  );
+
+  // Priority order decides who keeps a reference image when the provider caps
+  // the count: the focus of the shot first, then whoever speaks, then the rest.
+  const ordered = referencePriority(lists);
+  const [characters, stylePrompt] = await Promise.all([
+    getCharacterSheetsByName(ordered),
+    resolveStylePrompt(stylePresetId),
+  ]);
+
+  // `visualDescription` is the scene; it is never optional.
+  //
+  // The old order preferred `imagePrompt` and fell back to `visualDescription`
+  // only when it was empty - but real text models fill `imagePrompt` with style
+  // and character boilerplate ("3D cartoon style... Characters: Max, Leo as
+  // defined"), which is never empty and carries no action. The result was that
+  // "Max holds an enormous jar of beans" never reached the image API at all,
+  // and every scene came back as a plain-background character line-up.
+  //
+  // The model's own `imagePrompt` is dropped on purpose: this pipeline already
+  // supplies the style preset and the canonical character sheets, so including
+  // it duplicates both and crowds out the part only it can provide.
+  const action = [scene.visualDescription, scene.characterAction]
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0)
+    .join(" ");
+
+  // Every character in frame gets their full profile in the prompt, whether or
+  // not a reference image survives the cap.
+  const prompt = buildScenePrompt({
+    sceneDescription: action.length > 0 ? action : scene.imagePrompt,
+    characters,
+    stylePrompt,
+    camera: scene.camera,
+  });
+
+  // Only approved references are ever sent. An unapproved master would quietly
+  // become the thing every later scene is matched against.
+  const withMaster = characters.filter((c) => c.primaryReference !== null);
+  const sent = withMaster.slice(0, referenceLimit);
+  const dropped = withMaster.slice(referenceLimit);
+
+  return {
+    prompt,
+    negativePrompt: buildNegativePrompt(characters),
+    referenceImages: sent.map((c) =>
+      referenceAbsolutePath(c.primaryReference as string),
+    ),
+    characters,
+    referencedCharacters: sent.map((c) => c.name),
+    unreferencedCharacters: characters
+      .filter((c) => c.primaryReference === null)
+      .map((c) => c.name),
+    repairedCharacters: repaired,
+    droppedByLimit: dropped.map((c) => c.name),
+    trimmedCharacters: trimmed,
+  };
+}
+
+/**
+ * Add characters the scene text clearly shows but the lists forgot.
+ *
+ * The text model lists who speaks far more reliably than who is visible, so a
+ * scene whose description says "Leo folds his arms" can arrive with Leo absent
+ * from `charactersPresent`. Generating from that would send no reference for
+ * him and let the model invent his face - the exact inconsistency this step
+ * exists to stop. Repairing beats refusing: the scene is otherwise fine, and
+ * the correction is reported rather than done silently.
+ */
+export async function repairSceneCharacters(
+  lists: SceneCharacterLists,
+  sceneText: string,
+): Promise<{ lists: SceneCharacterLists; repaired: string[] }> {
+  const known = await prisma.character.findMany({
+    where: { enabled: true },
+    select: { name: true },
+  });
+
+  const present = [...lists.present];
+  const repaired: string[] = [];
+
+  for (const { name } of known) {
+    if (present.some((n) => n.toLowerCase() === name.toLowerCase())) continue;
+    if (!mentionsCharacter(sceneText, name)) continue;
+    present.push(name);
+    repaired.push(name);
+  }
+
+  if (repaired.length > 0) {
+    await logger.warn({
+      event: "scene.characters_repaired",
+      message:
+        `Cảnh nhắc tới ${repaired.join(", ")} nhưng không liệt kê trong ` +
+        `charactersPresent. Đã bổ sung trước khi tạo ảnh.`,
+      data: { added: repaired },
+    });
+  }
+
+  return {
+    lists: { ...lists, present },
+    repaired,
+  };
+}
+
+/**
+ * Drop characters the scene lists but never actually stages.
+ *
+ * The mirror image of the repair above, and just as necessary. Told to list
+ * everyone visible, the text model over-corrected and began pasting the third
+ * character into scenes whose description never mentions them - so they would
+ * be drawn silently at the edge of frame, costing a reference image and
+ * pushing the real subjects towards the crop.
+ *
+ * The test is deliberately narrow: only a character who is absent from the
+ * scene's own staging text AND has no line AND is not the focus can be
+ * dropped. Anyone the scene actually uses survives.
+ */
+export function trimUnusedCharacters(
+  lists: SceneCharacterLists,
+  stagingText: string,
+): { lists: SceneCharacterLists; trimmed: string[] } {
+  // Silence is not evidence of absence.
+  //
+  // A description like "a funny moment" names nobody, and trimming against it
+  // would drop every silent character - recreating, from the other direction,
+  // the exact bug this whole area exists to prevent. Only text that names
+  // characters is treated as a statement about the cast.
+  const namesSomeone = lists.present.some((name) =>
+    mentionsCharacter(stagingText, name),
+  );
+  if (!namesSomeone) return { lists, trimmed: [] };
+
+  const trimmed: string[] = [];
+  const kept = lists.present.filter((name) => {
+    const speaks = lists.speaking.some((n) => equals(n, name));
+    const leads = lists.primary.some((n) => equals(n, name));
+    if (speaks || leads) return true;
+    if (mentionsCharacter(stagingText, name)) return true;
+    trimmed.push(name);
+    return false;
+  });
+
+  // Never empty the cast. A scene whose description names nobody would
+  // otherwise lose every character and be drawn as an empty room.
+  if (kept.length === 0) return { lists, trimmed: [] };
+
+  return { lists: { ...lists, present: kept }, trimmed };
+}
+
+function equals(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * Whether a body of scene text names this character.
+ *
+ * Word-boundary matching, so "Mia" does not fire on "Amiable" and "Max" does
+ * not fire on "maximum".
+ */
+export function mentionsCharacter(text: string, name: string): boolean {
+  // Split into words rather than building a regex: character names are
+  // arbitrary user input, and a name containing a regex metacharacter would
+  // either throw or match the wrong thing.
+  const target = name.trim().toLowerCase();
+  if (target.length === 0) return false;
+  const words = text.toLowerCase().split(/[^a-z0-9]+/);
+  return words.includes(target);
+}
+
+const DEFAULT_STYLE_PROMPT =
+  "consistent 3D cartoon style, bright colours, soft even lighting";
+
+async function resolveStylePrompt(stylePresetId: string | null): Promise<string> {
+  if (!stylePresetId) return DEFAULT_STYLE_PROMPT;
+  const preset = await prisma.stylePreset.findUnique({
+    where: { id: stylePresetId },
+  });
+  if (!preset) return DEFAULT_STYLE_PROMPT;
+  // A preset is several fields, not one string. Joining them here keeps the
+  // prompt builder ignorant of how presets are stored.
+  return [
+    preset.positivePrompt,
+    preset.lightingStyle,
+    preset.cameraLanguage,
+    preset.visualTone,
+  ]
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0)
+    .join(", ");
 }
 
 // ------------------------------------------------------------------ video ---
@@ -481,7 +792,7 @@ export async function generateSceneVideo(sceneId: string): Promise<string> {
     : undefined;
 
   const { result, used } = await withFallback(ctx, decision, async (d) => {
-    const provider = getVideoProvider(d.provider);
+    const provider = await getVideoProvider(d.provider, d.modelId);
     return runProviderJob({
       ctx,
       kind: "video",
@@ -548,9 +859,11 @@ export async function generateSceneVoice(sceneId: string): Promise<string | null
     { provider: scene.voiceProvider, model: scene.voiceModel },
   );
 
-  const characterIds = parseJson<string[]>(scene.characterIdsJson, []);
-  const character = characterIds[0]
-    ? await prisma.character.findFirst({ where: { name: characterIds[0] } })
+  // Voice follows the SPEAKING list, not presence: a character standing
+  // silently in frame must be drawn but must not be given a line.
+  const speaking = sceneCharacters(scene).speaking;
+  const character = speaking[0]
+    ? await prisma.character.findFirst({ where: { name: speaking[0] } })
     : null;
 
   const outputPath = path.join(
@@ -643,7 +956,7 @@ export async function evaluateScene(sceneId: string): Promise<QualityOutcome | n
       model: decision.modelId,
       videoPath,
       prompt: scene.videoPrompt,
-      expectedCharacters: parseJson<string[]>(scene.characterIdsJson, []),
+      expectedCharacters: sceneCharacters(scene).present,
     }),
   );
 

@@ -1,11 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { isMockMode } from "@/lib/env";
+import { OPENAI_COMPATIBLE_PROVIDERS } from "@/providers/text-config";
+import { IMAGE_PROVIDERS, splitModelTier } from "@/providers/image-config";
 import {
-  buildTextConfig,
-  OPENAI_COMPATIBLE_PROVIDERS,
-  TextConfigError,
-} from "@/providers/text-config";
+  ProviderConfigError,
+  resolveApiKey,
+  resolveBaseUrl,
+} from "@/providers/provider-credentials";
+import type { ModelType } from "@/domain/enums";
 
 /**
  * Ask a provider which models it actually offers.
@@ -45,10 +48,29 @@ interface ModelsResponse {
  * Models that are not chat models. Listing endpoints mix in speech, embedding
  * and moderation models, none of which can write a script.
  */
-const NON_CHAT = /whisper|tts|embed|guard|moderation|orpheus|rerank|distil/i;
+const NON_CHAT = /whisper|tts|embed|guard|moderation|orpheus|rerank|distil|image|dall-e|video|sora/i;
 
-export async function discoverTextModels(
+/** Image generation models, by the only signal a listing endpoint gives: the name. */
+const IMAGE_MODEL = /image|dall-e/i;
+
+export function discoverTextModels(providerName: string): Promise<ModelDiscovery> {
+  return discoverModels(providerName, "text");
+}
+
+export function discoverImageModels(providerName: string): Promise<ModelDiscovery> {
+  return discoverModels(providerName, "image");
+}
+
+/**
+ * Ask one provider for its live model list, filtered to one media type.
+ *
+ * Credentials come from the shared resolver rather than a type-specific config
+ * builder, so discovery works before any model of that type has been priced or
+ * enabled - which is the whole point: you cannot price a model you cannot see.
+ */
+export async function discoverModels(
   providerName: string,
+  type: ModelType,
 ): Promise<ModelDiscovery> {
   if (isMockMode()) {
     return {
@@ -61,57 +83,45 @@ export async function discoverTextModels(
     };
   }
 
-  if (!OPENAI_COMPATIBLE_PROVIDERS.has(providerName)) {
+  const supported =
+    type === "image" ? IMAGE_PROVIDERS : OPENAI_COMPATIBLE_PROVIDERS;
+  if (!supported.has(providerName)) {
     return {
       provider: providerName,
       ok: false,
-      error: `Nhà cung cấp "${providerName}" chưa được tích hợp cho loại text.`,
+      error: `Nhà cung cấp "${providerName}" chưa được tích hợp cho loại ${type}.`,
       models: [],
       stale: [],
     };
   }
 
-  let config;
+  let apiKey: string;
+  let baseUrl: string;
   try {
-    // Any enabled model of this provider will do - we only need its base URL and
-    // key, not the model itself.
-    const anyModel = await prisma.modelRegistry.findFirst({
-      where: { provider: providerName, type: "text" },
-      // Prefer an enabled row when there is one, but do not require it.
-      orderBy: { enabled: "desc" },
-    });
-    if (!anyModel) {
-      return {
-        provider: providerName,
-        ok: false,
-        error: `Chưa có model text nào của ${providerName} trong bảng Mô hình AI.`,
-        models: [],
-        stale: [],
-      };
-    }
-    config = await buildTextConfig(providerName, anyModel.modelId, false);
+    [apiKey, baseUrl] = await Promise.all([
+      resolveApiKey(providerName),
+      resolveBaseUrl(providerName),
+    ]);
   } catch (err) {
     return {
       provider: providerName,
       ok: false,
       error:
-        err instanceof TextConfigError
+        err instanceof ProviderConfigError || err instanceof Error
           ? err.message
-          : err instanceof Error
-            ? err.message
-            : String(err),
+          : String(err),
       models: [],
       stale: [],
     };
   }
 
-  const url = `${config.baseUrl.replace(/\/+$/, "")}/models`;
+  const url = `${baseUrl.replace(/\/+$/, "")}/models`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
 
   try {
     const headers: Record<string, string> = {};
-    if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
     const response = await fetch(url, { headers, signal: controller.signal });
     if (!response.ok) {
@@ -132,12 +142,19 @@ export async function discoverTextModels(
         contextWindow: m.context_window ?? null,
         ownedBy: m.owned_by ?? null,
       }))
-      .filter((m) => m.id.length > 0 && !NON_CHAT.test(m.id));
+      .filter((m) =>
+        m.id.length > 0 &&
+        (type === "image" ? IMAGE_MODEL.test(m.id) : !NON_CHAT.test(m.id)),
+      );
 
     const registry = await prisma.modelRegistry.findMany({
-      where: { provider: providerName, type: "text" },
+      where: { provider: providerName, type },
       select: { modelId: true },
     });
+    // Image rows carry a quality-tier suffix that the provider knows nothing
+    // about, so compare on the bare API model name.
+    const bare = (id: string) =>
+      type === "image" ? splitModelTier(id).apiModel : id;
     const registryIds = new Set(registry.map((r) => r.modelId));
     const liveIds = new Set(ids.map((m) => m.id));
 
@@ -147,12 +164,12 @@ export async function discoverTextModels(
 
     // A registry row the provider no longer serves. Calling it gives a 404 at
     // the worst possible moment, so surface it before that happens.
-    const stale = [...registryIds].filter((id) => !liveIds.has(id)).sort();
+    const stale = [...registryIds].filter((id) => !liveIds.has(bare(id))).sort();
 
     await logger.info({
       event: "provider.models_listed",
       provider: providerName,
-      message: `${models.length} model khả dụng, ${stale.length} model trong bảng đã lỗi thời.`,
+      message: `${type}: ${models.length} model khả dụng, ${stale.length} model trong bảng đã lỗi thời.`,
     });
 
     return { provider: providerName, ok: true, models, stale };
