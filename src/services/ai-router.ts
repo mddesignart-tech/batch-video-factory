@@ -1,0 +1,356 @@
+import type { ModelRegistry } from "@prisma/client";
+import type {
+  Complexity,
+  ModelType,
+  QualityMode,
+  RouterStrategy,
+  SpendPriority,
+} from "@/domain/enums";
+import { costForModel, qualityIndex, valueIndex, type UsageUnits } from "./pricing";
+import { round } from "@/lib/utils";
+
+/**
+ * AIRouterService - decides which provider/model generates each individual
+ * scene.
+ *
+ * The product principle is "quality per dollar", not "cheapest" and not "best".
+ * Concretely that means:
+ *   - every scene is routed on its own, so one video can mix a cheap model for
+ *     a static explanation card with a stronger one for the punchline;
+ *   - each mode sets a *minimum acceptable quality* that scales with the scene's
+ *     complexity and spend priority, and then buys the best value at or above
+ *     that floor rather than the most expensive option available;
+ *   - the remaining budget is a hard ceiling that can force a downgrade, and if
+ *     even the cheapest feasible model does not fit, routing fails loudly
+ *     instead of silently overspending.
+ */
+
+export interface RouteContext {
+  type: ModelType;
+  qualityMode: QualityMode;
+  strategy: RouterStrategy;
+  complexity: Complexity;
+  spendPriority: SpendPriority;
+  durationSeconds: number;
+  characterCount: number;
+  /** Character identity must hold across scenes - weights consistency. */
+  consistencyRequired: boolean;
+  needs1080p: boolean;
+  needsReferenceImage: boolean;
+  /** Dollars still available for this project/batch. */
+  budgetRemaining: number;
+  usage: UsageUnits;
+  /** Provider names currently usable (key present, enabled, not rate limited). */
+  availableProviders: string[];
+  /** Manual pin. Honoured in CUSTOM/MANUAL, and respected everywhere else too. */
+  manualProvider?: string | null;
+  manualModel?: string | null;
+}
+
+export interface RouteCandidate {
+  provider: string;
+  modelId: string;
+  displayName: string;
+  estimatedCost: number;
+  quality: number;
+  value: number;
+}
+
+export interface RouteDecision {
+  provider: string;
+  modelId: string;
+  displayName: string;
+  estimatedCost: number;
+  quality: number;
+  /** Human-readable Vietnamese explanation shown in the storyboard editor. */
+  reason: string;
+  /** Ordered alternates to try if the chosen model fails. */
+  fallbacks: RouteCandidate[];
+  /** True when the budget forced something weaker than the mode wanted. */
+  downgraded: boolean;
+}
+
+export class RoutingError extends Error {
+  constructor(
+    message: string,
+    readonly code:
+      | "no_models"
+      | "no_capable_models"
+      | "over_budget"
+      | "manual_not_found",
+  ) {
+    super(message);
+    this.name = "RoutingError";
+  }
+}
+
+/**
+ * Minimum quality index a model must reach to be considered, given how much the
+ * viewer will notice this particular scene. This is the heart of "use cheaper AI
+ * where the difference is not noticeable".
+ */
+export function qualityFloor(
+  mode: QualityMode,
+  complexity: Complexity,
+  spendPriority: SpendPriority,
+): number {
+  const complexityBump =
+    complexity === "HIGH" ? 1.5 : complexity === "MEDIUM" ? 0.75 : 0;
+  const priorityBump =
+    spendPriority === "HIGH" ? 1.5 : spendPriority === "LOW" ? -0.75 : 0;
+
+  const base: Record<QualityMode, number> = {
+    // Economy takes usable output and stops there; it only escalates when the
+    // scene genuinely cannot be produced by a weak model.
+    ECONOMY: 3,
+    BALANCED: 5,
+    QUALITY: 7,
+    CUSTOM: 5,
+  };
+
+  const floor = base[mode] + complexityBump + priorityBump;
+  // Economy refuses to be talked into premium tiers by a busy scene.
+  const cap = mode === "ECONOMY" ? 5.5 : 9.5;
+  return Math.min(cap, Math.max(1, round(floor, 2)));
+}
+
+/** Does this model physically support what the scene needs? */
+export function isCapable(model: ModelRegistry, ctx: RouteContext): boolean {
+  if (!model.enabled) return false;
+  if (model.type !== ctx.type) return false;
+  if (!ctx.availableProviders.includes(model.provider)) return false;
+
+  if (ctx.type === "video") {
+    if (model.maxDuration > 0 && ctx.durationSeconds > model.maxDuration) {
+      return false;
+    }
+    if (ctx.needsReferenceImage && !model.supportsImageToVideo) return false;
+    if (!ctx.needsReferenceImage && !model.supportsTextToVideo && !model.supportsImageToVideo) {
+      return false;
+    }
+    if (ctx.needs1080p && !model.supports1080p) return false;
+    // Two characters that must stay on-model need explicit reference support.
+    if (
+      ctx.consistencyRequired &&
+      ctx.characterCount >= 2 &&
+      !model.supportsCharacterReference &&
+      !model.supportsReferenceImage
+    ) {
+      return false;
+    }
+  }
+
+  if (ctx.type === "image" && ctx.consistencyRequired) {
+    if (!model.supportsReferenceImage && !model.supportsCharacterReference) {
+      return false;
+    }
+  }
+
+  if (ctx.type === "upscale" && !model.supportsUpscale) return false;
+
+  return true;
+}
+
+function toCandidate(model: ModelRegistry, ctx: RouteContext): RouteCandidate {
+  const estimatedCost = costForModel(model, ctx.usage);
+  return {
+    provider: model.provider,
+    modelId: model.modelId,
+    displayName: model.displayName,
+    estimatedCost,
+    quality: qualityIndex(model),
+    value: valueIndex(model, estimatedCost),
+  };
+}
+
+const byCheapest = (a: RouteCandidate, b: RouteCandidate) =>
+  a.estimatedCost - b.estimatedCost || b.quality - a.quality;
+
+const byQuality = (a: RouteCandidate, b: RouteCandidate) =>
+  b.quality - a.quality || a.estimatedCost - b.estimatedCost;
+
+const byValue = (a: RouteCandidate, b: RouteCandidate) =>
+  b.value - a.value || b.quality - a.quality;
+
+export function routeScene(
+  models: ModelRegistry[],
+  ctx: RouteContext,
+): RouteDecision {
+  if (models.length === 0) {
+    throw new RoutingError(
+      "Chưa có mô hình AI nào trong hệ thống. Hãy thêm mô hình ở mục Mô hình AI.",
+      "no_models",
+    );
+  }
+
+  const capable = models.filter((m) => isCapable(m, ctx));
+  if (capable.length === 0) {
+    throw new RoutingError(
+      `Không có mô hình ${ctx.type} nào đáp ứng yêu cầu của cảnh này ` +
+        `(${ctx.durationSeconds}s, ${ctx.characterCount} nhân vật).`,
+      "no_capable_models",
+    );
+  }
+
+  // A manual pin short-circuits scoring, but still has to be capable and to fit
+  // the budget - a pinned model is not a licence to overspend.
+  const wantsManual =
+    ctx.strategy === "MANUAL" ||
+    (ctx.manualProvider != null && ctx.manualModel != null);
+
+  if (wantsManual) {
+    const pinned = capable.find(
+      (m) => m.provider === ctx.manualProvider && m.modelId === ctx.manualModel,
+    );
+    if (!pinned) {
+      throw new RoutingError(
+        `Không tìm thấy mô hình được chọn thủ công (${ctx.manualProvider}/${ctx.manualModel}) ` +
+          `hoặc mô hình đó không phù hợp với cảnh này.`,
+        "manual_not_found",
+      );
+    }
+    const candidate = toCandidate(pinned, ctx);
+    assertAffordable(candidate, ctx);
+    return {
+      ...candidate,
+      reason: "Người dùng chọn thủ công",
+      fallbacks: [],
+      downgraded: false,
+    };
+  }
+
+  const candidates = capable.map((m) => toCandidate(m, ctx));
+  const strategy = effectiveStrategy(ctx);
+
+  // The quality floor is the AUTO heuristic: it is how a mode decides that this
+  // particular scene deserves a better model. When the operator names a strategy
+  // explicitly they are overriding that judgement, so the floor does not apply -
+  // asking for CHEAPEST and being handed the premium model would be a bug, not a
+  // safeguard.
+  const floor =
+    ctx.strategy === "AUTO"
+      ? qualityFloor(ctx.qualityMode, ctx.complexity, ctx.spendPriority)
+      : 0;
+  const atOrAboveFloor = candidates.filter((c) => c.quality >= floor);
+  // If nothing clears the bar, take the best available rather than failing: a
+  // usable cheap clip beats no clip at all.
+  const pool = atOrAboveFloor.length > 0 ? atOrAboveFloor : candidates;
+  const relaxedFloor = atOrAboveFloor.length === 0;
+  const sorter =
+    strategy === "CHEAPEST"
+      ? byCheapest
+      : strategy === "BEST_QUALITY"
+        ? byQuality
+        : byValue;
+
+  const ranked = [...pool].sort(sorter);
+  let chosen = ranked[0]!;
+  let downgraded = false;
+
+  // Budget ceiling. Step down through the affordable options rather than
+  // refusing outright - a cheaper scene is better than a stalled project.
+  if (chosen.estimatedCost > ctx.budgetRemaining) {
+    const affordable = candidates
+      .filter((c) => c.estimatedCost <= ctx.budgetRemaining)
+      .sort(byValue);
+    const next = affordable[0];
+    if (!next) {
+      throw new RoutingError(
+        `Chi phí tối thiểu cho cảnh này là ${formatMoney(
+          Math.min(...candidates.map((c) => c.estimatedCost)),
+        )} nhưng ngân sách còn lại chỉ ${formatMoney(ctx.budgetRemaining)}.`,
+        "over_budget",
+      );
+    }
+    chosen = next;
+    downgraded = true;
+  }
+
+  const fallbacks = ranked
+    .filter(
+      (c) =>
+        !(c.provider === chosen.provider && c.modelId === chosen.modelId) &&
+        c.estimatedCost <= ctx.budgetRemaining,
+    )
+    .slice(0, 3);
+
+  return {
+    ...chosen,
+    reason: explain(ctx, strategy, floor, chosen, { downgraded, relaxedFloor }),
+    fallbacks,
+    downgraded,
+  };
+}
+
+function effectiveStrategy(ctx: RouteContext): RouterStrategy {
+  if (ctx.strategy !== "AUTO") return ctx.strategy;
+  switch (ctx.qualityMode) {
+    case "ECONOMY":
+      return "CHEAPEST";
+    case "QUALITY":
+      return "BEST_QUALITY";
+    case "BALANCED":
+    case "CUSTOM":
+    default:
+      return "BEST_VALUE";
+  }
+}
+
+function assertAffordable(c: RouteCandidate, ctx: RouteContext): void {
+  if (c.estimatedCost > ctx.budgetRemaining) {
+    throw new RoutingError(
+      `Mô hình đã chọn tốn ${formatMoney(c.estimatedCost)} nhưng ngân sách còn lại chỉ ${formatMoney(
+        ctx.budgetRemaining,
+      )}.`,
+      "over_budget",
+    );
+  }
+}
+
+function explain(
+  ctx: RouteContext,
+  strategy: RouterStrategy,
+  floor: number,
+  chosen: RouteCandidate,
+  flags: { downgraded: boolean; relaxedFloor: boolean },
+): string {
+  const bits: string[] = [];
+
+  if (ctx.spendPriority === "HIGH") {
+    bits.push("cảnh quan trọng (hook/punchline) nên ưu tiên chất lượng");
+  } else if (ctx.spendPriority === "LOW") {
+    bits.push("cảnh phụ nên ưu tiên tiết kiệm");
+  }
+
+  if (ctx.complexity === "HIGH") {
+    bits.push("cảnh phức tạp, nhiều chuyển động/nhân vật");
+  } else if (ctx.complexity === "LOW") {
+    bits.push("cảnh đơn giản, mô hình rẻ là đủ");
+  }
+
+  const strategyLabel: Record<RouterStrategy, string> = {
+    AUTO: "tự động",
+    CHEAPEST: "chọn rẻ nhất",
+    BEST_VALUE: "chọn giá trị tốt nhất",
+    BEST_QUALITY: "chọn chất lượng cao nhất",
+    MANUAL: "thủ công",
+  };
+
+  bits.push(
+    `${strategyLabel[strategy]} với ngưỡng chất lượng ${floor.toFixed(1)}/10 ` +
+      `(mô hình đạt ${chosen.quality.toFixed(1)})`,
+  );
+
+  if (flags.relaxedFloor) {
+    bits.push("không có mô hình nào đạt ngưỡng nên dùng mô hình tốt nhất hiện có");
+  }
+  if (flags.downgraded) {
+    bits.push("đã hạ cấp mô hình để không vượt ngân sách");
+  }
+
+  return bits.join("; ");
+}
+
+function formatMoney(value: number): string {
+  return `$${value.toFixed(value > 0 && value < 0.01 ? 4 : 2)}`;
+}
