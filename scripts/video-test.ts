@@ -35,6 +35,7 @@ const KNOWN_FLAGS = new Set([
   "limit",
   "real",
   "dry-run",
+  "prompt-file",
 ]);
 
 function assertKnownFlags(): void {
@@ -240,6 +241,37 @@ async function main(): Promise<void> {
   if (dryRun) {
     console.log("\n  --dry-run: khong goi API.\n");
     return;
+  }
+
+  // A replacement prompt, written to the scene before generating.
+  //
+  // It has to go through the database rather than around it: the generation
+  // path reads the scene's own prompt, so a flag that changed only what this
+  // script printed would describe a request nobody made. The old prompt is
+  // echoed first so it can be put back.
+  const promptFile = arg("prompt-file", "");
+  if (promptFile !== "") {
+    const fsMod = await import("node:fs");
+    const pathMod = await import("node:path");
+    const abs = pathMod.isAbsolute(promptFile)
+      ? promptFile
+      : pathMod.join(process.cwd(), promptFile);
+    if (!fsMod.existsSync(abs)) {
+      console.log(`\n  [DUNG] Khong tim thay tep prompt ${abs}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    const next = fsMod.readFileSync(abs, "utf8").trim();
+    console.log("\n  ---- DOI PROMPT ----");
+    console.log(`  Prompt CU (${scene.videoPrompt.length} ky tu):`);
+    for (const l of scene.videoPrompt.split("\n")) console.log(`    | ${l}`);
+    console.log(`  Prompt MOI (${next.length} ky tu):`);
+    for (const l of next.split("\n")) console.log(`    > ${l}`);
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: { videoPrompt: next },
+    });
+    scene.videoPrompt = next;
   }
 
   // ---- one permit, for one create ---------------------------------------

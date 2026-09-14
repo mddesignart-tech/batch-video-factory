@@ -1,0 +1,9 @@
+Animate this image naturally.
+
+Leo remains in the same position and keeps the same face, glasses, hairstyle, clothing and body proportions.
+
+Leo gives one small friendly nod and a slight smile.
+
+Keep movement natural and clearly visible.
+
+Static camera. No camera movement. No new characters. No new objects. No text. No morphing. No body deformation. No face drift.
