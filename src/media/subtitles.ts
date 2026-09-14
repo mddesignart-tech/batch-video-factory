@@ -111,6 +111,40 @@ export function buildCuesFromAudio(
   return cues;
 }
 
+/**
+ * Cues taken straight from the scene timelines the audio was built from.
+ *
+ * This is the version to use once audio exists. `buildCuesFromAudio` above
+ * recomputes placement from line durations, which is fine but is a second
+ * implementation of the same arithmetic - and two implementations of "where
+ * does line 3 start" eventually disagree. Here the caption and the audio come
+ * from one source, so they cannot drift.
+ */
+export function cuesFromTimelines(
+  scenes: { entries: { startSec: number; endSec: number; text: string }[]; sceneDurationSec: number }[],
+): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  let offset = 0;
+  for (const scene of scenes) {
+    for (const entry of scene.entries) {
+      const text = entry.text.trim();
+      if (text.length === 0) continue;
+      cues.push({
+        startSeconds: round(offset + entry.startSec),
+        // A 60ms trim stops one caption flickering into the next.
+        endSeconds: round(offset + Math.max(entry.startSec + 0.3, entry.endSec - 0.06)),
+        text,
+      });
+    }
+    offset += scene.sceneDurationSec;
+  }
+  return cues;
+}
+
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
 /** Total runtime implied by measured audio, for checking against the video. */
 export function timelineLength(
   scenes: { plannedDuration: number; lines: SpokenLine[] }[],

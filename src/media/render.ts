@@ -10,6 +10,7 @@ import {
   supportsSubtitleBurn,
 } from "./ffmpeg";
 import { buildASS, buildCues, buildSRT } from "./subtitles";
+import { DEFAULT_MIX, DUCK_RATIO, thresholdForDuck } from "./mix-config";
 import { ensureProjectDirs, projectSubdir } from "@/lib/paths";
 
 /**
@@ -170,7 +171,7 @@ export function buildConcatArgs(listFile: string, output: string): string[] {
  * Music level when nobody is speaking. Low enough to sit under dialogue, loud
  * enough to be heard in the gaps.
  */
-const MUSIC_BED_GAIN = 0.25;
+const MUSIC_BED_GAIN = DEFAULT_MIX.musicGain;
 
 /**
  * Duck the music under the voice, rather than just turning it down.
@@ -196,7 +197,8 @@ export function buildDuckFilter(): string {
   return [
     `[0:a]asplit=2[voice][key]`,
     `[1:a]volume=${MUSIC_BED_GAIN}[bed]`,
-    `[bed][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=350:makeup=1[ducked]`,
+    `[bed][key]sidechaincompress=threshold=${thresholdForDuck(DEFAULT_MIX.duckDb)}` +
+      `:ratio=${DUCK_RATIO}:attack=${DEFAULT_MIX.attackMs}:release=${DEFAULT_MIX.releaseMs}:makeup=1[ducked]`,
     // normalize=0 keeps the voice at full level. Without it amix halves both.
     `[voice][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`,
   ].join(";");
