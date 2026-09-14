@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { splitModelSize } from "@/domain/video-duration";
 import {
   LOCAL_PROVIDERS,
   ProviderConfigError,
@@ -61,19 +62,7 @@ export interface VideoModelConfig {
  * lets the router treat them as separate options with real cost differences -
  * and it makes the size an operator-visible fact rather than a hidden default.
  */
-export function splitModelSize(modelId: string): {
-  apiModel: string;
-  size: string;
-} {
-  const at = modelId.lastIndexOf(":");
-  if (at > 0) {
-    const suffix = modelId.slice(at + 1);
-    if (/^\d{3,4}x\d{3,4}$/.test(suffix)) {
-      return { apiModel: modelId.slice(0, at), size: suffix };
-    }
-  }
-  return { apiModel: modelId, size: "720x1280" };
-}
+export { splitModelSize };
 
 /** Parse "720x1280" into numbers, for resizing the keyframe to match. */
 export function parseSize(size: string): { width: number; height: number } {

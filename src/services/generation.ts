@@ -135,6 +135,10 @@ function routeFor(
         scene.complexity as "LOW" | "MEDIUM" | "HIGH",
         characterCount,
       ),
+    // Whether a keyframe EXISTS, not whether we would like one. Veo bills 8
+    // seconds instead of 4 when an image is attached, so the estimate has to
+    // follow the file on disk rather than the preference.
+    keyframeAvailable: Boolean(scene.imagePath),
     budgetRemaining: ctx.budgetRemaining,
     usage,
     availableProviders: ctx.availableProviders,
@@ -157,6 +161,16 @@ export function idempotencyKey(opts: {
   model: string;
   prompt: string;
   generation: number;
+  /**
+   * Billable request parameters that are not already implied by the model id.
+   *
+   * Video duration is the reason this exists: the same scene, prompt and model
+   * at 5 seconds and at 10 seconds are two different purchases, but they hashed
+   * to the same key, so the 10-second run would "resume" the finished
+   * 5-second job and hand back the short clip as though it were the new one.
+   * Output size does NOT belong here - it is already part of the model id.
+   */
+  variant?: string;
 }): string {
   return sha256(
     [
@@ -166,6 +180,7 @@ export function idempotencyKey(opts: {
       opts.model,
       sha256(opts.prompt),
       String(opts.generation),
+      opts.variant ?? "",
     ].join("|"),
   );
 }
@@ -175,6 +190,8 @@ interface RunOptions {
   kind: AssetKind | "quality";
   decision: RouteDecision;
   prompt: string;
+  /** Extra billable parameters for the idempotency key. See idempotencyKey. */
+  variant?: string;
   outputPath: string;
   create: () => Promise<{ externalId: string }>;
   poll: (externalId: string) => Promise<JobStatus>;
@@ -187,7 +204,7 @@ interface RunOptions {
  * This is the only place in the app that is allowed to start a paid generation.
  */
 async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
-  const { ctx, kind, decision, prompt, create, poll, download } = opts;
+  const { ctx, kind, decision, prompt, variant, create, poll, download } = opts;
   const key = idempotencyKey({
     sceneId: ctx.scene.id,
     kind,
@@ -195,6 +212,7 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
     model: decision.modelId,
     prompt,
     generation: ctx.scene.retryCount,
+    variant: variant ?? "",
   });
 
   const existing = await prisma.providerJob.findUnique({
@@ -798,6 +816,10 @@ export async function generateSceneVideo(sceneId: string): Promise<string> {
       kind: "video",
       decision: d,
       prompt: scene.videoPrompt,
+      // Duration is billable and is not implied by the model id, so it has to
+      // be part of the key: a 5s and a 10s clip of the same scene are two
+      // different purchases, not one job to resume.
+      variant: `${scene.duration}s`,
       outputPath,
       create: async () =>
         provider.createVideo({

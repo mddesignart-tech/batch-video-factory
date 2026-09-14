@@ -7,6 +7,7 @@ import type {
   SpendPriority,
 } from "@/domain/enums";
 import { costForModel, qualityIndex, valueIndex, type UsageUnits } from "./pricing";
+import { billedVideoSeconds, splitModelSize } from "@/domain/video-duration";
 import { round } from "@/lib/utils";
 
 /**
@@ -37,6 +38,12 @@ export interface RouteContext {
   consistencyRequired: boolean;
   needs1080p: boolean;
   needsReferenceImage: boolean;
+  /**
+   * Whether a keyframe image actually exists to send, as opposed to whether one
+   * is wanted. Only affects video billing (Veo's 8-second rule). Left undefined,
+   * `needsReferenceImage` stands in for it.
+   */
+  keyframeAvailable?: boolean;
   /** Dollars still available for this project/batch. */
   budgetRemaining: number;
   usage: UsageUnits;
@@ -187,8 +194,40 @@ export function isCapable(model: ModelRegistry, ctx: RouteContext): boolean {
   return true;
 }
 
+/**
+ * Usage for ONE candidate, with the vendor's own billing rules applied.
+ *
+ * Video vendors do not sell arbitrary lengths: Runway bills a 4-second scene as
+ * 5, and Veo forces 8 whenever a keyframe or 1080p is involved. Those rules are
+ * per-model, so the conversion has to happen per candidate rather than once for
+ * the whole route.
+ *
+ * This is the fix for a real accounting hole: the router used to price video as
+ * `price x seconds requested` and hand that figure to `assertCanSpend`, so the
+ * hard cap was being checked against a number 20% (Runway) to 50% (Veo) below
+ * the actual invoice.
+ */
+function usageForCandidate(
+  model: ModelRegistry,
+  ctx: RouteContext,
+): UsageUnits {
+  if (ctx.type !== "video" || ctx.usage.seconds === undefined) return ctx.usage;
+  const { size } = splitModelSize(model.modelId);
+  return {
+    ...ctx.usage,
+    seconds: billedVideoSeconds({
+      provider: model.provider,
+      size,
+      requestedSeconds: ctx.usage.seconds,
+      // Err towards "a keyframe is being sent". For Veo that is the more
+      // expensive branch, and over-quoting is the safe direction for a cap.
+      hasKeyframe: ctx.keyframeAvailable ?? ctx.needsReferenceImage,
+    }),
+  };
+}
+
 function toCandidate(model: ModelRegistry, ctx: RouteContext): RouteCandidate {
-  const estimatedCost = costForModel(model, ctx.usage);
+  const estimatedCost = costForModel(model, usageForCandidate(model, ctx));
   return {
     provider: model.provider,
     modelId: model.modelId,

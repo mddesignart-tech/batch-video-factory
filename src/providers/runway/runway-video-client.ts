@@ -4,6 +4,7 @@ import { ProviderError } from "@/providers/types";
 import { logger } from "@/lib/logger";
 import { classifyHttpError } from "@/providers/openai/openai-client";
 import type { VideoModelConfig } from "@/providers/video-config";
+import { RUNWAY_DURATIONS, nearestFrom } from "@/domain/video-duration";
 
 /**
  * HTTP client for the Runway video API.
@@ -36,8 +37,12 @@ export const RUNWAY_BASE_URL = "https://api.dev.runwayml.com/v1";
  * The API is the authority; an unsupported value comes back as a free 400.
  * It matters here because 4 seconds - our benchmark length - is not in the
  * list, so a Runway comparison runs 5 seconds and costs proportionally more.
+ *
+ * Defined in `@/domain/video-duration` and re-exported here. The router has to
+ * price this rule before any adapter is built, so the rule cannot live in the
+ * adapter - that split is what let the spend guard under-quote Runway by 20%.
  */
-export const RUNWAY_DURATIONS = [5, 10] as const;
+export { RUNWAY_DURATIONS };
 
 export interface RunwayTask {
   id: string;
@@ -65,9 +70,7 @@ export function toRunwayRatio(size: string): string {
 
 /** Nearest allowed duration, never rounding DOWN into a shorter paid clip. */
 export function nearestDuration(seconds: number): number {
-  const allowed = [...RUNWAY_DURATIONS];
-  const fit = allowed.find((d) => d >= seconds);
-  return fit ?? allowed[allowed.length - 1] ?? 5;
+  return nearestFrom(RUNWAY_DURATIONS, seconds);
 }
 
 /** A keyframe has to travel inside JSON here, so it becomes a data URI. */

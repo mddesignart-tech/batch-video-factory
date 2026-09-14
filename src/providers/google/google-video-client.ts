@@ -8,6 +8,11 @@ import {
   resolutionTierFor,
   type VideoModelConfig,
 } from "@/providers/video-config";
+import {
+  VEO_DURATIONS,
+  forcedToEightSeconds,
+  nearestFrom,
+} from "@/domain/video-duration";
 
 /**
  * HTTP client for Google's Veo video generation, via the Gemini API.
@@ -32,7 +37,7 @@ export const GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta
  * for that rule is unclear from the documentation, and it doubles the price if
  * it does. The API is the authority; an unsupported value is a free 400.
  */
-export const VEO_DURATIONS = [4, 6, 8] as const;
+export { VEO_DURATIONS };
 
 export interface VeoOperation {
   name: string;
@@ -45,8 +50,7 @@ export interface VeoOperation {
 
 /** Nearest allowed duration, never rounding DOWN into a shorter paid clip. */
 export function nearestDuration(seconds: number): number {
-  const fit = VEO_DURATIONS.find((d) => d >= seconds);
-  return fit ?? 8;
+  return nearestFrom(VEO_DURATIONS, seconds);
 }
 
 /**
@@ -56,12 +60,7 @@ export function nearestDuration(seconds: number): number {
  * that silently becomes 8 seconds costs twice the estimate, which is exactly
  * the kind of surprise the spend guards exist to prevent.
  */
-export function forcedToEightSeconds(
-  size: string,
-  hasKeyframe: boolean,
-): boolean {
-  return resolutionTierFor(size) !== "720p" || hasKeyframe;
-}
+export { forcedToEightSeconds };
 
 function headers(config: VideoModelConfig): Record<string, string> {
   return {
