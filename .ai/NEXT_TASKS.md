@@ -1,44 +1,72 @@
 # Việc tiếp theo
 
-Xếp theo thứ tự khuyến nghị.
+**Cập nhật:** 2026-09-14
 
 ---
 
-## ⛔ VIỆC ĐẦU TIÊN KHI MỞ LẠI: hai dòng trong .env
+## ⛔ VIỆC ĐẦU TIÊN KHI MỞ LẠI: trả lời ba câu hỏi phạm vi
 
-Adapter Runway và Google Veo **đã viết xong và có test**, nhưng chưa gọi API
-lần nào vì thiếu key. Tự thêm vào tệp `.env` ở thư mục gốc, **đừng gửi qua
-chat**:
+Người dùng đã chốt mục tiêu kế tiếp: **Batch Video Factory V1** — một nút bấm
+tạo nhiều video hoàn chỉnh hàng loạt. Kèm theo hai ràng buộc:
 
-```
-RUNWAY_API_KEY=...
-GOOGLE_AI_API_KEY=...
-```
+- **Không benchmark thêm model hay provider nào nữa.**
+- Không tự chạy request trả phí. `CREATE_ATTEMPT_TOKEN = 0`.
 
-Chỉ cần `RUNWAY_API_KEY` là đủ để chạy bước tiếp theo.
+Chưa viết code được vì ba câu hỏi sau quyết định kiến trúc, và người dùng phải
+là người trả lời:
 
-### Kế hoạch đã thống nhất
+1. **Nút đó chạy tới đâu?**
+   - (a) script → ảnh → video → voice → render, tự động toàn bộ
+   - (b) tự động tới trước bước video, dừng chờ duyệt rồi mới chi tiền video
+   - (c) chỉ batch các bước **miễn phí** (render, mix, subtitle) trên project đã
+     có sẵn media
+2. **Hạn mức cho một lần bấm nút là bao nhiêu?**
+3. **Mô hình cấp phép chi tiêu cho batch trông như thế nào?**
 
-1. **Test Runway trước** — rẻ nhất ($0,25 cho 5 giây), chuyên image-to-video,
-   không có luật ép thời lượng ẩn như Veo.
-2. Dùng đúng benchmark cũ: **Spill the beans cảnh 4**, keyframe
-   `images/5a55264f-00f0-4807-bb89-aec2d4a14c8a.png`, prompt motion của Test #2.
-3. So sánh với Sora-2 theo 6 tiêu chí đã dùng.
+Vì sao câu 3 không bỏ qua được: `CREATE_ATTEMPT_TOKEN` hiện tại được thiết kế
+cho **đúng một** request. Batch cần một mô hình khác hẳn. Và ngân sách còn
+$4,287240 trong khi một video 6 cảnh tốn khoảng $1,50–2,40 — tức chỉ đủ **tối đa
+2 video**, nên một nút chạy tự do có thể tiêu sạch hạn mức trong một lần bấm.
 
-### Lệnh cần nhớ
+---
+
+## Việc đã xong, không cần làm lại
+
+- Benchmark Runway gen4_turbo và gen4.5 — xong, lưu trong `VideoBenchmark`.
+- Benchmark Sora-2 cảnh 3 — đã thử, hỏng 400, **không chạy lại** (người dùng đã
+  dừng mọi benchmark).
+- Preflight Sora (`scripts/preflight-sora.ts`) — chỉ GET, chạy lại miễn phí bất
+  cứ lúc nào.
+- Pipeline âm thanh, loudness, ducking, subtitle timing — production ready.
+
+---
+
+## Nếu sau này quay lại chuyện Sora 6 giây
+
+Đừng POST để thử. Trước hết đọc lại `src/providers/openai/openai-video-client.ts`
+quanh chỗ `input_reference`, và so với hai job 4 giây đã đạt
+(`GET /videos` liệt kê miễn phí). Chỉ POST khi người dùng cấp token mới.
+
+---
+
+## Lệnh cần nhớ
+
 
 ```
 npm run video:benchmark                       # bảng giá mọi provider, miễn phí
 npm run project:status -- --idiom "Spill the beans"
 npm run video:test -- --scene 4 --dry-run     # kiểm tra, không gọi API
+npx tsx scripts/preflight-sora.ts --scene 3   # chỉ GET, miễn phí
+npx tsx scripts/routing-preview.ts            # định tuyến + chi phí, miễn phí
 npm run crop:check                            # đo vùng cắt 9:16
 ```
 
 ### Ngân sách
 
-Đã chi **$2,022494** / **$3,00** — còn **$0,977506**.
-Đủ cho Runway ($0,25) và Veo ($0,40), nhưng sau đó gần hết.
-Mọi script đều có cờ `--limit` chặn thật trước khi gọi API.
+Đã chi **$3,712760** / **$8,00** — còn **$4,287240**. Ví từng nhà cung cấp tách
+riêng, xem [STATE.md](STATE.md). Mọi script đều có cờ `--limit` chặn thật trước
+khi gọi API, và không script nào gọi được create khi
+`CREATE_ATTEMPT_TOKEN = 0`.
 
 ---
 

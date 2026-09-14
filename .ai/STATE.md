@@ -1,10 +1,76 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-13
-**Cột mốc hiện tại:** Milestone 2 — **Bước 3 (Video AI): SORA-2 ĐÃ KIỂM CHỨNG. Adapter Veo + Runway đã viết, chờ API key để so sánh.**
+**Cập nhật:** 2026-09-14
+**Cột mốc hiện tại:** Milestone 2 xong (Text + Image + Video + Voice đã chạy
+thật). **Kế tiếp: Batch Video Factory V1 — đang chờ người dùng chốt phạm vi.**
 
 Tài liệu này ghi tình trạng **thực tế**. Tính năng chỉ được đánh dấu hoạt động
 khi đã chạy thật và được kiểm chứng, không phải khi đã viết xong mã.
+
+---
+
+## Tiền và quyền chi tiêu
+
+```
+Hạn mức tổng : $8,00   đã chi $3,712760   còn $4,287240
+CREATE_ATTEMPT_TOKEN : 0
+```
+
+Ví **tách riêng từng nhà cung cấp, không bao giờ cộng chung**:
+
+| Ví | Đã chi | Số gọi | Số dư |
+|---|---|---|---|
+| openai | $1,993906 | 42 | $6,00 — **khai báo**, không phải live |
+| runway | $1,690000 | 3 | 831 credit — live, đọc từ `GET /organization` |
+| groq | $0,028854 | 24 | external, nhà cung cấp tự quản |
+
+Một lần người dùng xác nhận = **đúng một** lần POST create. Token bị tiêu ngay
+khi POST rời máy, bất kể thành công, 400, timeout hay lỗi provider.
+
+---
+
+## Benchmark video đã trả tiền
+
+Lưu trong bảng `VideoBenchmark`, seed lại được bằng
+`npx tsx scripts/record-benchmarks.ts`.
+
+| Model | Cảnh | Độ khó | Kết quả | Tiền |
+|---|---|---|---|---|
+| gen4_turbo | 4 | MEDIUM | hỏng `BAD_OUTPUT.CODE01` (2 lần) | $0 |
+| gen4_turbo | 5 | LOW | đạt — identity 10, camera 10, motion 4 | $0,25 |
+| gen4.5 | 3 | HIGH | đạt — composition **3**, Max rời khung ở 5,9s | $0,72 |
+| gen4.5 | 3 | HIGH | đạt — composition **9**, camera 7, artifacts 7 | $0,72 |
+| sora-2 | 3 | HIGH | **hỏng HTTP 400** `input_reference`, không tạo job | $0 |
+
+Hai lần gen4.5 là A/B có kiểm soát, **chỉ đổi prompt**: cho phép push-in →
+composition 3; khoá camera → composition 9. Bài học: phần lớn hiện tượng trôi
+camera là do prompt, phần còn lại là bản tính của model.
+
+Lần Sora hỏng là **lỗi của ta, không phải Sora từ chối cảnh**. Cùng đoạn code đã
+chạy đạt 2 lần ngày 13/09 với **4 giây** + keyframe, không có commit nào sửa nó
+từ đó. Khác biệt duy nhất: `seconds` 4 → 6. Giả thuyết là 6 không nằm trong tập
+độ dài hợp lệ — **chưa chứng minh được nếu không POST thêm lần nữa**.
+
+---
+
+## Định tuyến video — CHƯA CHỐT PRODUCTION
+
+| Độ khó | Hiện tại |
+|---|---|
+| LOW | `runway/gen4_turbo` — có bằng chứng tốt |
+| MEDIUM | **chưa chốt** |
+| HIGH | **chưa chốt** |
+
+`runway/gen4.5` ở trạng thái **pin-only**: còn trong registry, chọn tay được,
+router tự động không bao giờ chọn. Xem `NEEDS_EXPLICIT_PIN` trong
+`src/domain/video-suitability.ts`. Gỡ một dòng khỏi bảng đó chính là hành động
+đưa model lên production — chỉ làm khi có một lần chạy đạt ngưỡng, và lần chạy
+đó phải nằm trong bảng benchmark.
+
+`findContradictions()` trong `src/services/benchmark-evidence.ts` sẽ báo động nếu
+luật định tuyến mâu thuẫn với một clip đã trả tiền. Nó **chỉ** tính thất bại nói
+lên điều gì đó về model (`BAD_OUTPUT`, từ chối nội dung). Một lỗi 400/429/5xx hay
+timeout là lỗi phía ta hoặc lỗi nhất thời, không phải bản án cho model.
 
 ---
 
@@ -14,7 +80,7 @@ khi đã chạy thật và được kiểm chứng, không phải khi đã viế
 |---|---|---|
 | Lint | `npm run lint` | ✅ 0 lỗi |
 | Kiểu dữ liệu | `npm run typecheck` | ✅ 0 lỗi (TS strict, không dùng `any`) |
-| Kiểm thử | `npm run test` | ✅ **360 test / 14 tệp, tất cả đạt** |
+| Kiểm thử | `npm run test` | ✅ **636 test / 26 tệp, tất cả đạt** |
 | Build production | `npm run build` | ✅ 16 route biên dịch thành công |
 | Chạy thật | `npm start` | ✅ Đã kiểm tra thủ công trên Windows 11 |
 
