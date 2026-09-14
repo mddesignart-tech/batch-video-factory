@@ -25,6 +25,10 @@ function arg(name: string, fallback: string): string {
   return i >= 0 ? (process.argv[i + 1] ?? fallback) : fallback;
 }
 
+function flag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
+}
+
 function fmt(n: number, d = 2): string {
   return Number.isFinite(n) ? n.toFixed(d) : "?";
 }
@@ -63,11 +67,13 @@ async function main(): Promise<void> {
 
   console.log("\n========== NGHIEM THU RENDER PROJECT THAT ==========\n");
   console.log("  KHONG goi API tra phi nao. Chi FFmpeg cuc bo.\n");
-  console.log("  LUU Y QUAN TRONG VE AM THANH:");
-  console.log("  Project nay chua tung chay TTS, nen khong co giong dung loi thoai.");
-  console.log("  Script gan 3 tep giong CO SAN (Max/Leo/Mia) vao cac cau thoai de");
-  console.log("  kiem tra DUONG ONG. Noi dung noi KHONG khop chu tren man hinh.");
-  console.log("  Day la phep thu ky thuat, khong phai ban video de dang len.\n");
+  if (flag("use-existing")) {
+    console.log("  Dung giong DA CO trong du an (TTS that). Khong ghi de.\n");
+  } else {
+    console.log("  LUU Y: che do fixture - gan 3 tep giong co san vao cac cau thoai");
+    console.log("  de kiem tra duong ong. Noi dung noi KHONG khop chu tren man hinh.");
+    console.log("  Da chay TTS that roi thi dung --use-existing.\n");
+  }
 
   const absVoiceDir = path.isAbsolute(voiceDir)
     ? voiceDir
@@ -84,11 +90,31 @@ async function main(): Promise<void> {
   }
 
   // ---- 1. attach existing audio to the project's real dialogue lines -----
-  console.log("--- 1. GAN GIONG CO SAN VAO CAC CAU THOAI ---\n");
-
+  //
+  // Skipped entirely with --use-existing, which is the mode to use once real
+  // TTS has run: overwriting genuine speech with stand-in clips would throw
+  // away something that was paid for.
+  const useExisting = flag("use-existing");
   const characters = await prisma.character.findMany();
   const byName = new Map(characters.map((c) => [c.name, c]));
   let lineTotal = 0;
+
+  if (useExisting) {
+    console.log("--- 1. DUNG GIONG DA CO TRONG DU AN ---\n");
+    const rows = await prisma.dialogueLine.findMany({
+      where: { scene: { projectId: project.id }, status: "completed" },
+      orderBy: [{ scene: { sceneNumber: "asc" } }, { lineNumber: "asc" }],
+      include: { scene: { select: { sceneNumber: true } } },
+    });
+    lineTotal = rows.length;
+    for (const r of rows) {
+      console.log(
+        `  canh ${r.scene.sceneNumber} cau ${r.lineNumber}: ${fmt(r.durationSec)}s ` +
+          `(${r.provider}/${r.model}, giong ${r.voiceId})`,
+      );
+    }
+  } else {
+  console.log("--- 1. GAN GIONG CO SAN VAO CAC CAU THOAI ---\n");
 
   for (const scene of project.scenes) {
     if (scene.skipped) continue;
@@ -152,6 +178,7 @@ async function main(): Promise<void> {
       `  canh ${scene.sceneNumber}: ${lines.length} cau - ` +
         lines.map((l) => `${l.lineNumber}:${fmt(l.durationSec)}s`).join(", "),
     );
+  }
   }
   check("Co cau thoai de render", lineTotal > 0, `${lineTotal} cau`);
 
