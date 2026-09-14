@@ -46,6 +46,15 @@ export interface FittedPrompt {
   changed: boolean;
   originalChars: number;
   finalChars: number;
+  /**
+   * UTF-8 bytes of the final text.
+   *
+   * Reported alongside the character count because the two differ the moment a
+   * prompt contains anything outside ASCII, and a vendor limit may be stated in
+   * either. Runway's is in characters - its own error said so - but recording
+   * both means the next vendor's limit needs no guesswork.
+   */
+  finalBytes: number;
   /** Human-readable note for the log and the job record. */
   note: string;
 }
@@ -65,6 +74,7 @@ export function fitVideoPrompt(prompt: string, limit: number): FittedPrompt {
       changed: false,
       originalChars,
       finalChars: originalChars,
+      finalBytes: utf8Bytes(prompt),
       note: `${originalChars} ký tự, trong giới hạn ${limit}`,
     };
   }
@@ -92,8 +102,19 @@ export function fitVideoPrompt(prompt: string, limit: number): FittedPrompt {
     changed: true,
     originalChars,
     finalChars: rebuilt.length,
+    finalBytes: utf8Bytes(rebuilt),
     note:
       `rút gọn ${originalChars} -> ${rebuilt.length} ký tự cho giới hạn ${limit}: ` +
       `giữ nguyên bối cảnh + "Movement:", thay khối ràng buộc bằng bản ngắn`,
   };
+}
+
+/**
+ * UTF-8 byte length, without pulling in Node's Buffer.
+ *
+ * TextEncoder works in every runtime this code might end up in, and the count
+ * is the same one a server sees on the wire.
+ */
+function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length;
 }

@@ -22,6 +22,8 @@ import {
   getTask,
   isTerminal,
   nearestDuration,
+  toRunwayRatio,
+  RUNWAY_API_VERSION,
 } from "./runway-video-client";
 
 /**
@@ -118,6 +120,26 @@ export class RunwayVideoProvider implements VideoProvider {
         provider: this.config.providerName,
         model: this.config.model,
         estimatedCost: this.costFor(req.durationSeconds),
+        // The real request, minus the key and the base64 image. Recorded so a
+        // vendor-side failure can be investigated against what was sent rather
+        // than what was intended.
+        sentRequest: {
+          endpoint: `${this.config.baseUrl.replace(/\/+$/, "")}/image_to_video`,
+          apiVersion: RUNWAY_API_VERSION,
+          model: this.config.model,
+          ratio: toRunwayRatio(this.config.size),
+          size: this.config.size,
+          durationRequested: req.durationSeconds,
+          durationSent: nearestDuration(req.durationSeconds),
+          promptTextLength: fitted.text.length,
+          promptTextBytes: Buffer.byteLength(fitted.text, "utf8"),
+          promptText: fitted.text,
+          promptCompacted: fitted.changed,
+          keyframeBytes: fs.existsSync(prepared.path)
+            ? fs.statSync(prepared.path).size
+            : 0,
+          keyframeMime: "image/png",
+        },
       };
     } finally {
       if (prepared.temporary && fs.existsSync(prepared.path)) {

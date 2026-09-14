@@ -141,6 +141,23 @@ async function main(): Promise<void> {
   // A task id the operator typed that we have no record of is still worth
   // asking about - that is exactly the "we crashed before writing it down" case.
   const ids = jobs.map((j) => j.externalId).filter((x): x is string => Boolean(x));
+
+  // Earlier attempts on the same work. Runway has NO endpoint that lists tasks,
+  // so an id that is not in our own ledger is gone forever - which is exactly
+  // why these are kept, and why they must be checked too.
+  for (const job of jobs) {
+    try {
+      const prior: unknown = JSON.parse(job.previousExternalIds);
+      if (Array.isArray(prior)) {
+        for (const id of prior) {
+          if (typeof id === "string" && !ids.includes(id)) ids.push(id);
+        }
+      }
+    } catch {
+      /* a malformed history is not a reason to stop looking */
+    }
+  }
+
   if (onlyId && !ids.includes(onlyId)) ids.unshift(onlyId);
 
   console.log(`  Job se kiem tra: ${ids.length}\n`);
@@ -151,7 +168,9 @@ async function main(): Promise<void> {
 
   for (const id of ids) {
     const job = jobs.find((j) => j.externalId === id);
+    const isPrior = !job && jobs.some((j) => j.previousExternalIds.includes(id));
     console.log(`  ---- ${id} ----`);
+    if (isPrior) console.log("    (LAN THU TRUOC tren cung cong viec)");
     if (job) {
       console.log(`    So ghi cua ta : ${job.status}, uoc tinh $${job.estimatedCost.toFixed(6)}, da ghi $${job.actualCost.toFixed(6)}`);
       console.log(`    Tao luc       : ${job.createdAt.toISOString()}`);

@@ -92,3 +92,39 @@ describe("fitVideoPrompt", () => {
     expect(fitted.note).toContain(String(fitted.finalChars));
   });
 });
+
+describe("never cuts a character in half", () => {
+  /**
+   * The fit works by replacing whole paragraphs, never by slicing a string.
+   * That is what keeps it safe on non-ASCII text: a `slice` at a byte or code
+   * unit boundary can split a multi-byte character or an emoji into halves,
+   * and the vendor then receives a replacement character where a word was.
+   */
+  it("keeps text with accents and emoji intact", () => {
+    const movement =
+      "Movement: Max nhìn quanh, ngạc nhiên, rồi nhún vai thật rõ 🤷 và cười.";
+    const long = [SETUP, movement, BOILERPLATE, BOILERPLATE].join("\n\n");
+    const fitted = fitVideoPrompt(long, RUNWAY_MAX_PROMPT_CHARS);
+    expect(fitted.text).toContain(movement);
+    // A split surrogate pair shows up as a lone replacement character.
+    expect(fitted.text).not.toContain("\uFFFD");
+  });
+
+  it("reports UTF-8 bytes as well as characters", () => {
+    // They differ the moment the text leaves ASCII, and a vendor limit may be
+    // stated in either.
+    const fitted = fitVideoPrompt(`${SETUP}\n\nMovement: ngạc nhiên 🤷`, 1000);
+    expect(fitted.finalBytes).toBeGreaterThan(fitted.finalChars);
+  });
+
+  it("counts plain ASCII the same in both units", () => {
+    const fitted = fitVideoPrompt(FULL, RUNWAY_MAX_PROMPT_CHARS);
+    expect(fitted.finalBytes).toBe(fitted.finalChars);
+  });
+
+  it("the real scene 4 prompt fits by BOTH measures", () => {
+    const fitted = fitVideoPrompt(FULL, RUNWAY_MAX_PROMPT_CHARS);
+    expect(fitted.finalChars).toBeLessThanOrEqual(RUNWAY_MAX_PROMPT_CHARS);
+    expect(fitted.finalBytes).toBeLessThanOrEqual(RUNWAY_MAX_PROMPT_CHARS);
+  });
+});

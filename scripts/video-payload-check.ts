@@ -171,6 +171,28 @@ async function main(): Promise<void> {
   console.log(`    Ty le           : ${ratio.toFixed(4)}  (9:16 = ${(9 / 16).toFixed(4)})  ${Math.abs(ratio - 9 / 16) < 0.001 ? "KHOP 9:16" : "KHONG khop"}`);
   console.log(`    ffmpeg giai ma  : ${probeOk ? "SACH" : "CO LOI"}`);
 
+  // Orientation metadata. A rotation tag is a classic way for an image to look
+  // correct in a viewer and arrive at a vendor sideways: the pixels say one
+  // thing and the tag says another, and different decoders obey different ones.
+  try {
+    const rot = await ffprobe([
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream_tags=rotate:side_data=rotation:format_tags=Orientation",
+      "-of", "default=noprint_wrappers=1",
+      keptPath,
+    ]);
+    const tags = rot.stdout.trim();
+    console.log(
+      "    Metadata xoay   : " +
+        (tags.length === 0
+          ? "KHONG CO (tot - pixel la su that duy nhat)"
+          : tags.split(/\s+/).join(", ")),
+    );
+  } catch {
+    console.log("    Metadata xoay   : khong doc duoc");
+  }
+
   if (prepared.temporary) fs.rmSync(path.dirname(prepared.path), { recursive: true, force: true });
 
   // ---- 2. the payload, sanitized ----------------------------------------

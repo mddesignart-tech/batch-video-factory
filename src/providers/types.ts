@@ -29,6 +29,16 @@ export interface ProviderJob {
   provider: string;
   model: string;
   estimatedCost: number;
+  /**
+   * What the adapter ACTUALLY sent, with the key and any binary removed.
+   *
+   * The pipeline used to record the prompt it handed the adapter, which is not
+   * the same thing: Runway's prompt is compacted to fit a 1000-character limit
+   * before it is sent, so the stored request described a request that was never
+   * made. When a provider then fails for an unexplained reason, the one piece
+   * of evidence worth having is what actually went over the wire.
+   */
+  sentRequest?: Record<string, unknown>;
 }
 
 export interface JobStatus {

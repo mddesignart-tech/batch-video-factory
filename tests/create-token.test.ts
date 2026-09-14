@@ -7,6 +7,7 @@ import {
   peekCreateToken,
   revokeCreateToken,
 } from "@/services/create-token";
+import { needsCreatePermit } from "@/services/generation";
 
 /**
  * A benchmark authorised as ONE paid create issued four. All four happened to
@@ -157,5 +158,99 @@ describe("durability", () => {
     await grantCreateToken(GRANT);
     await revokeCreateToken();
     expect(await peekCreateToken()).toBeNull();
+  });
+});
+
+describe("one approval = exactly one create attempt", () => {
+  /**
+   * The rule the operator asked for, stated as tests.
+   *
+   * "It did not cost anything" is NOT the same as "you may try again". Each of
+   * these outcomes ends an approval, because each one was a real attempt to
+   * charge the account - and the four that cost nothing did so by the vendor's
+   * choice, not by ours.
+   */
+  const OUTCOMES = [
+    "success",
+    "HTTP 400",
+    "HTTP 401",
+    "HTTP 429",
+    "HTTP 500",
+    "timeout",
+    "vendor FAILED",
+    "provider internal error",
+  ];
+
+  for (const outcome of OUTCOMES) {
+    it(`is spent after a create that ended in: ${outcome}`, async () => {
+      await grantCreateToken(GRANT);
+      // The permit is taken BEFORE the request leaves, so the outcome cannot
+      // change whether it was spent.
+      await consumeCreateToken(REQ);
+      // ... the call then ends in `outcome`, whatever that was ...
+      await expect(consumeCreateToken(REQ)).rejects.toThrow(CreateTokenError);
+    });
+  }
+
+  it("two approvals allow exactly two creates, not three", async () => {
+    await grantCreateToken(GRANT);
+    await expect(consumeCreateToken(REQ)).resolves.toBeTruthy();
+    await grantCreateToken(GRANT);
+    await expect(consumeCreateToken(REQ)).resolves.toBeTruthy();
+    await expect(consumeCreateToken(REQ)).rejects.toThrow(CreateTokenError);
+  });
+});
+
+describe("read-only work never consumes an approval", () => {
+  /**
+   * Polling, status checks, downloads, model discovery and balance reads all
+   * happen many times per job. If any of them spent the permit, a single
+   * approved create could never finish.
+   */
+  it("needs NO permit in Mock Mode, whatever the kind", () => {
+    // The test suite runs in Mock Mode, which is itself the point: nothing can
+    // be billed, so requiring a permit would break every offline run for no
+    // benefit. Mock Mode is a hard gate ahead of this check.
+    expect(needsCreatePermit("video", "runway")).toBe(false);
+    expect(needsCreatePermit("image", "openai")).toBe(false);
+  });
+
+  it("in REAL mode, only a paid VIDEO create needs a permit", async () => {
+    const { resetEnvCache } = await import("@/lib/env");
+    const previous = process.env.AI_MOCK_MODE;
+    process.env.AI_MOCK_MODE = "false";
+    resetEnvCache();
+    try {
+      expect(needsCreatePermit("video", "runway")).toBe(true);
+      // Nothing else does: these are either not creates at all, or not the
+      // expensive kind the permit exists to guard.
+      expect(needsCreatePermit("image", "openai")).toBe(false);
+      expect(needsCreatePermit("audio", "openai")).toBe(false);
+      expect(needsCreatePermit("quality", "groq")).toBe(false);
+      // Nothing to authorise when nothing can be billed.
+      expect(needsCreatePermit("video", "ollama")).toBe(false);
+      expect(needsCreatePermit("video", "lmstudio")).toBe(false);
+    } finally {
+      process.env.AI_MOCK_MODE = previous;
+      resetEnvCache();
+    }
+  });
+
+  it("a permit survives any number of status reads", async () => {
+    await grantCreateToken(GRANT);
+    for (let i = 0; i < 25; i += 1) {
+      // Stands in for poll / download / balance / discovery: all of these read
+      // and none of them consume.
+      expect(await peekCreateToken()).not.toBeNull();
+    }
+    await expect(consumeCreateToken(REQ)).resolves.toBeTruthy();
+  });
+
+  it("the permit is gone once the create is attempted, even mid-poll", async () => {
+    // Polling after the create must not be able to resurrect an approval.
+    await grantCreateToken(GRANT);
+    await consumeCreateToken(REQ);
+    expect(await peekCreateToken()).toBeNull();
+    await expect(consumeCreateToken(REQ)).rejects.toThrow(CreateTokenError);
   });
 });

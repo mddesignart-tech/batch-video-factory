@@ -452,6 +452,14 @@ model ProviderJob {
   provider       String
   model          String
   kind           String
+  /// Task ids from earlier attempts on this same idempotency key, newest last.
+  ///
+  /// Runway has NO endpoint that lists tasks: a task id can only be looked up
+  /// if it was written down. Overwriting `externalId` on a retry therefore lost
+  /// the previous task forever, and with it any chance of finding out whether
+  /// it had been billed.
+  previousExternalIds String @default("[]")
+
   externalId     String?
   idempotencyKey String    @unique
   status         String    @default("pending")

@@ -198,7 +198,7 @@ export function idempotencyKey(opts: {
  * providers are excluded because there is nothing to authorise, and requiring a
  * permit there would break every offline run and every test for no benefit.
  */
-function needsCreatePermit(kind: string, provider: string): boolean {
+export function needsCreatePermit(kind: string, provider: string): boolean {
   if (kind !== "video") return false;
   if (isMockMode()) return false;
   return !isFreeVideoProvider(provider);
@@ -212,7 +212,17 @@ interface RunOptions {
   /** Extra billable parameters for the idempotency key. See idempotencyKey. */
   variant?: string;
   outputPath: string;
-  create: () => Promise<{ externalId: string }>;
+  /**
+   * Start the paid work.
+   *
+   * `sentRequest` is optional but strongly wanted: it is the sanitized record of
+   * what the adapter actually sent, which is the only useful evidence when a
+   * vendor fails for a reason it will not explain.
+   */
+  create: () => Promise<{
+    externalId: string;
+    sentRequest?: Record<string, unknown>;
+  }>;
   poll: (externalId: string) => Promise<JobStatus>;
   download: (externalId: string) => Promise<GeneratedAsset>;
 }
@@ -317,6 +327,36 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
 
     const created = await create();
     externalId = created.externalId;
+
+    // Never lose a previous task id.
+    //
+    // Runway has NO endpoint that lists tasks - a task can only be looked up by
+    // an id someone wrote down. Overwriting `externalId` on a retry therefore
+    // erased the earlier task permanently, and with it any way to find out
+    // whether it had been billed. Two real tasks were created during the first
+    // benchmark and only the second survived in the ledger.
+    const priorIds = parseJson<string[]>(existing?.previousExternalIds, []);
+    if (existing?.externalId && existing.externalId !== externalId) {
+      priorIds.push(existing.externalId);
+      await logger.warn({
+        event: "provider.job.new_task_id",
+        provider: decision.provider,
+        model: decision.modelId,
+        projectId: ctx.project.id,
+        sceneId: ctx.scene.id,
+        message:
+          `Lần thử này tạo task mới ${externalId}. Task trước ${existing.externalId} ` +
+          `được giữ lại để tra cứu - nhà cung cấp có thể đã tính phí nó.`,
+      });
+    }
+
+    // What was SENT, not what was intended. The adapter may rewrite the prompt
+    // to fit a vendor limit, and a record of the request that was never made is
+    // worse than no record when a provider fails for an unexplained reason.
+    const requestJson = JSON.stringify(
+      created.sentRequest ?? { prompt: prompt.slice(0, 2000) },
+    ).slice(0, 8000);
+
     record = await prisma.providerJob.upsert({
       where: { idempotencyKey: key },
       create: {
@@ -326,17 +366,20 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
         externalId,
         idempotencyKey: key,
         status: "processing",
-        requestJson: JSON.stringify({ prompt: prompt.slice(0, 2000) }),
+        requestJson,
         projectId: ctx.project.id,
         sceneId: ctx.scene.id,
         attempts: (existing?.attempts ?? 0) + 1,
         estimatedCost: decision.estimatedCost,
+        previousExternalIds: JSON.stringify(priorIds),
       },
       update: {
         externalId,
         status: "processing",
+        requestJson,
         attempts: { increment: 1 },
         error: null,
+        previousExternalIds: JSON.stringify(priorIds),
       },
     });
   }
