@@ -70,6 +70,52 @@ export function defaultEnvVarFor(providerName: string): string {
 }
 
 /**
+ * Extra env-var names a vendor is known by, tried in order.
+ *
+ * Some vendors document a name that does not match our NAME_API_KEY
+ * convention. Runway's own SDK and docs read `RUNWAYML_API_SECRET`, so someone
+ * following Runway's quickstart pastes the key under that name and our
+ * convention would report "missing key" with the key sitting right there.
+ *
+ * The vendor's documented name comes FIRST so a project following the vendor's
+ * instructions works untouched; our conventional name stays as a fallback so
+ * existing .env files keep working.
+ */
+export const ENV_VAR_ALIASES: Record<string, readonly string[]> = {
+  runway: ["RUNWAYML_API_SECRET", "RUNWAY_API_KEY"],
+  google: ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY"],
+};
+
+/** Every env-var name to try for this provider, most-official first. */
+export function envVarCandidates(
+  providerName: string,
+  configured?: string,
+): string[] {
+  const names: string[] = [];
+  if (configured && configured.trim().length > 0) names.push(configured.trim());
+  for (const alias of ENV_VAR_ALIASES[providerName] ?? []) names.push(alias);
+  names.push(defaultEnvVarFor(providerName));
+  return [...new Set(names)];
+}
+
+/**
+ * First env var that actually holds a value, or null.
+ *
+ * Returns the NAME, never the value, so callers can report which variable was
+ * used without the key itself reaching a log line.
+ */
+export function resolvedEnvVarName(
+  providerName: string,
+  configured?: string,
+): string | null {
+  for (const name of envVarCandidates(providerName, configured)) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.trim().length > 0) return name;
+  }
+  return null;
+}
+
+/**
  * Does this provider have a usable key in the environment?
  *
  * The env-var name comes from the provider row (`apiKeyEnvVar`), falling back to
@@ -80,8 +126,5 @@ export function defaultEnvVarFor(providerName: string): string {
  */
 export function hasEnvKey(providerName: string, envVar?: string): boolean {
   if (KEYLESS_PROVIDERS.has(providerName)) return true;
-  const varName =
-    envVar && envVar.trim().length > 0 ? envVar.trim() : defaultEnvVarFor(providerName);
-  const value = process.env[varName];
-  return typeof value === "string" && value.trim().length > 0;
+  return resolvedEnvVarName(providerName, envVar) !== null;
 }

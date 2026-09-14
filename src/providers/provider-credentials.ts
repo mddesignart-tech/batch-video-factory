@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/crypto";
+import { envVarCandidates } from "@/lib/env";
 
 /**
  * Where a provider's key and endpoint come from.
@@ -55,13 +56,19 @@ export async function resolveApiKey(providerName: string): Promise<string> {
     }
   }
 
-  const envVar = config?.apiKeyEnvVar || `${providerName.toUpperCase()}_API_KEY`;
-  const fromEnv = process.env[envVar];
-  if (fromEnv && fromEnv.trim().length > 0) return fromEnv.trim();
+  // Try every name this vendor is known by, most-official first. Runway
+  // documents RUNWAYML_API_SECRET, which does not match our NAME_API_KEY
+  // convention, so a key pasted per Runway's own quickstart used to read as
+  // "missing".
+  const candidates = envVarCandidates(providerName, config?.apiKeyEnvVar ?? undefined);
+  for (const name of candidates) {
+    const fromEnv = process.env[name];
+    if (fromEnv && fromEnv.trim().length > 0) return fromEnv.trim();
+  }
 
   throw new ProviderConfigError(
-    `Chưa có API key cho ${providerName}. Thêm ${envVar} vào tệp .env ` +
-      `hoặc nhập key trong trang "Nhà cung cấp AI".`,
+    `Chưa có API key cho ${providerName}. Thêm một trong ${candidates.join(" hoặc ")} ` +
+      `vào tệp .env, hoặc nhập key trong trang "Nhà cung cấp AI".`,
   );
 }
 

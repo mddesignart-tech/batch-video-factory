@@ -31,7 +31,8 @@
     "project:status": "tsx scripts/project-status.ts",
     "video:prompt": "tsx scripts/prepare-video-prompt.ts",
     "video:test": "tsx scripts/video-test.ts",
-    "video:benchmark": "tsx scripts/video-benchmark.ts"
+    "video:benchmark": "tsx scripts/video-benchmark.ts",
+    "preflight:runway": "tsx scripts/preflight-runway.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.1",
