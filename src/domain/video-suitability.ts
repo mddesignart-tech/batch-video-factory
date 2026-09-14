@@ -204,6 +204,31 @@ export function marksProviderUnsuitable(
   return errorCode.toUpperCase().includes("BAD_OUTPUT") ? RUNWAY_UNSUITABLE : null;
 }
 
+/**
+ * Does this failure say anything about the MODEL, or only about our request?
+ *
+ * The distinction decides whether a failed run is evidence. `BAD_OUTPUT` is the
+ * model saying it could not make something acceptable from this input - that is
+ * a fact about the model, and a rule may be built on it. A 400 is our own
+ * malformed request, a 429 is a queue, a 5xx is the vendor having a bad
+ * afternoon and a timeout is simply an unknown. None of those tell us whether
+ * the model could have done the scene.
+ *
+ * Getting this wrong in the permissive direction turns every bug we write into
+ * a permanent verdict against a model. Getting it wrong in the other direction
+ * makes the evidence check cry wolf, and an alarm that cries wolf is one nobody
+ * reads - which is how the alarm stops working at all.
+ */
+export function failureIsAboutTheModel(errorCode: string | null | undefined): boolean {
+  if (!errorCode) return false;
+  const code = errorCode.toUpperCase();
+  if (code.includes("BAD_OUTPUT")) return true;
+  // A vendor refusing the CONTENT is also about the model's own limits, not
+  // about whether our JSON was shaped right.
+  if (code.includes("CONTENT_POLICY") || code.includes("MODERATION")) return true;
+  return false;
+}
+
 /** Add a marker without duplicating one already present. */
 export function withFlag(flags: string[], flag: string): string[] {
   return flags.includes(flag) ? flags : [...flags, flag];

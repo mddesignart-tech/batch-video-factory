@@ -113,6 +113,35 @@ describe("the alarm: rules that disagree with a paid result", () => {
     expect(conflict!.message).toContain("0.7200");
   });
 
+  it("stays quiet when the failure was OUR bug, not the model's", async () => {
+    // The Sora scene-3 run: rejected with a 400 for a malformed
+    // `input_reference` before any job existed. That says nothing about
+    // whether Sora could animate the scene, and counting it would recommend
+    // blocking a model on the strength of our own mistake.
+    await recordBenchmark({
+      ...BASE,
+      provider: "openai",
+      model: "sora-2:720x1280",
+      sceneNumber: 3,
+      complexity: "HIGH",
+      characterCount: 3,
+      outcome: "failed",
+      failureCode: "http_400 input_reference",
+      actualCost: 0,
+    });
+    expect(await findContradictions()).toEqual([]);
+  });
+
+  it("stays quiet for a rate limit, a server error or a timeout", async () => {
+    // None of these are the model declining the work; an alarm that fires on
+    // them is one nobody reads.
+    for (const failureCode of ["http_429", "http_500", "timeout", ""]) {
+      await prisma.videoBenchmark.deleteMany();
+      await recordBenchmark({ ...BASE, outcome: "failed", failureCode, actualCost: 0 });
+      expect(await findContradictions(), failureCode || "(no code)").toEqual([]);
+    }
+  });
+
   it("shouts when the rules offer work the model has refused", async () => {
     // A LOW one-character scene that failed anyway. The rules allow it, so the
     // next render will pay to rediscover this.
@@ -157,6 +186,7 @@ describe("the alarm: rules that disagree with a paid result", () => {
       ...BASE,
       sceneNumber: 7,
       outcome: "failed",
+      failureCode: "INTERNAL.BAD_OUTPUT.CODE01",
       actualCost: 0,
     });
     const kinds = (await findContradictions()).map((c) => c.kind).sort();
@@ -170,6 +200,7 @@ describe("the alarm: rules that disagree with a paid result", () => {
       ...BASE,
       characterCount: 0,
       outcome: "failed",
+      failureCode: "INTERNAL.BAD_OUTPUT.CODE01",
       actualCost: 0,
     });
     expect(await findContradictions()).toHaveLength(1);

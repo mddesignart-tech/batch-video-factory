@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import type { Complexity } from "@/domain/enums";
-import { checkSuitability } from "@/domain/video-suitability";
+import { checkSuitability, failureIsAboutTheModel } from "@/domain/video-suitability";
 
 /**
  * Recorded benchmark runs, and the check that routing rules agree with them.
@@ -150,7 +150,13 @@ export async function findContradictions(): Promise<Contradiction[]> {
       });
     }
 
-    if (run.outcome === "failed" && verdict.allowed) {
+    // A failure only argues with the rules if it was the MODEL that failed.
+    // The Sora scene-3 run was rejected with a 400 for a malformed
+    // `input_reference` - our bug, fixable, and no evidence at all about
+    // whether Sora could have animated the scene. Counting it would have
+    // recommended blocking a model on the strength of our own mistake, and
+    // would make this alarm fire on every bug we write.
+    if (run.outcome === "failed" && verdict.allowed && failureIsAboutTheModel(run.failureCode)) {
       found.push({
         provider: run.provider,
         model: run.model,
