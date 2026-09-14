@@ -214,6 +214,40 @@ async function main(): Promise<void> {
     return;
   }
 
+  // A replacement prompt is read HERE, before the key, and written to the
+  // database later.
+  //
+  // The key answers "has this exact work already been paid for", and the prompt
+  // is part of what makes the work exact. Computing it from the scene's current
+  // prompt while sending a different one would key the record to a request
+  // nobody made - and two genuinely different benchmarks on one scene would
+  // collide, the second refusing to start because it believed the first had
+  // already bought it.
+  //
+  // Reading and writing are split so that --dry-run stays read-only: a rehearsal
+  // that rewrites the scene's prompt is not a rehearsal.
+  const promptFile = arg("prompt-file", "");
+  let replacementPrompt = "";
+  if (promptFile !== "") {
+    const fsMod = await import("node:fs");
+    const pathMod = await import("node:path");
+    const abs = pathMod.isAbsolute(promptFile)
+      ? promptFile
+      : pathMod.join(process.cwd(), promptFile);
+    if (!fsMod.existsSync(abs)) {
+      console.log(`\n  [DUNG] Khong tim thay tep prompt ${abs}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    replacementPrompt = fsMod.readFileSync(abs, "utf8").trim();
+    if (replacementPrompt === "") {
+      console.log(`\n  [DUNG] Tep prompt ${abs} rong.\n`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+  const promptToSend = replacementPrompt !== "" ? replacementPrompt : scene.videoPrompt;
+
   // ---- idempotency: is this work already paid for? ----------------------
   const { idempotencyKey } = await import("../src/services/generation");
   const key = idempotencyKey({
@@ -221,7 +255,7 @@ async function main(): Promise<void> {
     kind: "video",
     provider: PROVIDER,
     model: MODEL_ID,
-    prompt: scene.videoPrompt,
+    prompt: promptToSend,
     generation: scene.retryCount,
     variant: `${scene.duration}s`,
   });
@@ -244,35 +278,23 @@ async function main(): Promise<void> {
     return;
   }
 
-  // A replacement prompt, written to the scene before generating.
+  // Now write the replacement prompt that was read above.
   //
   // It has to go through the database rather than around it: the generation
   // path reads the scene's own prompt, so a flag that changed only what this
   // script printed would describe a request nobody made. The old prompt is
   // echoed first so it can be put back.
-  const promptFile = arg("prompt-file", "");
-  if (promptFile !== "") {
-    const fsMod = await import("node:fs");
-    const pathMod = await import("node:path");
-    const abs = pathMod.isAbsolute(promptFile)
-      ? promptFile
-      : pathMod.join(process.cwd(), promptFile);
-    if (!fsMod.existsSync(abs)) {
-      console.log(`\n  [DUNG] Khong tim thay tep prompt ${abs}\n`);
-      process.exitCode = 1;
-      return;
-    }
-    const next = fsMod.readFileSync(abs, "utf8").trim();
+  if (replacementPrompt !== "") {
     console.log("\n  ---- DOI PROMPT ----");
     console.log(`  Prompt CU (${scene.videoPrompt.length} ky tu):`);
     for (const l of scene.videoPrompt.split("\n")) console.log(`    | ${l}`);
-    console.log(`  Prompt MOI (${next.length} ky tu):`);
-    for (const l of next.split("\n")) console.log(`    > ${l}`);
+    console.log(`  Prompt MOI (${replacementPrompt.length} ky tu):`);
+    for (const l of replacementPrompt.split("\n")) console.log(`    > ${l}`);
     await prisma.scene.update({
       where: { id: scene.id },
-      data: { videoPrompt: next },
+      data: { videoPrompt: replacementPrompt },
     });
-    scene.videoPrompt = next;
+    scene.videoPrompt = replacementPrompt;
   }
 
   // ---- one permit, for one create ---------------------------------------
