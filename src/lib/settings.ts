@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { env } from "./env";
 import { parseJson } from "./utils";
+import { DEFAULT_MIX, resolveMix, type AudioMixSettings } from "@/media/mix-config";
 
 /**
  * App settings live in the DB so they survive restarts and can be edited from
@@ -19,6 +20,14 @@ export interface AppSettings {
   cleanupFinalDays: number | null;
   burnSubtitles: boolean;
   maxRetries: number;
+  /**
+   * How the three audio layers sit against each other.
+   *
+   * Stored with the rest of the app settings rather than per project: an
+   * operator tunes these once by ear and wants every video to match. A project
+   * may still override at render time.
+   */
+  audioMix: AudioMixSettings;
 }
 
 export const SETTINGS_KEY = "app.settings";
@@ -41,19 +50,34 @@ export function defaultSettings(): AppSettings {
     cleanupFinalDays: Number.isFinite(finalDays) ? finalDays : null,
     burnSubtitles: true,
     maxRetries: 3,
+    audioMix: { ...DEFAULT_MIX },
   };
 }
 
 export async function getSettings(): Promise<AppSettings> {
   const row = await prisma.setting.findUnique({ where: { key: SETTINGS_KEY } });
   const stored = parseJson<Partial<AppSettings>>(row?.valueJson, {});
-  return { ...defaultSettings(), ...stored };
+  const base = defaultSettings();
+  return {
+    ...base,
+    ...stored,
+    // A nested object would otherwise be replaced wholesale by a stored value
+    // written before a knob existed, leaving that knob undefined. resolveMix
+    // also clamps anything out of range, so a bad stored value cannot reach a
+    // render.
+    audioMix: resolveMix({ ...base.audioMix, ...(stored.audioMix ?? {}) }),
+  };
 }
 
 export async function saveSettings(
   patch: Partial<AppSettings>,
 ): Promise<AppSettings> {
-  const next = { ...(await getSettings()), ...patch };
+  const current = await getSettings();
+  const next = {
+    ...current,
+    ...patch,
+    audioMix: resolveMix({ ...current.audioMix, ...(patch.audioMix ?? {}) }),
+  };
   const valueJson = JSON.stringify(next);
   await prisma.setting.upsert({
     where: { key: SETTINGS_KEY },

@@ -11,6 +11,9 @@ import {
   DEFAULT_PAUSE_SPEAKER_CHANGE,
   MAX_PAUSE,
   MIN_PAUSE,
+  MAX_OVERRIDE_PAUSE,
+  clampOverridePause,
+  pauseFromMs,
 } from "@/domain/scene-timeline";
 import {
   buildFinalMixGraph,
@@ -196,14 +199,38 @@ describe("scene timeline", () => {
     expect(t.entries[0]?.pauseAfterSec).toBe(0.25);
   });
 
-  it("CLAMPS an override that would stall or collide", () => {
-    // A two-second beat stalls a Short; zero runs two speakers together. Both
-    // are worse than the default the script was trying to improve on.
-    const long = buildSceneTimeline([line(1, "Max", 2, "a.wav", 2), line(2, "Leo", 2)], 6);
-    const zero = buildSceneTimeline([line(1, "Max", 2, "a.wav", 0), line(2, "Leo", 2)], 6);
-    expect(long.entries[0]?.pauseAfterSec).toBe(MAX_PAUSE);
-    expect(zero.entries[0]?.pauseAfterSec).toBe(MIN_PAUSE);
+  it("lets a script ask for NO pause, for a line that lands on top", () => {
+    // An interruption, or one character finishing another's sentence. The
+    // automatic default may never do this; a stated 0 is a decision.
+    const t = buildSceneTimeline([line(1, "Max", 2, "a.wav", 0), line(2, "Leo", 2)], 6);
+    expect(t.entries[0]?.pauseAfterSec).toBe(0);
+  });
+
+  it("lets a script hold a comic beat longer than the automatic range", () => {
+    const t = buildSceneTimeline([line(1, "Max", 2, "a.wav", 0.9), line(2, "Leo", 2)], 6);
+    expect(t.entries[0]?.pauseAfterSec).toBe(0.9);
+    expect(t.entries[0]?.pauseAfterSec).toBeGreaterThan(MAX_PAUSE);
+  });
+
+  it("still refuses an override large enough to be a typo", () => {
+    // 12 where 1.2 was meant would stall the video for twelve seconds.
+    const t = buildSceneTimeline([line(1, "Max", 2, "a.wav", 12), line(2, "Leo", 2)], 6);
+    expect(t.entries[0]?.pauseAfterSec).toBe(MAX_OVERRIDE_PAUSE);
+  });
+
+  it("keeps the AUTOMATIC pause inside the tighter 150-300ms range", () => {
+    const t = buildSceneTimeline([line(1, "Max", 2), line(2, "Leo", 2)], 6);
+    expect(t.entries[0]?.pauseAfterSec).toBeGreaterThanOrEqual(MIN_PAUSE);
+    expect(t.entries[0]?.pauseAfterSec).toBeLessThanOrEqual(MAX_PAUSE);
     expect(clampPause(Number.NaN)).toBe(DEFAULT_PAUSE_SAME_SPEAKER);
+    expect(clampOverridePause(-5)).toBe(DEFAULT_PAUSE_SAME_SPEAKER);
+  });
+
+  it("reads a pause stored in milliseconds", () => {
+    expect(pauseFromMs(250)).toBe(0.25);
+    expect(pauseFromMs(0)).toBe(0);
+    expect(pauseFromMs(null)).toBeUndefined();
+    expect(pauseFromMs(undefined)).toBeUndefined();
   });
 
   it("EXTENDS the scene when speech runs longer than the visuals", () => {

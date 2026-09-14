@@ -132,7 +132,22 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    include: { scenes: { orderBy: { sceneNumber: "asc" } }, idiom: true },
+    include: {
+      scenes: {
+        orderBy: { sceneNumber: "asc" },
+        // The real audio source. A scene with lines uses them; only a scene
+        // with none falls back to its single legacy audio file.
+        include: {
+          dialogueLines: {
+            orderBy: { lineNumber: "asc" },
+            // The speaker's name decides where a pause goes, so it has to come
+            // along rather than be looked up per line later.
+            include: { character: { select: { name: true } } },
+          },
+        },
+      },
+      idiom: true,
+    },
   });
   if (!project) throw new Error(`Không tìm thấy dự án ${projectId}`);
 
@@ -178,6 +193,7 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
     target: targetForAspect(project.aspectRatio),
     burnSubtitles: settings.burnSubtitles,
     highlightPhrase: project.idiom.phrase,
+    mixSettings: settings.audioMix,
     scenes: active.map((s) => ({
       sceneNumber: s.sceneNumber,
       duration: s.duration,
@@ -185,8 +201,42 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
       videoPath: s.videoPath ? toAbsolute(s.videoPath) : null,
       audioPath: s.audioPath ? toAbsolute(s.audioPath) : null,
       imagePath: s.imagePath ? toAbsolute(s.imagePath) : null,
+      dialogueLines: s.dialogueLines
+        .filter((l) => l.status === "completed" && l.outputPath.length > 0)
+        .map((l) => ({
+          lineNumber: l.lineNumber,
+          speaker: l.character?.name ?? "",
+          text: l.text,
+          audioPath: toAbsolute(l.outputPath),
+          durationSec: l.durationSec,
+          pauseAfterMs: l.pauseAfterMs,
+        })),
     })),
   });
+
+  // Say which audio pipeline ran and what the mix measured. A render that
+  // silently used the legacy path would look identical in the UI otherwise.
+  await logger.info({
+    event: "render.audio",
+    projectId,
+    message:
+      `Âm thanh: ${result.audioPipeline}` +
+      (result.audioMetrics
+        ? `, ${result.audioMetrics.integratedLufs.toFixed(1)} LUFS, ` +
+          `${result.audioMetrics.truePeakDb.toFixed(2)} dBTP, ` +
+          `${result.audioMetrics.durationSec.toFixed(2)}s`
+        : "") +
+      (result.audioWarnings.length > 0
+        ? `, ${result.audioWarnings.length} cảnh báo`
+        : ""),
+  });
+  for (const warning of result.audioWarnings) {
+    await logger.warn({
+      event: `audio.${warning.kind}`,
+      projectId,
+      message: `${warning.message} ${warning.suggestion}`,
+    });
+  }
 
   await prisma.asset.create({
     data: {

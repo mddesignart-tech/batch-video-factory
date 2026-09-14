@@ -27,9 +27,30 @@ export const DEFAULT_PAUSE_SAME_SPEAKER = 0.15;
  */
 export const DEFAULT_PAUSE_SPEAKER_CHANGE = 0.28;
 
-/** Bounds the brief. Anything outside makes a Short drag or run together. */
+/**
+ * Bounds for the pause the system CHOOSES.
+ *
+ * Below 150ms two speakers run together; above 300ms a Short starts to drag.
+ * These bound the default only - a script that states a length is making a
+ * deliberate choice and gets a wider range.
+ */
 export const MIN_PAUSE = 0.15;
 export const MAX_PAUSE = 0.3;
+
+/**
+ * Bounds for a pause the SCRIPT asked for.
+ *
+ * Zero is allowed, because "say this immediately after" is a real instruction -
+ * an interruption, a character finishing another's sentence. Long is allowed
+ * too, because a held beat before a punchline is the oldest joke mechanic
+ * there is.
+ *
+ * The ceiling exists because an override is as likely to be a typo as an
+ * intention: 12 where 1.2 was meant would stall the video for twelve seconds,
+ * and no comic pause in a sixty-second Short is worth more than this.
+ */
+export const MIN_OVERRIDE_PAUSE = 0;
+export const MAX_OVERRIDE_PAUSE = 1.5;
 
 export interface TimelineInput {
   /** Position within the scene, 1-based. */
@@ -43,9 +64,10 @@ export interface TimelineInput {
   /**
    * Script override for the gap AFTER this line, in seconds.
    *
-   * Clamped rather than obeyed blindly: a script asking for a two-second beat
-   * would stall a Short, and a script asking for zero would run two speakers
-   * together. Both are worse than the default it was trying to improve on.
+   * Honoured across a wider range than the automatic default, because a stated
+   * length is a decision: 0 for a line that must land on top of the previous
+   * one, longer for a deliberate comic beat. Still bounded, since an override
+   * is as likely to be a typo as an intention.
    */
   pauseAfterOverride?: number;
 }
@@ -75,9 +97,23 @@ export interface SceneTimeline {
   extended: boolean;
 }
 
+/** Bound a pause the system chose for itself. */
 export function clampPause(seconds: number): number {
   if (!Number.isFinite(seconds)) return DEFAULT_PAUSE_SAME_SPEAKER;
   return Math.min(MAX_PAUSE, Math.max(MIN_PAUSE, seconds));
+}
+
+/** Bound a pause the script asked for. Wider, because it was a decision. */
+export function clampOverridePause(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds < 0) return DEFAULT_PAUSE_SAME_SPEAKER;
+  return Math.min(MAX_OVERRIDE_PAUSE, Math.max(MIN_OVERRIDE_PAUSE, seconds));
+}
+
+/** Milliseconds from the database into the seconds the timeline works in. */
+export function pauseFromMs(ms: number | null | undefined): number | undefined {
+  if (ms === null || ms === undefined) return undefined;
+  if (!Number.isFinite(ms)) return undefined;
+  return ms / 1000;
 }
 
 /**
@@ -115,7 +151,9 @@ export function buildSceneTimeline(
         : DEFAULT_PAUSE_SAME_SPEAKER;
     const pauseAfterSec = isLast
       ? 0
-      : clampPause(line.pauseAfterOverride ?? naturalPause);
+      : line.pauseAfterOverride === undefined
+        ? clampPause(naturalPause)
+        : clampOverridePause(line.pauseAfterOverride);
 
     entries.push({
       lineNumber: line.lineNumber,

@@ -10,6 +10,7 @@ import { isMockMode } from "@/lib/env";
 import { DATA_ROOT } from "@/lib/paths";
 import { ffmpegVersion, resolveFfmpeg, resolveFfprobe } from "@/media/ffmpeg";
 import { SettingsForm } from "./settings-form";
+import { AudioMixForm } from "./audio-mix-form";
 import { SpendCapForm } from "@/components/spend-gate";
 import { spendStatus } from "@/services/spend-guard";
 
@@ -36,6 +37,15 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <SettingsForm settings={settings} />
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-start-1">
+          <CardHeader>
+            <CardTitle>Âm thanh</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AudioMixForm mix={settings.audioMix} />
           </CardContent>
         </Card>
 

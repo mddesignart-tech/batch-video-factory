@@ -59,6 +59,25 @@ const SCENE_LINES = [
   { speaker: "Mia", file: "mia.wav", text: "Now the secret AND the beans are on the floor." },
 ];
 
+/**
+ * A short sound effect, synthesised locally.
+ *
+ * A bright percussive blip, which is the worst case for masking speech: loud,
+ * short, and high enough to sit right on top of consonants. If the mix keeps
+ * this out of the way, a softer effect will not be a problem.
+ */
+async function makeSfx(outPath: string): Promise<void> {
+  const { ffmpeg } = await import("../src/media/ffmpeg");
+  await ffmpeg([
+    "-y", "-hide_banner", "-loglevel", "error",
+    "-f", "lavfi",
+    "-i", "sine=frequency=1200:duration=0.35",
+    "-af", "afade=t=out:st=0.05:d=0.3,volume=0.8,aresample=24000",
+    "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le",
+    outPath,
+  ]);
+}
+
 /** A short music bed, synthesised locally, so ducking can be heard. */
 async function makeMusicBed(outPath: string, seconds: number): Promise<void> {
   const { ffmpeg } = await import("../src/media/ffmpeg");
@@ -191,12 +210,24 @@ async function main(): Promise<void> {
     await makeMusicBed(musicPath, Math.ceil(scene.durationSec) + 2);
   }
 
+  // One effect, dropped in the pause between Max and Leo - the moment a real
+  // edit would use one, and the moment it is most likely to collide with a line.
+  const sfxPath = path.join(absOut, "sfx-blip.wav");
+  if (fs.existsSync(sfxPath)) fs.rmSync(sfxPath);
+  await makeSfx(sfxPath);
+  const firstEntry = timeline.entries[0];
+  const sfxAt = firstEntry ? firstEntry.endSec + 0.05 : 1;
+
   const mixPath = path.join(absOut, "scene-final-mix.wav");
   if (fs.existsSync(mixPath)) fs.rmSync(mixPath);
-  const mix = await renderFinalMix({ dialoguePath, musicPath }, mixPath);
+  const mix = await renderFinalMix(
+    { dialoguePath, musicPath, sfx: [{ path: sfxPath, atSec: sfxAt }] },
+    mixPath,
+  );
 
-  console.log("\n--- 4. FINAL MIX (thoai + nhac, co ducking) ---\n");
+  console.log("\n--- 4. FINAL MIX (thoai + nhac + SFX, co ducking) ---\n");
   console.log(`  Tep        : ${mix.outputPath}`);
+  console.log(`  SFX        : ${sfxPath} (dat tai ${fmt(sfxAt)}s)`);
   console.log(`  Thoi luong : ${fmt(mix.durationSec)}s`);
   console.log(`  Integrated : ${fmt(mix.loudness.integratedLufs)} LUFS`);
   console.log(`  True peak  : ${fmt(mix.loudness.truePeakDb)} dBTP`);

@@ -372,3 +372,44 @@ export async function deleteBatch(id: string): Promise<ActionResult> {
   revalidatePath("/batches");
   return { ok: true, message: "Đã xoá lô." };
 }
+
+// -------------------------------------------------------------- audio mix ---
+
+/**
+ * The five knobs that decide how music and effects sit under the voice.
+ *
+ * Saved separately from the rest of the settings so an operator tuning a mix by
+ * ear can save and re-listen without the form re-submitting cleanup schedules
+ * and budget defaults alongside it.
+ *
+ * The values are clamped in `resolveMix` rather than rejected here: these
+ * arrive from sliders, and an out-of-range number should produce a loud mix,
+ * not a failed save.
+ */
+export async function updateAudioMix(formData: FormData): Promise<ActionResult> {
+  const schema = z.object({
+    musicGain: z.coerce.number().min(0).max(1),
+    duckDb: z.coerce.number().min(0).max(30),
+    attackMs: z.coerce.number().min(1).max(500),
+    releaseMs: z.coerce.number().min(20).max(2000),
+    sfxGain: z.coerce.number().min(0).max(1),
+  });
+  const parsed = schema.safeParse(Object.fromEntries(formData.entries()));
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Giá trị không hợp lệ.",
+    };
+  }
+  await saveSettings({ audioMix: parsed.data });
+  revalidatePath("/settings");
+  return { ok: true, message: "Đã lưu cài đặt âm thanh." };
+}
+
+/** Put every knob back to the safe preset, in one action. */
+export async function resetAudioMix(): Promise<ActionResult> {
+  const { DEFAULT_MIX } = await import("@/media/mix-config");
+  await saveSettings({ audioMix: { ...DEFAULT_MIX } });
+  revalidatePath("/settings");
+  return { ok: true, message: "Đã khôi phục cài đặt âm thanh mặc định." };
+}
