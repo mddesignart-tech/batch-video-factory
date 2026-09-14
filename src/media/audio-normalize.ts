@@ -252,6 +252,25 @@ export async function normalizeVoiceClip(
       fs.copyFileSync(corrected, outputPath);
       after = await measureLoudness(outputPath);
     }
+
+    // Peak-bound recovery.
+    //
+    // Some lines hit the true-peak ceiling before their loudness reaches the
+    // target, and a single linear gain cannot take them further. Leo's scene-2
+    // line landed at -19.29 LUFS against a -16 target - about 6 dB quieter than
+    // its neighbours in the finished video, which is plainly audible.
+    //
+    // The fix is a gain lift with a lookahead limiter catching the few peaks
+    // that would otherwise clip. It is deliberately SMALL: at most 3 dB of
+    // makeup, so the limiter only ever touches transients. Past that a voice
+    // starts to sound squashed, and the whole reason for choosing a model that
+    // acts is to keep the acting.
+    //
+    // Accepting -17 is fine. Chasing the last decibel is what ruins a take.
+    if (after.integratedLufs < PEAK_BOUND_FLOOR_LUFS) {
+      const recovered = await recoverPeakBound(outputPath, after, work);
+      if (recovered) after = recovered;
+    }
     // Duration is measured on the FINISHED file, after trim, normalisation and
     // encode. A figure taken any earlier would drift from what the subtitles
     // have to line up against.
@@ -267,6 +286,115 @@ export async function normalizeVoiceClip(
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * Loudness below which a peak-bound clip is worth rescuing.
+ *
+ * -17 is the quietest a line may be and still sit comfortably beside one at
+ * -16: about a decibel, which is near the threshold most listeners notice.
+ */
+export const PEAK_BOUND_FLOOR_LUFS = -17;
+
+/**
+ * Largest makeup gain the recovery will apply.
+ *
+ * Three decibels is where a limiter stops catching occasional transients and
+ * starts flattening the delivery. A clip that needs more than this has a
+ * problem gain cannot fix.
+ */
+export const MAX_MAKEUP_DB = 3;
+
+/**
+ * Lift a peak-bound clip towards the target with a gentle limiter.
+ *
+ * Returns the new measurement, or null when nothing was changed - which happens
+ * when the shortfall is too large for the makeup ceiling to help, and leaving
+ * the clip quiet is better than squashing it.
+ */
+async function recoverPeakBound(
+  outputPath: string,
+  current: LoudnessStats,
+  work: string,
+): Promise<LoudnessStats | null> {
+  const shortfall = VOICE_TARGET_LUFS - current.integratedLufs;
+  if (shortfall <= 0) return null;
+
+  const makeup = Math.min(MAX_MAKEUP_DB, shortfall);
+
+  // The limiter works on SAMPLE peak; the target is TRUE peak, which can sit
+  // a few tenths higher after reconstruction. Aiming 0.5 dB below the ceiling
+  // absorbs that difference instead of discovering it in the measurement.
+  const limitDb = VOICE_TARGET_TRUE_PEAK - 0.5;
+  const limitLinear = 10 ** (limitDb / 20);
+
+  const lifted = path.join(work, "peak-recovered.wav");
+  await ffmpeg([
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    outputPath,
+    "-af",
+    // Gain first, then catch only what pokes above the ceiling. 5ms attack is
+    // fast enough for speech transients; 50ms release lets it recover between
+    // syllables rather than pumping across a word.
+    `volume=${makeup.toFixed(3)}dB,` +
+      `alimiter=limit=${limitLinear.toFixed(5)}:attack=5:release=50:level=false`,
+    "-ar",
+    "24000",
+    "-ac",
+    "1",
+    "-c:a",
+    "pcm_s16le",
+    lifted,
+  ]);
+
+  let after = await measureLoudness(lifted);
+  let candidate = lifted;
+
+  // The limiter holds SAMPLE peak; the ceiling is TRUE peak, and the gap
+  // between them is larger than intuition suggests. Limiting to -2.0 dBFS on
+  // this clip produced -1.22 dBTP: inter-sample peaks 0.78 dB above the samples
+  // the limiter could see. So the result is measured and trimmed by exactly the
+  // overshoot rather than guessed at with a wider margin, which would give away
+  // loudness on every clip to cover the worst one.
+  if (after.truePeakDb > VOICE_TARGET_TRUE_PEAK) {
+    const trimDb = VOICE_TARGET_TRUE_PEAK - after.truePeakDb;
+    const trimmed = path.join(work, "peak-recovered-trimmed.wav");
+    await ffmpeg([
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      lifted,
+      "-af",
+      `volume=${trimDb.toFixed(3)}dB`,
+      "-ar",
+      "24000",
+      "-ac",
+      "1",
+      "-c:a",
+      "pcm_s16le",
+      trimmed,
+    ]);
+    after = await measureLoudness(trimmed);
+    candidate = trimmed;
+  }
+
+  // Only keep it if it actually helped AND stayed under the ceiling. A
+  // "recovery" that clips is worse than the quiet original, and one that gains
+  // nothing is limiting for no reason.
+  if (
+    after.integratedLufs > current.integratedLufs + 0.5 &&
+    after.truePeakDb <= VOICE_TARGET_TRUE_PEAK + 0.05
+  ) {
+    fs.copyFileSync(candidate, outputPath);
+    return after;
+  }
+  return null;
 }
 
 /** Is this clip already inside the tolerances the mix expects? */

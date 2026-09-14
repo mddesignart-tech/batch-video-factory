@@ -8,6 +8,8 @@ import {
   withinVoiceTargets,
   VOICE_TARGET_LUFS,
   VOICE_TARGET_TRUE_PEAK,
+  PEAK_BOUND_FLOOR_LUFS,
+  MAX_MAKEUP_DB,
 } from "@/media/audio-normalize";
 import { buildDuckFilter } from "@/media/render";
 import {
@@ -255,4 +257,67 @@ describe("subtitles timed against real audio", () => {
     expect(timelineLength(scenes)).toBe(9);
     expect(cues[cues.length - 1]?.endSeconds).toBeLessThanOrEqual(9);
   });
+});
+
+describe.runIf(hasFfmpeg)("rescuing a peak-bound clip", () => {
+  /**
+   * Leo's scene-2 line came off the model at -19.29 LUFS against a -16 target -
+   * about 6 dB quieter than its neighbours in the finished video, which is
+   * plainly audible. Its peaks hit the ceiling before its loudness reached the
+   * target, so a single linear gain could not take it further.
+   */
+
+  /** A quiet clip with sharp transients: loud peaks, low average. */
+  async function makeSpiky(file: string): Promise<void> {
+    await ffmpeg([
+      "-y", "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi", "-i", "sine=frequency=200:duration=4",
+      "-af",
+      // A slow tremolo drives the average down while the peaks stay high,
+      // which is the shape that defeats a linear gain.
+      "volume=0.10,tremolo=f=3:d=0.9,aresample=24000",
+      "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le",
+      file,
+    ]);
+  }
+
+  it("lifts a quiet peak-bound clip towards the target", async () => {
+    const src = path.join(tmp, "spiky.wav");
+    await makeSpiky(src);
+    const before = await measureLoudness(src);
+    expect(before.integratedLufs).toBeLessThan(PEAK_BOUND_FLOOR_LUFS);
+
+    const out = path.join(tmp, "spiky-n.wav");
+    const r = await normalizeVoiceClip(src, out);
+    expect(r.after.integratedLufs).toBeGreaterThan(before.integratedLufs);
+  }, 180_000);
+
+  it("still respects the true-peak ceiling after lifting", async () => {
+    // A "recovery" that clips is worse than the quiet original. The limiter
+    // works on sample peak and true peak runs higher, so the result is measured
+    // and trimmed rather than assumed.
+    const src = path.join(tmp, "spiky2.wav");
+    await makeSpiky(src);
+    const out = path.join(tmp, "spiky2-n.wav");
+    const r = await normalizeVoiceClip(src, out);
+    expect(r.after.truePeakDb).toBeLessThanOrEqual(VOICE_TARGET_TRUE_PEAK + 0.05);
+  }, 180_000);
+
+  it("never applies more makeup than the cap allows", async () => {
+    // Past 3 dB a limiter stops catching transients and starts flattening the
+    // delivery, and the whole reason for a model that acts is to keep the act.
+    expect(MAX_MAKEUP_DB).toBeLessThanOrEqual(3);
+  });
+
+  it("leaves a clip that is already on target alone", async () => {
+    const src = path.join(tmp, "ontarget.wav");
+    await makeTone(src, 4, 0.25);
+    const out = path.join(tmp, "ontarget-n.wav");
+    const first = await normalizeVoiceClip(src, out);
+    const second = await normalizeVoiceClip(out, out);
+    // Running it twice must not creep: a clip at target stays at target.
+    expect(
+      Math.abs(second.after.integratedLufs - first.after.integratedLufs),
+    ).toBeLessThan(0.6);
+  }, 240_000);
 });

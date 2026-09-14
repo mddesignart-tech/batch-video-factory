@@ -47,6 +47,16 @@ export interface ProviderBudget {
   note: string;
   /** ISO date the operator last confirmed this figure. */
   updatedAt: string;
+  /**
+   * Can this balance be read back from the vendor?
+   *
+   * Runway exposes one at GET /organization, so its figure can be refreshed and
+   * trusted. OpenAI does not expose a balance to an API key, so its number is
+   * whatever the operator typed - which must be LABELLED as declared. Showing a
+   * typed figure as if it were live is how someone plans a render against money
+   * that was spent last week.
+   */
+  liveBalanceAvailable: boolean;
 }
 
 /**
@@ -67,6 +77,9 @@ export function defaultBudgets(): ProviderBudget[] {
       usdPerUnit: 1,
       note: "Nạp $6 vào tài khoản OpenAI. Dùng cho Image, Sora, TTS, GPT.",
       updatedAt: now,
+      // OpenAI gives an API key no way to read the account balance, so this is
+      // a declared figure and the UI must say so.
+      liveBalanceAvailable: false,
     },
     {
       provider: "runway",
@@ -77,6 +90,9 @@ export function defaultBudgets(): ProviderBudget[] {
       usdPerUnit: 0.01,
       note: "Credit riêng của Runway. KHÔNG liên quan tới số dư OpenAI.",
       updatedAt: now,
+      // GET /organization returns creditBalance, so this one can be refreshed
+      // from the vendor and checked against our ledger.
+      liveBalanceAvailable: true,
     },
     {
       provider: "groq",
@@ -85,6 +101,7 @@ export function defaultBudgets(): ProviderBudget[] {
       usdPerUnit: 1,
       note: "Groq tự tính theo gói/hạn mức riêng của họ. Tool không giữ số dư.",
       updatedAt: now,
+      liveBalanceAvailable: false,
     },
   ];
 }
@@ -109,6 +126,9 @@ function parse(valueJson: string | undefined): ProviderBudget[] | null {
             : 1,
         note: typeof b.note === "string" ? b.note : "",
         updatedAt: typeof b.updatedAt === "string" ? b.updatedAt : "",
+        // Default FALSE. A balance is declared until something proves it can be
+        // read back; assuming otherwise would label a typed number as live.
+        liveBalanceAvailable: b.liveBalanceAvailable === true,
       });
     }
     return rows.length > 0 ? rows : null;
@@ -126,7 +146,9 @@ export async function getProviderBudgets(): Promise<ProviderBudget[]> {
 
 export async function setProviderBudget(
   update: Pick<ProviderBudget, "provider" | "available"> &
-    Partial<Pick<ProviderBudget, "unit" | "usdPerUnit" | "note">>,
+    Partial<
+      Pick<ProviderBudget, "unit" | "usdPerUnit" | "note" | "liveBalanceAvailable">
+    >,
 ): Promise<ProviderBudget[]> {
   const current = await getProviderBudgets();
   const now = new Date().toISOString();
@@ -141,6 +163,8 @@ export async function setProviderBudget(
               unit: update.unit ?? b.unit,
               usdPerUnit: update.usdPerUnit ?? b.usdPerUnit,
               note: update.note ?? b.note,
+              liveBalanceAvailable:
+                update.liveBalanceAvailable ?? b.liveBalanceAvailable,
               updatedAt: now,
             }
           : b,
@@ -154,6 +178,10 @@ export async function setProviderBudget(
           usdPerUnit: update.usdPerUnit ?? 1,
           note: update.note ?? "",
           updatedAt: now,
+          // A newly declared wallet is declared unless the caller states
+          // otherwise. Only a provider we can actually read a balance from
+          // should ever be marked live.
+          liveBalanceAvailable: update.liveBalanceAvailable ?? false,
         },
       ];
 

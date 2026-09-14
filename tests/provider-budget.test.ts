@@ -190,3 +190,44 @@ describe("the breakdown", () => {
     expect(rows.some((r) => r.provider === "mock")).toBe(false);
   });
 });
+
+describe("declared balance versus live balance", () => {
+  /**
+   * A number the operator typed and a number read back from the vendor are
+   * different kinds of fact. Presenting the first as the second is how someone
+   * plans a render against money that was spent last week.
+   */
+  it("marks Runway as readable, because GET /organization returns one", async () => {
+    const rows = defaultBudgets();
+    expect(rows.find((b) => b.provider === "runway")?.liveBalanceAvailable).toBe(true);
+  });
+
+  it("marks OpenAI as declared, because an API key cannot read the balance", async () => {
+    const rows = defaultBudgets();
+    expect(rows.find((b) => b.provider === "openai")?.liveBalanceAvailable).toBe(false);
+  });
+
+  it("defaults a NEW wallet to declared, never to live", async () => {
+    // Assuming otherwise would label a typed figure as if it had been verified.
+    await setProviderBudget({ provider: "brand-new", available: 10, unit: "usd" });
+    const rows = await getProviderBudgets();
+    expect(rows.find((b) => b.provider === "brand-new")?.liveBalanceAvailable).toBe(
+      false,
+    );
+  });
+
+  it("treats a stored record with the flag missing as declared", async () => {
+    await prisma.setting.upsert({
+      where: { key: PROVIDER_BUDGET_SETTING },
+      create: {
+        key: PROVIDER_BUDGET_SETTING,
+        valueJson: JSON.stringify([{ provider: "openai", available: 6, unit: "usd" }]),
+      },
+      update: {
+        valueJson: JSON.stringify([{ provider: "openai", available: 6, unit: "usd" }]),
+      },
+    });
+    const rows = await getProviderBudgets();
+    expect(rows.find((b) => b.provider === "openai")?.liveBalanceAvailable).toBe(false);
+  });
+});

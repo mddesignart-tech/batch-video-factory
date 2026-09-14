@@ -66,13 +66,28 @@ export function ProviderBudgets({ rows }: { rows: ProviderSpendRow[] }) {
                   </div>
                   {budget && !external && (
                     <div className="flex justify-between">
-                      <dt className="text-ink-400">Còn ở tài khoản hãng</dt>
+                      {/* A typed number and a number read back from the vendor
+                          are different kinds of fact, and the label has to say
+                          which this is. Showing a declared figure as if it were
+                          live is how someone plans a render against money that
+                          was spent last week. */}
+                      <dt className="text-ink-400">
+                        {budget.liveBalanceAvailable
+                          ? "Số dư đọc từ hãng"
+                          : "Số dư khai báo"}
+                      </dt>
                       <dd className="font-mono text-ink-100">
                         {budget.unit === "credits"
                           ? `${budget.available} credit ≈ ${money(row.availableUsd ?? 0)}`
                           : money(row.availableUsd ?? 0)}
                       </dd>
                     </div>
+                  )}
+                  {budget && !external && !budget.liveBalanceAvailable && (
+                    <p className="pt-0.5 text-[10px] text-warn-400">
+                      Hãng này không cho đọc số dư qua API — đây là con số bạn
+                      tự khai, không phải số dư thật lúc này.
+                    </p>
                   )}
                   {external && (
                     <div className="flex justify-between">
