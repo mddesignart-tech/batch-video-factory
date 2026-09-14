@@ -22,7 +22,6 @@ import {
   downloadTaskOutput,
   getTask,
   isTerminal,
-  nearestDuration,
   toRunwayRatio,
   RUNWAY_API_VERSION,
 } from "./runway-video-client";
@@ -142,7 +141,11 @@ export class RunwayVideoProvider implements VideoProvider {
           ratio: toRunwayRatio(this.config.size),
           size: this.config.size,
           durationRequested: req.durationSeconds,
-          durationSent: nearestDuration(req.durationSeconds),
+          // THIS model's duration rule, not the provider's default. Recording
+          // `nearestDuration(seconds)` without the model logged 10 seconds for
+          // a call that actually sent 6 - a record describing a request nobody
+          // made, which is the one thing a request record must never be.
+          durationSent: this.billedSeconds(req.durationSeconds),
           promptTextLength: fitted.text.length,
           promptTextBytes: Buffer.byteLength(fitted.text, "utf8"),
           promptText: fitted.text,
