@@ -5,7 +5,8 @@ import { splitModelSize } from "./video-duration";
  * Which video model may be trusted with which kind of scene.
  *
  * This encodes benchmark evidence, not preference. Every rule below is written
- * because a real clip was paid for and looked at:
+ * because a real clip was paid for and looked at. The full records live in the
+ * VideoBenchmark table (services/benchmark-evidence); the summary:
  *
  *   Sora-2, "Spill the beans" scene 4, two attempts
  *     identity 10 / motion 3, then identity 7 / motion 8, camera 10 both times.
@@ -17,13 +18,22 @@ import { splitModelSize } from "./video-duration";
  *   Runway gen4_turbo, scene 5 (one character, plain background)
  *     SUCCEEDED. Identity 10, camera 10, artifacts 7, motion 4. $0.25 for 5s.
  *
- * The pattern that reading gives: Runway holds a character better than Sora and
- * costs 37.5% less, but it obeys a prompt loosely and it refuses outright on
- * busy scenes. That makes it a good default for simple shots and a bad one for
- * everything else - which is a per-scene decision, not a per-video one.
+ *   Runway gen4.5, scene 3 (three characters, HIGH, a floor of beans), twice
+ *     SUCCEEDED both times, $0.72 for 6s each. Run 1, with a prompt that
+ *     allowed a slow push-in, scored composition 3 - the model pushed in until
+ *     a character left the frame. Run 2, with the camera locked seven different
+ *     ways, scored composition 9 but camera 7 and artifacts 7. Capable of work
+ *     gen4_turbo refuses; not yet dependable enough to hand a scene to
+ *     unattended.
+ *
+ * The pattern that reading gives: gen4_turbo holds a character well and costs
+ * little, but obeys a prompt loosely and refuses outright on busy scenes;
+ * gen4.5 handles the busy scene but creeps the camera even when told not to,
+ * at 2.9x the price. That makes the choice per-scene, not per-video.
  *
  * Nothing here is permanent. These are the rules the evidence supports TODAY,
- * and they should be revisited when there is more of it.
+ * and `findContradictions` in services/benchmark-evidence exists to shout if a
+ * later edit here starts disagreeing with a run that was paid for.
  */
 
 /** Marker written on a scene that a provider has already refused. */
@@ -73,6 +83,48 @@ const MAX_CHARACTERS: Record<string, number> = {
   // Two characters standing together is the case gen4_turbo failed twice.
   "runway/gen4_turbo": 2,
 };
+
+/**
+ * Models that have PROVEN they can do the work but are not yet cleared to be
+ * chosen automatically.
+ *
+ * This is a third state, and it is needed because the two obvious ones are both
+ * wrong for gen4.5 right now. Blocking it in MAX_COMPLEXITY would contradict two
+ * paid runs that succeeded on the hardest scene in the project - and
+ * `findContradictions` would rightly report it. Leaving it unmarked would let
+ * automatic routing spend $0.72 a scene on a model that still drifts the camera
+ * enough to clip an arm out of frame at 4.5s with the lock prompt in force.
+ *
+ * So: stays in the registry, stays pinnable by hand for the next benchmark,
+ * and the router will not reach for it on its own.
+ *
+ * Removing an entry here is the act of promoting a model to production. It
+ * should happen because a run cleared the bar, and the run should be in the
+ * benchmark table when it does.
+ */
+const NEEDS_EXPLICIT_PIN: Record<string, string> = {
+  "runway/gen4.5":
+    "Gen-4.5 làm được cảnh HIGH (2/2 lần đạt, $0,72 mỗi lần 6s) nhưng vẫn " +
+    "trôi khung: lần 2 đã khoá camera bằng bảy cách mà tới giây 4.5 vẫn siết " +
+    "vào cắt mất tay Leo (camera 7, artifacts 7, đều dưới ngưỡng 8). Đang là " +
+    "ỨNG VIÊN cho cảnh HIGH, chưa phải mặc định production - chọn tay nếu muốn dùng.",
+};
+
+/**
+ * Why the router must not pick this model by itself, or null if it may.
+ *
+ * Separate from `checkSuitability` on purpose: an unsuitable model cannot do
+ * the scene at all, so a manual pin should fail too. A model that merely needs
+ * a pin CAN do the scene, and the whole point is that a person may still ask
+ * for it.
+ */
+export function requiresExplicitPin(provider: string, model?: string): string | null {
+  for (const key of ruleKeys(provider, model)) {
+    const reason = NEEDS_EXPLICIT_PIN[key];
+    if (reason !== undefined) return reason;
+  }
+  return null;
+}
 
 /**
  * The key a rule is looked up under: the exact model first, the bare provider

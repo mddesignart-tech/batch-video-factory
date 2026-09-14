@@ -8,7 +8,7 @@ import type {
 } from "@/domain/enums";
 import { costForModel, qualityIndex, valueIndex, type UsageUnits } from "./pricing";
 import { billedVideoSeconds, splitModelSize } from "@/domain/video-duration";
-import { checkSuitability } from "@/domain/video-suitability";
+import { checkSuitability, requiresExplicitPin } from "@/domain/video-suitability";
 import { round } from "@/lib/utils";
 
 /**
@@ -92,6 +92,7 @@ export class RoutingError extends Error {
     readonly code:
       | "no_models"
       | "no_capable_models"
+      | "needs_explicit_pin"
       | "over_budget"
       | "manual_not_found",
   ) {
@@ -336,7 +337,28 @@ export function routeScene(
     };
   }
 
-  const candidates = capable.map((m) => toCandidate(m, ctx));
+  // Models that can do the work but are not cleared to be CHOSEN. They stayed
+  // in `capable` so a manual pin still reaches them; automatic routing steps
+  // over them. See NEEDS_EXPLICIT_PIN in domain/video-suitability.
+  const pinOnly = capable.filter((m) => requiresExplicitPin(m.provider, m.modelId));
+  const automatic = capable.filter((m) => !requiresExplicitPin(m.provider, m.modelId));
+  if (automatic.length === 0) {
+    // Do NOT fall through to the pin-only model. Silently spending on a
+    // candidate that is under review is exactly what marking it was meant to
+    // prevent - so name it and let a person decide.
+    const names = pinOnly.map((m) => `${m.provider}/${m.modelId}`).join(", ");
+    throw new RoutingError(
+      pinOnly.length > 0
+        ? `Cảnh này chỉ còn ứng viên chưa được chốt: ${names}. ` +
+          `${requiresExplicitPin(pinOnly[0]!.provider, pinOnly[0]!.modelId)} ` +
+          `Hãy chọn thủ công nếu bạn đồng ý chi.`
+        : `Không có mô hình ${ctx.type} nào đáp ứng yêu cầu của cảnh này ` +
+          `(${ctx.durationSeconds}s, ${ctx.characterCount} nhân vật).`,
+      pinOnly.length > 0 ? "needs_explicit_pin" : "no_capable_models",
+    );
+  }
+
+  const candidates = automatic.map((m) => toCandidate(m, ctx));
   const strategy = effectiveStrategy(ctx);
 
   // The quality floor is the AUTO heuristic: it is how a mode decides that this

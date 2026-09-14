@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkSuitability,
   marksProviderUnsuitable,
+  requiresExplicitPin,
   withFlag,
   RUNWAY_UNSUITABLE,
 } from "@/domain/video-suitability";
@@ -213,5 +214,50 @@ describe("flag bookkeeping", () => {
       "SOMETHING_ELSE",
       RUNWAY_UNSUITABLE,
     ]);
+  });
+});
+
+describe("a model that is capable but not yet cleared", () => {
+  /**
+   * Gen-4.5 sits in a third state that neither of the obvious two describes.
+   *
+   * It succeeded twice on the hardest scene in the project, so blocking it in
+   * MAX_COMPLEXITY would contradict two paid runs - and `findContradictions`
+   * would rightly report that. But with the camera locked seven ways it still
+   * crept in far enough to clip Leo's arm out of frame at 4.5s, so automatic
+   * routing should not be spending $0.72 a scene on it either.
+   */
+  it("is still suitable - the evidence says it can do the work", () => {
+    expect(
+      checkSuitability({
+        provider: "runway",
+        model: GEN45,
+        complexity: "HIGH",
+        characterCount: 3,
+      }).allowed,
+    ).toBe(true);
+  });
+
+  it("is nonetheless flagged as needing a deliberate choice", () => {
+    expect(requiresExplicitPin("runway", GEN45)).toMatch(/chưa phải mặc định/);
+  });
+
+  it("explains itself with the numbers, not just a verdict", () => {
+    // An operator deciding whether to pay for it needs the two scores that
+    // failed and the price, not the word "unproven".
+    const reason = requiresExplicitPin("runway", GEN45)!;
+    expect(reason).toContain("0,72");
+    expect(reason).toMatch(/camera 7/);
+  });
+
+  it("does not flag the model that IS cleared for its tier", () => {
+    expect(requiresExplicitPin("runway", TURBO)).toBeNull();
+  });
+
+  it("does not flag a whole provider because one of its models is unproven", () => {
+    // The same mistake as inheriting a ceiling by vendor, in the other
+    // direction: gen4_turbo earned its LOW tier and must keep it.
+    expect(requiresExplicitPin("runway")).toBeNull();
+    expect(requiresExplicitPin("openai", "sora-2:720x1280")).toBeNull();
   });
 });
