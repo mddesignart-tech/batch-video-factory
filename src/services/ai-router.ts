@@ -157,6 +157,7 @@ export function explainIncapable(model: ModelRegistry, ctx: RouteContext): strin
     }
     const suitability = checkSuitability({
       provider: model.provider,
+      model: model.modelId,
       complexity: ctx.complexity,
       characterCount: ctx.characterCount,
       sceneFlags: ctx.sceneFlags,
@@ -194,6 +195,7 @@ export function isCapable(model: ModelRegistry, ctx: RouteContext): boolean {
     if (
       !checkSuitability({
         provider: model.provider,
+        model: model.modelId,
         complexity: ctx.complexity,
         characterCount: ctx.characterCount,
         sceneFlags: ctx.sceneFlags,
@@ -247,6 +249,7 @@ function usageForCandidate(
     ...ctx.usage,
     seconds: billedVideoSeconds({
       provider: model.provider,
+      model: model.modelId,
       size,
       requestedSeconds: ctx.usage.seconds,
       // Err towards "a keyframe is being sent". For Veo that is the more

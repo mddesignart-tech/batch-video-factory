@@ -233,6 +233,7 @@ async function main(): Promise<void> {
       const { size } = splitModelSize(sora.modelId);
       const seconds = billedVideoSeconds({
         provider: sora.provider,
+        model: sora.modelId,
         size,
         requestedSeconds: r.duration,
         hasKeyframe: true,
@@ -255,6 +256,7 @@ async function main(): Promise<void> {
       const { size } = splitModelSize(runway.modelId);
       const seconds = billedVideoSeconds({
         provider: runway.provider,
+        model: runway.modelId,
         size,
         requestedSeconds: r.duration,
         hasKeyframe: true,
@@ -273,6 +275,7 @@ async function main(): Promise<void> {
   for (const r of rows) {
     const rwSec = billedVideoSeconds({
       provider: "runway",
+      model: runway?.modelId ?? "gen4_turbo:720x1280",
       size: "720x1280",
       requestedSeconds: r.duration,
       hasKeyframe: true,

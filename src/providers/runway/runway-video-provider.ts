@@ -12,6 +12,7 @@ import type { ProviderStatus } from "@/domain/enums";
 import { prepareKeyframe } from "@/providers/openai/openai-video-provider";
 import type { VideoModelConfig } from "@/providers/video-config";
 import { logger } from "@/lib/logger";
+import { billedVideoSeconds } from "@/domain/video-duration";
 import {
   fitVideoPrompt,
   RUNWAY_MAX_PROMPT_CHARS,
@@ -51,14 +52,25 @@ export class RunwayVideoProvider implements VideoProvider {
     return this.config.apiKey.length > 0 ? "connected" : "missing_key";
   }
 
+  /** Seconds Runway will charge for, by THIS model's rule. */
+  private billedSeconds(seconds: number): number {
+    return billedVideoSeconds({
+      provider: this.config.providerName,
+      model: this.config.model,
+      size: this.config.size,
+      requestedSeconds: seconds,
+      hasKeyframe: true,
+    });
+  }
+
   /** Billed at the duration Runway will actually use, not the one requested. */
   private costFor(seconds: number): number {
-    const billed = nearestDuration(seconds);
+    const billed = this.billedSeconds(seconds);
     return Math.round(billed * this.config.pricePerSecond * 1e6) / 1e6;
   }
 
   async estimateCost(req: VideoRequest): Promise<CostEstimate> {
-    const billed = nearestDuration(req.durationSeconds);
+    const billed = this.billedSeconds(req.durationSeconds);
     return {
       amount: this.costFor(req.durationSeconds),
       unit: "per_second",

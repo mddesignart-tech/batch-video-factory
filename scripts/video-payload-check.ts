@@ -200,6 +200,7 @@ async function main(): Promise<void> {
   const requested = scene.duration;
   const billed = billedVideoSeconds({
     provider,
+    model: model.modelId,
     size,
     requestedSeconds: requested,
     hasKeyframe: true,

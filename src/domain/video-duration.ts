@@ -19,8 +19,25 @@
  * the cap that should have been refused.
  */
 
-/** Clip lengths Runway sells. A 4-second scene is billed as 5. */
-export const RUNWAY_DURATIONS = [5, 10] as const;
+/**
+ * Clip lengths Runway's gen4_turbo sells. A 4-second scene is billed as 5.
+ *
+ * Per MODEL, not per provider: gen4.5 bills by the second across a 2-10 second
+ * range, so applying gen4_turbo's quantisation to it would quote a 6-second
+ * scene as 10 and refuse a request that is actually affordable. The rule was
+ * always model-specific; there was only ever one model to notice it with.
+ */
+export const RUNWAY_TURBO_DURATIONS = [5, 10] as const;
+
+/** Kept under its old name for callers that mean gen4_turbo. */
+export const RUNWAY_DURATIONS = RUNWAY_TURBO_DURATIONS;
+
+/** gen4.5 accepts any whole number of seconds in this range. */
+export const RUNWAY_GEN45_MIN_SECONDS = 2;
+export const RUNWAY_GEN45_MAX_SECONDS = 10;
+
+/** Runway models that bill per second rather than per fixed clip length. */
+const RUNWAY_PER_SECOND_MODELS = new Set(["gen4.5"]);
 
 /** Clip lengths Veo sells, before its 8-second forcing rules apply. */
 export const VEO_DURATIONS = [4, 6, 8] as const;
@@ -80,11 +97,29 @@ export function billedVideoSeconds(args: {
   size: string;
   requestedSeconds: number;
   hasKeyframe: boolean;
+  /**
+   * API model name, without the size suffix.
+   *
+   * Optional so existing callers keep working, but pass it for Runway: its two
+   * models bill differently, and guessing wrong quotes a 6-second gen4.5 clip
+   * at gen4_turbo's 10-second minimum.
+   */
+  model?: string;
 }): number {
-  const { provider, size, requestedSeconds, hasKeyframe } = args;
+  const { provider, size, requestedSeconds, hasKeyframe, model } = args;
   switch (provider) {
-    case "runway":
-      return nearestFrom(RUNWAY_DURATIONS, requestedSeconds);
+    case "runway": {
+      const apiModel = model ? splitModelSize(model).apiModel : "";
+      if (RUNWAY_PER_SECOND_MODELS.has(apiModel)) {
+        // Whole seconds, clamped to the range the model sells. Rounding UP so
+        // a fractional scene length is never quoted short.
+        return Math.min(
+          RUNWAY_GEN45_MAX_SECONDS,
+          Math.max(RUNWAY_GEN45_MIN_SECONDS, Math.ceil(requestedSeconds)),
+        );
+      }
+      return nearestFrom(RUNWAY_TURBO_DURATIONS, requestedSeconds);
+    }
     case "google":
       if (forcedToEightSeconds(size, hasKeyframe)) return 8;
       return nearestFrom(VEO_DURATIONS, requestedSeconds);
@@ -104,6 +139,7 @@ export function isDurationPaddedBy(args: {
   size: string;
   requestedSeconds: number;
   hasKeyframe: boolean;
+  model?: string;
 }): number {
   return billedVideoSeconds(args) - args.requestedSeconds;
 }

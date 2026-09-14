@@ -4,7 +4,7 @@ import { ProviderError } from "@/providers/types";
 import { logger } from "@/lib/logger";
 import { classifyHttpError } from "@/providers/openai/openai-client";
 import type { VideoModelConfig } from "@/providers/video-config";
-import { RUNWAY_DURATIONS, nearestFrom } from "@/domain/video-duration";
+import { RUNWAY_DURATIONS, billedVideoSeconds } from "@/domain/video-duration";
 
 /**
  * HTTP client for the Runway video API.
@@ -68,9 +68,24 @@ export function toRunwayRatio(size: string): string {
   return size.replace("x", ":");
 }
 
-/** Nearest allowed duration, never rounding DOWN into a shorter paid clip. */
-export function nearestDuration(seconds: number): number {
-  return nearestFrom(RUNWAY_DURATIONS, seconds);
+/**
+ * Duration this MODEL will accept, and be billed for.
+ *
+ * gen4_turbo sells 5- and 10-second clips only; gen4.5 bills by the second
+ * across 2-10. Sending a quantised length to gen4.5 would buy a different clip
+ * than the scene needs, and quoting one would refuse a request that is
+ * affordable - so the rule follows the model rather than the vendor.
+ *
+ * The single-argument form is kept for callers that mean gen4_turbo.
+ */
+export function nearestDuration(seconds: number, model?: string): number {
+  return billedVideoSeconds({
+    provider: "runway",
+    model: model ?? "gen4_turbo",
+    size: "720x1280",
+    requestedSeconds: seconds,
+    hasKeyframe: true,
+  });
 }
 
 /** A keyframe has to travel inside JSON here, so it becomes a data URI. */
@@ -141,7 +156,7 @@ export async function createTask(
         promptImage: toDataUri(request.keyframePath),
         promptText: request.prompt,
         ratio: toRunwayRatio(config.size),
-        duration: nearestDuration(request.seconds),
+        duration: nearestDuration(request.seconds, config.model),
       }),
       signal: controller.signal,
     });
@@ -183,7 +198,7 @@ export async function createTask(
       provider: config.providerName,
       model: config.model,
       durationMs,
-      message: `Đã tạo task ${json.id}, ${nearestDuration(request.seconds)}s ${config.size}`,
+      message: `Đã tạo task ${json.id}, ${nearestDuration(request.seconds, config.model)}s ${config.size}`,
     });
 
     return { id: json.id, status: json.status ?? "PENDING", progress: 0 };

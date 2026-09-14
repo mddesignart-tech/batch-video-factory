@@ -137,8 +137,25 @@ async function main(): Promise<void> {
     where: { provider: "runway", type: "video" },
     orderBy: { price: "asc" },
   });
-  const model = rows[0];
-  check("Co model video", model !== undefined, `${rows.length} dong trong ModelRegistry`);
+  // Cheapest by default, but a benchmark usually names the model it is testing -
+  // and picking the cheapest silently would preflight a different model than
+  // the one about to be paid for.
+  const wantModel = arg("model", "");
+  const model = wantModel !== "" ? rows.find((r) => r.modelId === wantModel) : rows[0];
+  if (wantModel !== "" && !model) {
+    console.log(`
+  [DUNG] Khong co model "${wantModel}" cho runway. Co: ` +
+      `${rows.map((r) => r.modelId).join(", ")}
+`);
+    process.exitCode = 1;
+    return;
+  }
+  check(
+    "Co model video",
+    model !== undefined,
+    `${rows.length} dong trong ModelRegistry` +
+      (wantModel !== "" ? `, dang kiem tra ${wantModel}` : ""),
+  );
   if (!model) {
     console.log("\n  [DUNG] Khong co model nao de chay.\n");
     process.exitCode = 1;
@@ -228,6 +245,7 @@ async function main(): Promise<void> {
   const requested = Number(arg("duration", String(scene.duration)));
   const billed = billedVideoSeconds({
     provider: "runway",
+    model: model.modelId,
     size,
     requestedSeconds: requested,
     hasKeyframe: Boolean(kf),

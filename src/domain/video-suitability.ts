@@ -1,4 +1,5 @@
 import type { Complexity } from "./enums";
+import { splitModelSize } from "./video-duration";
 
 /**
  * Which video model may be trusted with which kind of scene.
@@ -30,6 +31,17 @@ export const RUNWAY_UNSUITABLE = "RUNWAY_UNSUITABLE";
 
 export interface SuitabilityInput {
   provider: string;
+  /**
+   * Registry model id, e.g. "gen4_turbo:720x1280".
+   *
+   * Required in practice for Runway. The limits below were measured on
+   * gen4_turbo, and applying them to gen4.5 - a different model that has never
+   * been tested - would be exactly the "inventing a limit for something
+   * untested" mistake this file warns about two paragraphs up. Omitting it
+   * falls back to provider-wide rules, which is right for a provider whose
+   * models genuinely behave alike.
+   */
+  model?: string;
   complexity: Complexity;
   characterCount: number;
   /** Markers already recorded against this scene. */
@@ -51,15 +63,36 @@ export interface SuitabilityVerdict {
  * guess that picks one.
  */
 const MAX_COMPLEXITY: Record<string, Complexity> = {
-  runway: "LOW",
+  // Keyed by "provider/apiModel". gen4_turbo failed scene 4 twice and passed
+  // scene 5; that is a fact about gen4_turbo and about nothing else.
+  "runway/gen4_turbo": "LOW",
 };
 
 /** How many characters a provider has actually been shown to handle. */
 const MAX_CHARACTERS: Record<string, number> = {
-  // Two characters standing together is the case that failed twice. Until a
-  // two-character scene succeeds, one is what the evidence supports.
-  runway: 2,
+  // Two characters standing together is the case gen4_turbo failed twice.
+  "runway/gen4_turbo": 2,
 };
+
+/**
+ * The key a rule is looked up under: the exact model first, the bare provider
+ * as a fallback.
+ *
+ * Model first because that is the level evidence is actually gathered at. A
+ * provider-wide entry still works for a vendor whose models behave alike, but
+ * nothing should inherit a limit just for sharing a company.
+ */
+function ruleKeys(provider: string, model?: string): string[] {
+  const apiModel = model ? splitModelSize(model).apiModel : "";
+  return apiModel ? [`${provider}/${apiModel}`, provider] : [provider];
+}
+
+function lookup<T>(table: Record<string, T>, provider: string, model?: string): T | undefined {
+  for (const key of ruleKeys(provider, model)) {
+    if (key in table) return table[key];
+  }
+  return undefined;
+}
 
 const RANK: Record<Complexity, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
 
@@ -78,23 +111,24 @@ export function checkSuitability(input: SuitabilityInput): SuitabilityVerdict {
     };
   }
 
-  const ceiling = MAX_COMPLEXITY[provider];
+  const ceiling = lookup(MAX_COMPLEXITY, provider, input.model);
   if (ceiling && RANK[complexity] > RANK[ceiling]) {
     return {
       allowed: false,
       reason:
-        `Cảnh ${complexity} vượt mức ${ceiling} mà ${provider} đã được kiểm chứng. ` +
-        `Benchmark: ${provider} hỏng ở cảnh phức tạp, đạt ở cảnh đơn giản.`,
+        `Cảnh ${complexity} vượt mức ${ceiling} mà ${input.model ?? provider} ` +
+        `đã được kiểm chứng. Benchmark: model này hỏng ở cảnh phức tạp, ` +
+        `đạt ở cảnh đơn giản.`,
     };
   }
 
-  const maxChars = MAX_CHARACTERS[provider];
+  const maxChars = lookup(MAX_CHARACTERS, provider, input.model);
   if (maxChars !== undefined && characterCount > maxChars) {
     return {
       allowed: false,
       reason:
         `Cảnh có ${characterCount} nhân vật, nhiều hơn mức ${maxChars} mà ` +
-        `${provider} đã chứng minh xử lý được.`,
+        `${input.model ?? provider} đã chứng minh xử lý được.`,
     };
   }
 

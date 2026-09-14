@@ -6,6 +6,11 @@ import {
   RUNWAY_UNSUITABLE,
 } from "@/domain/video-suitability";
 
+/** The model every measured limit here was gathered from. */
+const TURBO = "gen4_turbo:720x1280";
+/** A sibling model at the same vendor that nothing has been measured about. */
+const GEN45 = "gen4.5:720x1280";
+
 /**
  * These rules exist because clips were paid for and looked at, not because a
  * provider seemed better on paper.
@@ -22,6 +27,7 @@ describe("complexity ceiling", () => {
   it("lets Runway take a simple scene - the one it actually succeeded on", () => {
     const v = checkSuitability({
       provider: "runway",
+      model: TURBO,
       complexity: "LOW",
       characterCount: 1,
     });
@@ -31,6 +37,7 @@ describe("complexity ceiling", () => {
   it("keeps Runway out of MEDIUM", () => {
     const v = checkSuitability({
       provider: "runway",
+      model: TURBO,
       complexity: "MEDIUM",
       characterCount: 1,
     });
@@ -40,14 +47,38 @@ describe("complexity ceiling", () => {
 
   it("keeps Runway out of HIGH", () => {
     expect(
-      checkSuitability({ provider: "runway", complexity: "HIGH", characterCount: 1 })
+      checkSuitability({
+        provider: "runway",
+        model: TURBO,
+        complexity: "HIGH",
+        characterCount: 1,
+      })
         .allowed,
     ).toBe(false);
+  });
+
+  it("does NOT apply a sibling model's measured limits to an untested one", () => {
+    // gen4_turbo failed scene 4 and passed scene 5. That is a fact about
+    // gen4_turbo. gen4.5 is a different model at the same vendor with no
+    // evidence either way, and inheriting a ceiling just for sharing a company
+    // is the same guess this file refuses to make for a whole provider.
+    for (const complexity of ["LOW", "MEDIUM", "HIGH"] as const) {
+      expect(
+        checkSuitability({
+          provider: "runway",
+          model: GEN45,
+          complexity,
+          characterCount: 3,
+        }).allowed,
+        complexity,
+      ).toBe(true);
+    }
   });
 
   it("says WHY, in terms of the benchmark rather than a rule number", () => {
     const v = checkSuitability({
       provider: "runway",
+      model: TURBO,
       complexity: "HIGH",
       characterCount: 1,
     });
@@ -59,7 +90,12 @@ describe("complexity ceiling", () => {
     // that blocks a model is as wrong as a guess that picks one.
     for (const complexity of ["LOW", "MEDIUM", "HIGH"] as const) {
       expect(
-        checkSuitability({ provider: "openai", complexity, characterCount: 3 })
+        checkSuitability({
+          provider: "openai",
+          model: "sora-2:720x1280",
+          complexity,
+          characterCount: 3,
+        })
           .allowed,
       ).toBe(true);
     }
@@ -69,7 +105,12 @@ describe("complexity ceiling", () => {
 describe("character ceiling", () => {
   it("allows Runway up to two characters", () => {
     expect(
-      checkSuitability({ provider: "runway", complexity: "LOW", characterCount: 2 })
+      checkSuitability({
+        provider: "runway",
+        model: TURBO,
+        complexity: "LOW",
+        characterCount: 2,
+      })
         .allowed,
     ).toBe(true);
   });
@@ -77,6 +118,7 @@ describe("character ceiling", () => {
   it("refuses three, which nothing has shown it can do", () => {
     const v = checkSuitability({
       provider: "runway",
+      model: TURBO,
       complexity: "LOW",
       characterCount: 3,
     });
@@ -91,6 +133,7 @@ describe("a scene the provider has already refused", () => {
     // identically. A third would have done the same.
     const v = checkSuitability({
       provider: "runway",
+      model: TURBO,
       complexity: "LOW",
       characterCount: 2,
       sceneFlags: [RUNWAY_UNSUITABLE],
@@ -104,6 +147,7 @@ describe("a scene the provider has already refused", () => {
     // scene, which beats a rule inferred from other scenes.
     const v = checkSuitability({
       provider: "runway",
+      model: TURBO,
       complexity: "LOW",
       characterCount: 1,
       sceneFlags: [RUNWAY_UNSUITABLE],

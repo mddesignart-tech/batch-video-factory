@@ -162,6 +162,7 @@ async function main(): Promise<void> {
   const requested = Number(arg("duration", String(scene.duration)));
   const billed = billedVideoSeconds({
     provider: PROVIDER,
+    model: MODEL_ID,
     size,
     requestedSeconds: requested,
     hasKeyframe: Boolean(scene.imagePath),

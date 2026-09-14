@@ -839,6 +839,35 @@ export const SEED_MODELS: SeedModel[] = [
     notes:
       "Nhan instructions de dieu khien cach dien. 10 giong co san. Tra ve wav/mp3/opus/aac/flac.",
   },
+  // ---- Runway, gen4.5 ----
+  // 12 credits/second at $0.01/credit = $0.12/second, from Runway's pricing
+  // page 2026-09-14. Nearly 2.5x gen4_turbo, which is the whole question this
+  // model exists to answer: gen4_turbo is cheap and refuses busy scenes, so a
+  // dearer model is only worth it if it actually handles them.
+  //
+  // Unlike gen4_turbo this one bills BY THE SECOND across 2-10 seconds - no
+  // 5-second minimum - so a 6-second scene costs 6 seconds, not 10.
+  {
+    provider: "runway",
+    modelId: "gen4.5:720x1280",
+    displayName: "Runway Gen-4.5 — dọc 720x1280",
+    type: "video",
+    enabled: false,
+    priceUnit: "per_second",
+    price: 0.12,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    maxDuration: 10,
+    // Ratings are PLACEHOLDERS until a real clip is scored. gen4_turbo earned
+    // its 8s from measured output; this model has none yet, so it is seeded at
+    // the same numbers rather than flattered with better ones.
+    qualityRating: 8,
+    speedRating: 7,
+    consistencyRating: 8,
+    lastVerifiedAt: "2026-09-14",
+    notes:
+      "Image-to-video. Tinh tien theo giay, 2-10s, KHONG co muc toi thieu 5s nhu gen4_turbo.",
+  },
   {
     provider: "elevenlabs",
     modelId: "eleven-voice",
