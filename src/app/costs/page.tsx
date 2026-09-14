@@ -14,6 +14,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { formatDateVi, formatUSD } from "@/lib/utils";
 import { costSummary, type CostPeriod } from "@/services/cost-tracker";
+import { providerSpendBreakdown } from "@/services/provider-budget";
 import { spendStatus } from "@/services/spend-guard";
 import { COST_CATEGORY_LABELS } from "@/services/cost-estimator";
 import type { CostCategory } from "@/domain/enums";
@@ -28,7 +29,8 @@ const PERIODS: { key: CostPeriod; label: string }[] = [
 ];
 
 export default async function CostsPage() {
-  const [today, week, month, all, spend, recent, byProvider] = await Promise.all([
+  const [today, week, month, all, spend, recent, byProvider, providerRows] =
+    await Promise.all([
     costSummary("today"),
     costSummary("week"),
     costSummary("month"),
@@ -45,6 +47,7 @@ export default async function CostsPage() {
       _sum: { amount: true },
       _count: { _all: true },
     }),
+    providerSpendBreakdown(),
   ]);
 
   const summaries = { today, week, month, all };
@@ -52,6 +55,7 @@ export default async function CostsPage() {
     1,
     ...Object.values(all.byCategory).map((v) => v),
   );
+  const maxProvider = Math.max(1, ...providerRows.map((r) => r.spentUsd));
 
   return (
     <>
@@ -134,6 +138,46 @@ export default async function CostsPage() {
                     </span>
                   </div>
                   <ProgressBar value={amount / maxCategory} />
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Chi phí theo nhà cung cấp</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Beside each provider's OWN wallet, never summed. Money at one
+                vendor cannot pay for work at another, and a combined total
+                would invite authorising a call the vendor is about to
+                refuse. */}
+            <p className="text-[11px] text-ink-400">
+              Mỗi hãng là một ví riêng — không cộng chung.
+            </p>
+            {providerRows.length === 0 ? (
+              <p className="text-xs text-ink-500">Chưa có chi phí thật nào.</p>
+            ) : (
+              providerRows.map((row) => (
+                <div key={row.provider}>
+                  <div className="mb-1 flex justify-between text-xs">
+                    <span className="text-ink-300">
+                      {row.provider}
+                      <span className="ml-2 text-ink-500">{row.calls} lần</span>
+                    </span>
+                    <span className="tabular-nums text-ink-200">
+                      {formatUSD(row.spentUsd)}
+                      {row.remainingUsd !== null && (
+                        <span className="ml-2 text-ink-500">
+                          còn {formatUSD(row.remainingUsd)}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <ProgressBar
+                    value={maxProvider > 0 ? row.spentUsd / maxProvider : 0}
+                  />
                 </div>
               ))
             )}

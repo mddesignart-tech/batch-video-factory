@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { isMockMode } from "@/lib/env";
 import { round } from "@/lib/utils";
+import { assertProviderBudget } from "./provider-budget";
 
 /**
  * Hard spend cap for real provider calls.
@@ -18,7 +19,13 @@ import { round } from "@/lib/utils";
 export const SPEND_CAP_SETTING = "spend.cap";
 export const SPEND_CONFIRM_SETTING = "spend.confirmedProviders";
 
-/** Default authorised ceiling for the whole app, in USD. */
+/**
+ * Default authorised ceiling for the whole app, in USD.
+ *
+ * This is a limit this TOOL imposes on itself. It is not an account balance and
+ * it is not the sum of any vendor's credit - raising it grants permission, it
+ * does not create money.
+ */
 export const DEFAULT_SPEND_CAP = 0.5;
 
 export class SpendCapExceededError extends Error {
@@ -214,10 +221,17 @@ export const LOCAL_FREE_PROVIDERS = new Set(["ollama", "lmstudio"]);
 /**
  * The gate every real provider call must pass.
  *
- * Three conditions, in order of how badly getting them wrong would hurt:
+ * Four conditions, in order of how badly getting them wrong would hurt:
  *   1. mock mode short-circuits (nothing to guard),
  *   2. the provider/model pair must have been explicitly confirmed,
- *   3. projected spend must stay under the authorised cap.
+ *   3. projected spend must stay under the app-wide authorised cap,
+ *   4. the PROVIDER'S OWN wallet must be able to cover it.
+ *
+ * Three and four are different questions and both have to be asked. The cap
+ * says "this tool has spent as much as I authorised"; the wallet says "that
+ * account has no money". Money topped up at one vendor buys nothing at another,
+ * so treating every balance as one pot would wave through a request the vendor
+ * is about to refuse with a 402 - after the guard had called it affordable.
  */
 export async function assertCanSpend(opts: {
   provider: string;
@@ -249,6 +263,14 @@ export async function assertCanSpend(opts: {
         projected,
       );
     }
+
+    // The vendor's own wallet, checked separately and never merged with the
+    // others. See services/provider-budget for why adding them is the mistake.
+    await assertProviderBudget({
+      provider: opts.provider,
+      model: opts.model,
+      estimatedCost: opts.estimatedCost,
+    });
   }
 
   return status;

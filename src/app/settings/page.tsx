@@ -12,15 +12,18 @@ import { ffmpegVersion, resolveFfmpeg, resolveFfprobe } from "@/media/ffmpeg";
 import { SettingsForm } from "./settings-form";
 import { AudioMixForm } from "./audio-mix-form";
 import { SpendCapForm } from "@/components/spend-gate";
+import { ProviderBudgets } from "@/components/provider-budgets";
+import { providerSpendBreakdown } from "@/services/provider-budget";
 import { spendStatus } from "@/services/spend-guard";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [settings, version, spend] = await Promise.all([
+  const [settings, version, spend, budgets] = await Promise.all([
     getSettings(),
     ffmpegVersion(),
     spendStatus(),
+    providerSpendBreakdown(),
   ]);
 
   return (
@@ -51,6 +54,8 @@ export default async function SettingsPage() {
 
         <div className="space-y-4">
           <SpendCapForm cap={spend.cap} spent={spend.spent} />
+
+          <ProviderBudgets rows={budgets} />
 
           <Card>
             <CardHeader>
