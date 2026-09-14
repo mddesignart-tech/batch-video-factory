@@ -33,6 +33,7 @@ import { recordCost, spentOnProject } from "./cost-tracker";
 import { assertCanSpend } from "./spend-guard";
 import { consumeCreateToken } from "./create-token";
 import { parseDialogueLines } from "@/domain/dialogue-lines";
+import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
 import { probeDuration } from "@/media/ffmpeg";
 import { normalizeVoiceClip } from "@/media/audio-normalize";
 import { isMockMode } from "@/lib/env";
@@ -145,6 +146,8 @@ function routeFor(
     // seconds instead of 4 when an image is attached, so the estimate has to
     // follow the file on disk rather than the preference.
     keyframeAvailable: Boolean(scene.imagePath),
+    // Providers this scene has already defeated. Excluded from routing.
+    sceneFlags: parseJson<string[]>(scene.providerFlagsJson, []),
     budgetRemaining: ctx.budgetRemaining,
     usage,
     availableProviders: ctx.availableProviders,
@@ -434,6 +437,37 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
         error: err instanceof Error ? err.message.slice(0, 500) : String(err),
       },
     });
+
+    // Some failures mean "never send THIS scene to THIS provider again".
+    //
+    // Runway's INTERNAL.BAD_OUTPUT is the model saying it cannot make something
+    // acceptable from this input, which does not change on a retry - scene 4
+    // was attempted twice with byte-identical requests and failed identically.
+    // Recording that stops the router offering the same dead end, and stops the
+    // next operator paying to learn it a third time.
+    const code = err instanceof ProviderError ? err.code : null;
+    const flag = marksProviderUnsuitable(decision.provider, code);
+    if (flag) {
+      const current = parseJson<string[]>(ctx.scene.providerFlagsJson, []);
+      const next = withFlag(current, flag);
+      if (next.length !== current.length) {
+        await prisma.scene.update({
+          where: { id: ctx.scene.id },
+          data: { providerFlagsJson: JSON.stringify(next) },
+        });
+        await logger.warn({
+          event: "provider.marked_unsuitable",
+          provider: decision.provider,
+          model: decision.modelId,
+          projectId: ctx.project.id,
+          sceneId: ctx.scene.id,
+          message:
+            `Đánh dấu ${flag} cho cảnh này. ${decision.provider} sẽ không được ` +
+            `định tuyến vào đây nữa cho tới khi cảnh được sửa.`,
+        });
+      }
+    }
+
     void record;
     throw err;
   }

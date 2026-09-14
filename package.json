@@ -40,7 +40,8 @@
     "voice:normalize": "tsx scripts/voice-normalize.ts",
     "scene:audio": "tsx scripts/scene-audio-test.ts",
     "project:render": "tsx scripts/project-render-test.ts",
-    "project:voice": "tsx scripts/project-voice.ts"
+    "project:voice": "tsx scripts/project-voice.ts",
+    "routing:preview": "tsx scripts/routing-preview.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.1",

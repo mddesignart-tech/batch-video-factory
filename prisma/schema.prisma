@@ -357,6 +357,14 @@ model Scene {
   status            String   @default("pending")
   approved          Boolean  @default(false)
   skipped           Boolean  @default(false)
+  /// Markers a provider earned on this scene, as a JSON array of strings.
+  ///
+  /// RUNWAY_UNSUITABLE is written when Runway answers INTERNAL.BAD_OUTPUT: the
+  /// model is saying it cannot make something acceptable from this input, and
+  /// that does not change on a retry. The router then stops offering Runway
+  /// this scene instead of paying to learn the same thing again.
+  providerFlagsJson String   @default("[]")
+
   errorMessage      String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

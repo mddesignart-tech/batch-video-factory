@@ -8,6 +8,7 @@ import type {
 } from "@/domain/enums";
 import { costForModel, qualityIndex, valueIndex, type UsageUnits } from "./pricing";
 import { billedVideoSeconds, splitModelSize } from "@/domain/video-duration";
+import { checkSuitability } from "@/domain/video-suitability";
 import { round } from "@/lib/utils";
 
 /**
@@ -44,6 +45,14 @@ export interface RouteContext {
    * `needsReferenceImage` stands in for it.
    */
   keyframeAvailable?: boolean;
+  /**
+   * Markers recorded against this scene, such as RUNWAY_UNSUITABLE.
+   *
+   * A provider that has already refused this exact scene is excluded from it:
+   * the two scene-4 attempts were byte-identical and failed identically, and a
+   * third would have done the same.
+   */
+  sceneFlags?: string[];
   /** Dollars still available for this project/batch. */
   budgetRemaining: number;
   usage: UsageUnits;
@@ -146,6 +155,13 @@ export function explainIncapable(model: ModelRegistry, ctx: RouteContext): strin
     if (ctx.needs1080p && !model.supports1080p) {
       return "chế độ Chất lượng cao yêu cầu 1080p gốc, model này không có";
     }
+    const suitability = checkSuitability({
+      provider: model.provider,
+      complexity: ctx.complexity,
+      characterCount: ctx.characterCount,
+      sceneFlags: ctx.sceneFlags,
+    });
+    if (!suitability.allowed) return suitability.reason;
     if (
       ctx.consistencyRequired &&
       ctx.characterCount >= 2 &&
@@ -172,6 +188,20 @@ export function isCapable(model: ModelRegistry, ctx: RouteContext): boolean {
       return false;
     }
     if (ctx.needs1080p && !model.supports1080p) return false;
+
+    // Benchmark evidence, not preference. A provider that has actually refused
+    // this class of scene is excluded from it - see domain/video-suitability.
+    if (
+      !checkSuitability({
+        provider: model.provider,
+        complexity: ctx.complexity,
+        characterCount: ctx.characterCount,
+        sceneFlags: ctx.sceneFlags,
+      }).allowed
+    ) {
+      return false;
+    }
+
     // Two characters that must stay on-model need explicit reference support.
     if (
       ctx.consistencyRequired &&
