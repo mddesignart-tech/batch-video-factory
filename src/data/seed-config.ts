@@ -104,10 +104,14 @@ export const SEED_CHARACTERS: SeedCharacter[] = [
     // Ballad is steadier and lower than Echo, so Leo cannot be mistaken for Max
     // on audio alone - the two of them share most scenes.
     voiceId: "ballad",
+    // Brisker than the first pass. The original delivery was clear but read
+    // slow and instructional, which is the wrong register for a Short: Leo is
+    // a friend making a point, not a narrator reading a lesson.
     voiceInstructions:
-      "Speak calmly and clearly with a mildly amused tone, " +
+      "Speak calmly and clearly with a mildly amused tone. " +
+      "Keep the delivery conversational and slightly brisk, " +
       "as if explaining something obvious to a funny friend. " +
-      "Use natural conversational English.",
+      "Clear enough for English learners, but do not sound slow or instructional.",
     voiceSpeed: 1,
     voiceGender: "male",
     voiceAccent: "US",
@@ -137,9 +141,13 @@ export const SEED_CHARACTERS: SeedCharacter[] = [
     voiceProvider: "openai",
     voiceModel: "gpt-4o-mini-tts",
     voiceId: "coral",
+    // "Dry humour" rather than "sarcastic": the first wording pushed the model
+    // towards a theatrical read, and the joke lands better underplayed.
     voiceInstructions:
-      "Speak with a bright, playful and slightly sarcastic tone. " +
-      "Friendly, expressive, natural and easy to understand.",
+      "Speak with a bright, playful tone with a hint of dry humor. " +
+      "Friendly, natural and expressive. " +
+      "Avoid sounding theatrical or overly sarcastic. " +
+      "Keep the English clear and conversational.",
     voiceSpeed: 1,
     voiceGender: "female",
     voiceAccent: "US",

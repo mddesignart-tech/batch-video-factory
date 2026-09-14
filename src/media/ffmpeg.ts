@@ -123,7 +123,7 @@ export const FFMPEG_MISSING_MESSAGE =
 function run(
   binary: string,
   args: string[],
-  opts: { cwd?: string; timeoutMs?: number } = {},
+  opts: { cwd?: string; timeoutMs?: number; keepAllOutput?: boolean } = {},
 ): Promise<FfmpegResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
@@ -136,8 +136,15 @@ function run(
     let stderr = "";
     // FFmpeg is chatty on stderr; cap what we keep so a long render cannot
     // balloon memory while still leaving enough tail to diagnose a failure.
+    //
+    // `keepAllOutput` exists for capability probes. `-filters` prints far more
+    // than 20000 characters, and keeping only the TAIL silently dropped every
+    // filter early in the alphabet - `amix` and `areverse` read as missing on a
+    // build that has both. A capability check that answers "no" for a filter
+    // that exists is worse than no check at all, because the caller then
+    // disables a feature that would have worked.
     const keep = (buf: string, chunk: string) =>
-      (buf + chunk).slice(-20000);
+      opts.keepAllOutput ? buf + chunk : (buf + chunk).slice(-20000);
 
     child.stdout.on("data", (d: Buffer) => {
       stdout = keep(stdout, d.toString());
@@ -177,7 +184,7 @@ function run(
 
 export async function ffmpeg(
   args: string[],
-  opts: { cwd?: string; timeoutMs?: number } = {},
+  opts: { cwd?: string; timeoutMs?: number; keepAllOutput?: boolean } = {},
 ): Promise<FfmpegResult> {
   const binary = resolveFfmpeg();
   if (!binary) throw new FfmpegError(FFMPEG_MISSING_MESSAGE, "", args);
@@ -212,7 +219,9 @@ let filterCache: Set<string> | null = null;
 export async function availableFilters(): Promise<Set<string>> {
   if (filterCache) return filterCache;
   try {
-    const { stdout } = await ffmpeg(["-hide_banner", "-filters"]);
+    const { stdout } = await ffmpeg(["-hide_banner", "-filters"], {
+      keepAllOutput: true,
+    });
     const found = new Set<string>();
     for (const line of stdout.split("\n")) {
       const match = /^\s*[TSC.]{3,}\s+(\S+)/.exec(line);

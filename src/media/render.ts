@@ -167,6 +167,42 @@ export function buildConcatArgs(listFile: string, output: string): string[] {
 }
 
 /**
+ * Music level when nobody is speaking. Low enough to sit under dialogue, loud
+ * enough to be heard in the gaps.
+ */
+const MUSIC_BED_GAIN = 0.25;
+
+/**
+ * Duck the music under the voice, rather than just turning it down.
+ *
+ * The old filter was `volume=0.18` plus `amix`, which is a fixed attenuation -
+ * the music sat at one level whether anyone was speaking or not. The comment
+ * above it claimed ducking; it never did any.
+ *
+ * Two things were wrong and the second one mattered more:
+ *
+ *   1. No sidechain, so quiet dialogue still competed with the bed.
+ *   2. `amix` normalises by default, dividing every input by the number of
+ *      inputs. Adding music therefore dropped the VOICE by 6 dB - the opposite
+ *      of the requirement that speech stay clearly above the music. That is
+ *      what `normalize=0` fixes.
+ *
+ * The voice is split: one copy goes to the mix untouched, the other drives the
+ * compressor's sidechain, so the voice controls the music without being
+ * processed itself. Attack is fast enough to catch a word's start; release is
+ * slow enough that the bed does not pump between syllables.
+ */
+export function buildDuckFilter(): string {
+  return [
+    `[0:a]asplit=2[voice][key]`,
+    `[1:a]volume=${MUSIC_BED_GAIN}[bed]`,
+    `[bed][key]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=350:makeup=1[ducked]`,
+    // normalize=0 keeps the voice at full level. Without it amix halves both.
+    `[voice][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`,
+  ].join(";");
+}
+
+/**
  * Burn subtitles and (optionally) duck background music under the voice.
  *
  * `subtitleFile` and `musicFile` are bare filenames resolved against the process
@@ -187,9 +223,7 @@ export function buildFinalArgs(opts: {
   if (musicFile) args.push("-stream_loop", "-1", "-i", musicFile);
 
   const videoFilter = subtitleFile ? `subtitles=${subtitleFile}` : null;
-  const audioFilter = musicFile
-    ? `[1:a]volume=0.18[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[a]`
-    : null;
+  const audioFilter = musicFile ? buildDuckFilter() : null;
 
   if (videoFilter && audioFilter) {
     args.push("-filter_complex", `[0:v]${videoFilter}[v];${audioFilter}`);

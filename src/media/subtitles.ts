@@ -45,6 +45,90 @@ export function buildCues(
   return cues;
 }
 
+/** Smallest audible pause between two speakers. Below this they read as one. */
+export const SPEAKER_GAP_SECONDS = 0.12;
+
+export interface SpokenLine {
+  /** MEASURED length of the rendered audio. Never a prediction. */
+  durationSec: number;
+  text: string;
+  /** Who says it, so a change of speaker can be spaced. */
+  speaker?: string;
+}
+
+/**
+ * Cues timed against the audio that will actually play.
+ *
+ * `buildCues` above lays cues out on the SCENE's planned duration, which is a
+ * figure chosen while writing the script. Speech does not obey it: a levelled,
+ * trimmed clip is whatever length it turned out to be, and timing subtitles
+ * against the plan puts the words progressively out of step with the voice.
+ *
+ * So this takes the measured length of each line instead. When a scene's audio
+ * runs shorter than its planned duration, the remainder is silence at the end
+ * rather than stretched captions.
+ *
+ * Two speakers never share a moment: a gap is inserted at every change of
+ * speaker so one line has visibly ended before the next begins.
+ */
+export function buildCuesFromAudio(
+  scenes: { plannedDuration: number; lines: SpokenLine[] }[],
+): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  let cursor = 0;
+
+  for (const scene of scenes) {
+    let withinScene = 0;
+    let previousSpeaker: string | undefined;
+
+    for (const line of scene.lines) {
+      const text = line.text.trim();
+      const duration = Math.max(0.3, line.durationSec);
+
+      // A change of speaker gets a real pause. Without it the two lines abut
+      // and the captions read as one person talking over themselves.
+      if (previousSpeaker !== undefined && line.speaker !== previousSpeaker) {
+        withinScene += SPEAKER_GAP_SECONDS;
+      }
+
+      if (text.length > 0) {
+        cues.push({
+          startSeconds: cursor + withinScene,
+          endSeconds: cursor + withinScene + duration - 0.06,
+          text,
+        });
+      }
+      withinScene += duration;
+      previousSpeaker = line.speaker;
+    }
+
+    // The scene lasts as long as its visuals OR its speech, whichever is
+    // longer. Cutting the picture while a line is still being spoken is the
+    // one outcome neither figure should be allowed to cause.
+    cursor += Math.max(scene.plannedDuration, withinScene);
+  }
+
+  return cues;
+}
+
+/** Total runtime implied by measured audio, for checking against the video. */
+export function timelineLength(
+  scenes: { plannedDuration: number; lines: SpokenLine[] }[],
+): number {
+  return scenes.reduce((total, scene) => {
+    let withinScene = 0;
+    let previousSpeaker: string | undefined;
+    for (const line of scene.lines) {
+      if (previousSpeaker !== undefined && line.speaker !== previousSpeaker) {
+        withinScene += SPEAKER_GAP_SECONDS;
+      }
+      withinScene += Math.max(0.3, line.durationSec);
+      previousSpeaker = line.speaker;
+    }
+    return total + Math.max(scene.plannedDuration, withinScene);
+  }, 0);
+}
+
 export function wrapSubtitle(text: string): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];

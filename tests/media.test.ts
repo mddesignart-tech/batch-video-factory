@@ -154,7 +154,12 @@ describe("final render arguments", () => {
     expect(vf).not.toMatch(/[A-Z]:/);
   });
 
-  it("mixes background music under the voice at reduced volume", () => {
+  it("ducks background music under the voice and leaves the voice at full level", () => {
+    // This test previously asserted `volume=0.18` - a FIXED attenuation that
+    // the surrounding comment already described as ducking, which it was not.
+    // Worse, `amix` normalises by default, so adding music quietly dropped the
+    // voice by 6 dB: the opposite of "speech must stay above the music".
+    // The assertions now pin the corrected behaviour.
     const args = buildFinalArgs({
       input: "joined.mp4",
       subtitleFile: null,
@@ -163,7 +168,8 @@ describe("final render arguments", () => {
       output: "final.mp4",
     });
     const filter = args[args.indexOf("-filter_complex") + 1]!;
-    expect(filter).toContain("volume=0.18");
+    expect(filter).toContain("sidechaincompress");
+    expect(filter).toContain("normalize=0");
     expect(filter).toContain("amix=inputs=2");
   });
 

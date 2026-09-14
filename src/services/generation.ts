@@ -34,6 +34,7 @@ import { assertCanSpend } from "./spend-guard";
 import { consumeCreateToken } from "./create-token";
 import { parseDialogueLines } from "@/domain/dialogue-lines";
 import { probeDuration } from "@/media/ffmpeg";
+import { normalizeVoiceClip } from "@/media/audio-normalize";
 import { isMockMode } from "@/lib/env";
 import { isFreeVideoProvider } from "@/providers/video-config";
 import { availableProviderNames } from "./provider-health";
@@ -1049,13 +1050,39 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
         asset: result,
       });
 
-      // Duration is MEASURED, not taken on trust: the mixer needs to know how
-      // long the audio really is, and a provider's promise is not a measurement.
+      // Level and trim BEFORE measuring.
+      //
+      // The three test clips came off the same model spanning more than ten
+      // decibels - Max at -16.0 LUFS, Leo at -26.9. A viewer sets the volume
+      // for Leo and then gets shouted at by Max. Per-character gain would fix
+      // those three and break the next three, so it is measured and automatic.
+      //
+      // Trimming also changes the length, which is why duration is taken from
+      // the FINISHED file: subtitles line up against the audio that ships, not
+      // against what came back from the vendor.
       let durationSec = 0;
       try {
-        durationSec = await probeDuration(result.filePath);
-      } catch {
-        durationSec = 0;
+        const levelled = await normalizeVoiceClip(result.filePath, result.filePath);
+        durationSec = levelled.durationSec;
+      } catch (normErr) {
+        // A levelling failure must not throw away audio that was paid for. Keep
+        // the clip, record the real duration, and say plainly that it is not
+        // levelled rather than letting it into a mix as if it were.
+        await logger.warn({
+          event: "audio.normalize_failed",
+          provider: used.provider,
+          model: used.modelId,
+          projectId: project.id,
+          sceneId: scene.id,
+          message: `Không chuẩn hoá được âm lượng, giữ nguyên tệp gốc: ${
+            normErr instanceof Error ? normErr.message : String(normErr)
+          }`,
+        });
+        try {
+          durationSec = await probeDuration(result.filePath);
+        } catch {
+          durationSec = 0;
+        }
       }
 
       await prisma.dialogueLine.update({
