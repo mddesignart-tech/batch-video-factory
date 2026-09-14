@@ -31,6 +31,9 @@ import {
 } from "./cost-estimator";
 import { recordCost, spentOnProject } from "./cost-tracker";
 import { assertCanSpend } from "./spend-guard";
+import { consumeCreateToken } from "./create-token";
+import { isMockMode } from "@/lib/env";
+import { isFreeVideoProvider } from "@/providers/video-config";
 import { availableProviderNames } from "./provider-health";
 import { targetForAspect } from "@/media/render";
 import {
@@ -185,6 +188,19 @@ export function idempotencyKey(opts: {
   );
 }
 
+/**
+ * Does this create need a single-use permit?
+ *
+ * Video only, and only when real money is in play. Mock mode and free local
+ * providers are excluded because there is nothing to authorise, and requiring a
+ * permit there would break every offline run and every test for no benefit.
+ */
+function needsCreatePermit(kind: string, provider: string): boolean {
+  if (kind !== "video") return false;
+  if (isMockMode()) return false;
+  return !isFreeVideoProvider(provider);
+}
+
 interface RunOptions {
   ctx: SceneContext;
   kind: AssetKind | "quality";
@@ -277,6 +293,24 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
       model: decision.modelId,
       estimatedCost: decision.estimatedCost,
     });
+
+    // "Can we afford it" and "did anyone authorise THIS purchase" are different
+    // questions, and the spend guard only answers the first. A create that
+    // fails for free spends nothing, so a retry loop passes the guard every
+    // time while issuing one real purchase attempt after another. Video is
+    // where that costs the most, so video creates need a single-use permit.
+    //
+    // Consumed BEFORE the request leaves, and never refunded on failure: the
+    // attempt is what the permit covers, not the outcome.
+    if (needsCreatePermit(kind, decision.provider)) {
+      await consumeCreateToken({
+        provider: decision.provider,
+        model: decision.modelId,
+        sceneId: ctx.scene.id,
+        kind,
+        estimatedCost: decision.estimatedCost,
+      });
+    }
 
     const created = await create();
     externalId = created.externalId;

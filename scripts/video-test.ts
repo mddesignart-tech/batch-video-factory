@@ -242,6 +242,24 @@ async function main(): Promise<void> {
     return;
   }
 
+  // ---- one permit, for one create ---------------------------------------
+  //
+  // The operator confirmed ONE paid create by running with --real. That buys
+  // exactly one call to the create endpoint, consumed by the attempt whatever
+  // the outcome. A failure that costs nothing does NOT hand the permit back:
+  // an earlier benchmark authorised as one create issued four, each a real
+  // attempt to charge the account, and only luck kept the bill at zero.
+  const { grantCreateToken } = await import("../src/services/create-token");
+  await grantCreateToken({
+    provider: PROVIDER,
+    model: MODEL_ID,
+    sceneId: scene.id,
+    kind: "video",
+    maxCost: Number.isFinite(limit) ? limit : estimate,
+    note: `video:test --real, uoc tinh $${estimate.toFixed(6)}`,
+  });
+  console.log("\n  Quyen goi create: CAP 1 LAN (dung xong la het, ke ca khi that bai)");
+
   // ---- pin the model so routing cannot choose something else ------------
   await prisma.scene.update({
     where: { id: scene.id },
