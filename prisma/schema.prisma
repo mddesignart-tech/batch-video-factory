@@ -551,6 +551,55 @@ model ConceptHistory {
   @@index([scriptHash])
 }
 
+/// One real, paid benchmark run: what was sent, what came back, what it scored.
+///
+/// This is the evidence the routing rules are derived FROM, kept so the rules
+/// can be checked against it. Every limit in domain/video-suitability was
+/// inferred from runs like these, and an inferred rule that contradicts the run
+/// it came from is a bug - one that already happened twice, and both times was
+/// caught by a person remembering rather than by anything in the code.
+model VideoBenchmark {
+  id            String   @id @default(uuid())
+
+  provider      String
+  model         String
+  /// Vendor-side task id, so the run can still be looked up at the provider.
+  taskId        String?
+
+  projectId     String?
+  sceneNumber   Int
+  /// Complexity as the classifier scored it AT THE TIME of the run.
+  complexity    String
+  complexityScore Float  @default(0)
+  characterCount  Int    @default(0)
+
+  /// The prompt actually sent, after any vendor-specific fitting.
+  promptSent    String   @default("")
+  durationRequested Float @default(0)
+  /// Seconds the vendor actually billed. Differs from requested for Runway.
+  durationSent  Float    @default(0)
+  keyframePath  String   @default("")
+
+  outcome       String
+  /// Vendor failure code when it failed, e.g. INTERNAL.BAD_OUTPUT.CODE01.
+  failureCode   String   @default("")
+  credits       Int      @default(0)
+  actualCost    Float    @default(0)
+  generationMs  Int      @default(0)
+  outputPath    String   @default("")
+
+  /// Human scores, 1-10, as JSON. Null for a run that produced nothing to score.
+  scoresJson    String   @default("{}")
+  /// What went wrong, in the reviewer's words.
+  notes         String   @default("")
+
+  createdAt     DateTime @default(now())
+
+  @@index([provider, model])
+  @@index([sceneNumber])
+  @@index([outcome])
+}
+
 model Setting {
   key       String   @id
   valueJson String
