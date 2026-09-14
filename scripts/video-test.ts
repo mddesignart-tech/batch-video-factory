@@ -10,13 +10,52 @@ import { PrismaClient } from "@prisma/client";
  *
  * Usage:
  *   npx tsx scripts/video-test.ts --idiom "Spill the beans" --scene 4 --dry-run
- *   npx tsx scripts/video-test.ts --idiom "Spill the beans" --scene 4 --real --limit 1.00
+ *   npx tsx scripts/video-test.ts --scene 4 --provider runway --model gen4_turbo:720x1280 --dry-run
+ *   npx tsx scripts/video-test.ts --scene 4 --provider runway --real --limit 0.30
+ *
+ * Unknown flags are a hard error, not a shrug. An earlier version hard-coded
+ * the provider, so `--provider runway` was silently swallowed and the run went
+ * to Sora anyway - printing an openai quote for what the operator believed was
+ * a Runway test. A benchmark that quietly measures the wrong vendor is worse
+ * than one that refuses to start.
  */
 
 const prisma = new PrismaClient();
 
-const MODEL = "sora-2:720x1280";
-const PROVIDER = "openai";
+const DEFAULT_MODEL = "sora-2:720x1280";
+const DEFAULT_PROVIDER = "openai";
+
+/** Every flag this script understands. Anything else stops the run. */
+const KNOWN_FLAGS = new Set([
+  "idiom",
+  "scene",
+  "provider",
+  "model",
+  "duration",
+  "limit",
+  "real",
+  "dry-run",
+]);
+
+function assertKnownFlags(): void {
+  const unknown = process.argv
+    .slice(2)
+    .filter((a) => a.startsWith("--"))
+    .map((a) => a.slice(2).split("=")[0] ?? "")
+    .filter((name) => !KNOWN_FLAGS.has(name));
+  if (unknown.length > 0) {
+    console.log("");
+    console.log(
+      `  [DUNG] Khong hieu tham so: ${unknown.map((u) => `--${u}`).join(", ")}.`,
+    );
+    console.log(
+      `  Tham so hop le: ${[...KNOWN_FLAGS].map((k) => `--${k}`).join(", ")}`,
+    );
+    console.log("");
+    process.exitCode = 1;
+    process.exit(1);
+  }
+}
 /** How long to wait for the whole job before giving up on polling (not on it). */
 const MAX_WAIT_MS = 15 * 60_000;
 const POLL_INTERVAL_MS = 10_000;
@@ -35,8 +74,11 @@ function runLimit(): number {
 }
 
 async function main(): Promise<void> {
+  assertKnownFlags();
   const idiom = arg("idiom", "Spill the beans");
   const sceneNumber = Number(arg("scene", "4"));
+  const PROVIDER = arg("provider", DEFAULT_PROVIDER);
+  const MODEL = arg("model", "");
   const real = flag("real");
   const dryRun = flag("dry-run") || !real;
   const limit = runLimit();
@@ -61,32 +103,85 @@ async function main(): Promise<void> {
     return;
   }
 
-  const model = await prisma.modelRegistry.findUnique({
-    where: { provider_modelId: { provider: PROVIDER, modelId: MODEL } },
+  // Resolve the model. With --provider but no --model, take that provider's
+  // only video row rather than guessing: if it has several, the operator must
+  // say which, because they are priced differently.
+  const rows = await prisma.modelRegistry.findMany({
+    where: { provider: PROVIDER, type: "video" },
+    orderBy: { price: "asc" },
   });
-  if (!model) {
-    console.log(`Khong tim thay model ${PROVIDER}/${MODEL} trong bang Mo hinh AI.`);
+  if (rows.length === 0) {
+    console.log(
+      `\n  [DUNG] Provider "${PROVIDER}" khong co model video nao ` +
+        `trong bang Mo hinh AI.\n`,
+    );
     process.exitCode = 1;
     return;
   }
+  const modelId =
+    MODEL !== ""
+      ? MODEL
+      : PROVIDER === DEFAULT_PROVIDER
+        ? DEFAULT_MODEL
+        : rows.length === 1
+          ? (rows[0]?.modelId ?? "")
+          : "";
+  if (modelId === "") {
+    console.log("");
+    console.log(
+      `  [DUNG] Provider "${PROVIDER}" co ${rows.length} model video. ` +
+        `Chon bang --model:`,
+    );
+    for (const r of rows) {
+      console.log(`    ${r.modelId}  ($${r.price}/giay)`);
+    }
+    console.log("");
+    process.exitCode = 1;
+    return;
+  }
+  const model = rows.find((r) => r.modelId === modelId);
+  if (!model) {
+    console.log(
+      `\n  [DUNG] Khong tim thay model ${PROVIDER}/${modelId} ` +
+        `trong bang Mo hinh AI.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const MODEL_ID = modelId;
 
-  const estimate =
-    Math.round(scene.duration * model.price * 1e6) / 1e6;
+  const { splitModelSize, billedVideoSeconds } = await import(
+    "../src/domain/video-duration"
+  );
+  const { size } = splitModelSize(MODEL_ID);
+
+  // Requested seconds are not billed seconds. Runway sells 5s and 10s clips
+  // only; Veo is forced to 8 with a keyframe. Quoting the requested length
+  // under-quotes the invoice, which is the wrong direction for a spend cap.
+  const requested = Number(arg("duration", String(scene.duration)));
+  const billed = billedVideoSeconds({
+    provider: PROVIDER,
+    size,
+    requestedSeconds: requested,
+    hasKeyframe: Boolean(scene.imagePath),
+  });
+  const estimate = Math.round(billed * model.price * 1e6) / 1e6;
   const before = await spendStatus();
-  const { splitModelSize } = await import("../src/providers/video-config");
-  const { size } = splitModelSize(MODEL);
 
   console.log("\n========== TEST VIDEO AI ==========\n");
   console.log(`  Che do        : ${real ? "THAT (co tinh tien)" : "MOCK (mien phi)"}`);
   console.log(`  Du an         : ${project.idiom.phrase} canh ${scene.sceneNumber}`);
   console.log(`  Provider      : ${PROVIDER}`);
-  console.log(`  Model         : ${MODEL}`);
+  console.log(`  Model         : ${MODEL_ID}`);
   console.log(`  Do phan giai  : ${size}`);
-  console.log(`  Thoi luong    : ${scene.duration}s`);
+  console.log(
+    `  Thoi luong    : yeu cau ${requested}s` +
+      (billed === requested ? "" : ` -> TINH TIEN ${billed}s`),
+  );
   console.log(`  Don vi gia    : ${model.priceUnit}`);
   console.log(`  Gia           : $${model.price}/giay`);
   console.log(`  Gia kiem chung: ${model.lastVerifiedAt?.toISOString().slice(0, 10) ?? "CHUA BAO GIO"}`);
-  console.log(`  UOC TINH      : $${estimate.toFixed(4)}`);
+  console.log(`  UOC TINH      : $${estimate.toFixed(4)}  (${billed}s x $${model.price})`);
   console.log(`  Keyframe      : ${scene.imagePath ?? "KHONG CO"}`);
   console.log(`\n  Da chi        : $${before.spent.toFixed(6)} / $${before.cap.toFixed(2)}`);
   console.log(`  Sau khi chay  : $${(before.spent + estimate).toFixed(4)}`);
@@ -123,9 +218,10 @@ async function main(): Promise<void> {
     sceneId: scene.id,
     kind: "video",
     provider: PROVIDER,
-    model: MODEL,
+    model: MODEL_ID,
     prompt: scene.videoPrompt,
     generation: scene.retryCount,
+    variant: `${scene.duration}s`,
   });
   const existing = await prisma.providerJob.findUnique({
     where: { idempotencyKey: key },
@@ -151,7 +247,7 @@ async function main(): Promise<void> {
     where: { id: scene.id },
     data: {
       videoProvider: PROVIDER,
-      videoModel: MODEL,
+      videoModel: MODEL_ID,
       routingMode: "MANUAL",
     },
   });
