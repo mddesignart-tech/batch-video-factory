@@ -316,3 +316,218 @@ describe("idempotency key covers every billable parameter", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe("the recorded request describes the request that was actually sent", () => {
+  /**
+   * `sentRequest.durationSent` once logged 10 seconds for a call that put 6 in
+   * the body: the field was computed with the provider's default rule instead
+   * of this model's. Nothing failed, and the record was the only evidence of
+   * what a $0.72 call had been - so it was evidence of a request nobody made.
+   *
+   * This test does not check `durationSent` against another calculation of the
+   * same thing, which is how the bug survived. It checks it against the JSON
+   * body the HTTP client hands to `fetch`.
+   */
+  async function captureCreate(modelId: string, requestedSeconds: number) {
+    const [{ RunwayVideoProvider }, { toAbsolute, ensureProjectDirs }] = await Promise.all([
+      import("@/providers/runway/runway-video-provider"),
+      import("@/lib/paths"),
+    ]);
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+
+    const projectId = `dur-${modelId.replace(/[^a-z0-9]/gi, "")}`;
+    ensureProjectDirs(projectId);
+    // A real PNG, because the adapter reads and re-encodes the keyframe.
+    const keyframe = path.join(toAbsolute(`projects/${projectId}/images`), "kf.png");
+    fs.writeFileSync(
+      keyframe,
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk" +
+          "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+
+    let sentBody: Record<string, unknown> = {};
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      sentBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ id: "task-1", status: "PENDING" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      const provider = new RunwayVideoProvider({
+        providerName: "runway",
+        model: modelId,
+        apiKey: "test-key",
+        baseUrl: "https://example.invalid/v1",
+        pricePerSecond: 0.12,
+        size: "720x1280",
+        timeoutMs: 5_000,
+      });
+      const job = await provider.createVideo({
+        projectId,
+        sceneId: "scene-1",
+        model: modelId,
+        prompt: "Animate this image. Locked camera.",
+        negativePrompt: "",
+        durationSeconds: requestedSeconds,
+        width: 720,
+        height: 1280,
+        fps: 24,
+        referenceImagePath: keyframe,
+        outputPath: `projects/${projectId}/videos/out.mp4`,
+      });
+      return { job, sentBody };
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  it("logs the duration gen4.5 was actually asked for, per-second", async () => {
+    // 6 seconds is sendable to gen4.5 and is what the scene-3 benchmark used.
+    const { job, sentBody } = await captureCreate("gen4.5", 6);
+    expect(sentBody.duration).toBe(6);
+    expect(job.sentRequest?.durationSent).toBe(6);
+    expect(job.sentRequest?.durationRequested).toBe(6);
+  });
+
+  it("logs gen4_turbo's quantised duration, not the one we asked for", async () => {
+    // Runway bills gen4_turbo at 5 or 10 seconds only. Asking for 4 gets 5, and
+    // the record has to show BOTH numbers or the 25% overspend is invisible.
+    const { job, sentBody } = await captureCreate("gen4_turbo", 4);
+    expect(sentBody.duration).toBe(5);
+    expect(job.sentRequest?.durationRequested).toBe(4);
+    expect(job.sentRequest?.durationSent).toBe(5);
+  });
+
+  it("never records a duration the body does not contain", async () => {
+    // The bug in one line: these two must be the same number for every model,
+    // whatever rule each one is billed by.
+    for (const [modelId, seconds] of [
+      ["gen4.5", 2],
+      ["gen4.5", 10],
+      ["gen4_turbo", 3],
+      ["gen4_turbo", 9],
+    ] as const) {
+      const { job, sentBody } = await captureCreate(modelId, seconds);
+      expect(job.sentRequest?.durationSent, `${modelId} @ ${seconds}s`).toBe(
+        sentBody.duration,
+      );
+    }
+  });
+
+  it("prices the estimate on the billed duration, not the requested one", async () => {
+    const { RunwayVideoProvider } = await import(
+      "@/providers/runway/runway-video-provider"
+    );
+    const provider = new RunwayVideoProvider({
+      providerName: "runway",
+      model: "gen4_turbo",
+      apiKey: "k",
+      baseUrl: "https://example.invalid/v1",
+      pricePerSecond: 0.05,
+      size: "720x1280",
+      timeoutMs: 1_000,
+    });
+    const estimate = await provider.estimateCost({
+      projectId: "p",
+      sceneId: "s",
+      model: "gen4_turbo",
+      prompt: "x",
+      negativePrompt: "",
+      durationSeconds: 4,
+      width: 720,
+      height: 1280,
+      fps: 24,
+      outputPath: "projects/p/videos/o.mp4",
+    });
+    // 5 billed seconds, not 4 requested.
+    expect(estimate.amount).toBeCloseTo(0.25, 6);
+    expect(estimate.detail).toContain("tính tiền 5s");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("routing steps over a model that is under review", () => {
+  const GEN45 = model({
+    provider: "runway",
+    modelId: "gen4.5:720x1280",
+    price: 0.12,
+    qualityRating: 10,
+    consistencyRating: 10,
+  });
+
+  it("does not pick gen4.5 by itself, even when it scores best", () => {
+    // BEST_QUALITY with gen4.5 rated 10 against gen4_turbo's 8: without the
+    // pin rule this is exactly the choice that quietly spends $0.72 a scene.
+    const decision = routeScene(
+      [RUNWAY, GEN45],
+      ctx({ strategy: "BEST_QUALITY", complexity: "LOW", characterCount: 1 }),
+    );
+    expect(decision.modelId).toBe("gen4_turbo:720x1280");
+  });
+
+  it("keeps it out of the fallback list too", () => {
+    // A fallback is still an automatic choice; it just happens later.
+    const decision = routeScene(
+      [RUNWAY, GEN45],
+      ctx({ strategy: "BEST_QUALITY", complexity: "LOW", characterCount: 1 }),
+    );
+    expect(decision.fallbacks.map((f) => f.modelId)).not.toContain("gen4.5:720x1280");
+  });
+
+  it("still hands it over when a person asks for it by name", () => {
+    // The whole reason this is a separate tier: gen4.5 is the HIGH candidate,
+    // and the next benchmark has to be able to reach it.
+    const decision = routeScene(
+      [RUNWAY, GEN45],
+      ctx({
+        strategy: "MANUAL",
+        manualProvider: "runway",
+        manualModel: "gen4.5:720x1280",
+        complexity: "HIGH",
+        characterCount: 3,
+        durationSeconds: 6,
+        usage: { seconds: 6, jobs: 1 },
+      }),
+    );
+    expect(decision.modelId).toBe("gen4.5:720x1280");
+    // Priced by gen4.5's per-second rule: 6s x $0.12, not quantised to 10.
+    expect(decision.estimatedCost).toBeCloseTo(0.72, 6);
+  });
+
+  it("refuses rather than falling back to it when nothing else fits", () => {
+    // The failure mode worth preventing: a HIGH scene where gen4_turbo is
+    // excluded on evidence leaves gen4.5 as the only capable model. Using it
+    // silently would defeat the point of marking it.
+    expect(() =>
+      routeScene(
+        [RUNWAY, GEN45],
+        ctx({ strategy: "AUTO", complexity: "HIGH", characterCount: 3 }),
+      ),
+    ).toThrowError(/chưa được chốt/);
+  });
+
+  it("names the model and the reason when it refuses", () => {
+    try {
+      routeScene(
+        [RUNWAY, GEN45],
+        ctx({ strategy: "AUTO", complexity: "HIGH", characterCount: 3 }),
+      );
+      expect.unreachable("routing should have refused");
+    } catch (err) {
+      const e = err as { message: string; code: string };
+      expect(e.code).toBe("needs_explicit_pin");
+      expect(e.message).toContain("runway/gen4.5:720x1280");
+      expect(e.message).toMatch(/chọn thủ công/);
+    }
+  });
+});
