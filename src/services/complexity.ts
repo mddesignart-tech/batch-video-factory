@@ -74,57 +74,144 @@ const WEIGHTS = {
 const MEDIUM_AT = 4;
 const HIGH_AT = 7.5;
 
-const BODY_MOVEMENT = /\b(run|runs|running|jump|jumps|walk|walks|dance|trip|fall|falls|struggl|chase|spin|bow|collapse)\w*/i;
-const CAMERA_MOTION = /\b(pan|zoom|push[- ]in|dolly|tracking|whip|orbit|handheld|tilt)\w*/i;
-const HAND_INTERACTION = /\b(hand|hands|grab|grabs|hold|holding|carry|carries|point|points|thumbs up|facepalm|take|takes|pass|catch)\w*/i;
-const OBJECT_INTERACTION = /\b(box|prop|helmet|whiteboard|mallet|phone|book|cake|bag|chair|table|card|sign|object|beans|jar)\w*/i;
-const FACIAL = /\b(reaction|close[- ]up|expression|shock|surprised|grin|smile|frown|eyes wide|stare)\w*/i;
-const ENVIRONMENT = /\b(crowd|street|classroom|office|kitchen|stage|park|market|background full|busy|city)\w*/i;
-const MOTION_COMPLEX = /\b(slapstick|chaos|collapse|explode|tumbl|pile|wobbl|crash|flying|scatter)\w*/i;
+/**
+ * Every pattern the classifier matches against, in one place.
+ *
+ * Grouped and exported as one record for a reason that is not tidiness: a test
+ * can then walk all of them and assert properties that must hold across the
+ * set. One of these patterns was built with `\b` inside a template literal,
+ * which is the BACKSPACE character rather than a word boundary, so it began
+ * with an invisible control code and could never match anything. Nothing
+ * failed; it simply scored every bean-covered scene as having no beans.
+ *
+ * A single fixed pattern would not have stopped that happening again. A test
+ * over the whole set does.
+ */
+
+const BODY_MOVEMENT =
+  /\b(run|runs|running|jump|jumps|walk|walks|dance|trip|fall|falls|struggl|chase|spin|bow|collapse)\w*/i;
+const CAMERA_MOTION =
+  /\b(pan|zoom|push[- ]in|dolly|tracking|whip|orbit|handheld|tilt)\w*/i;
+const HAND_INTERACTION =
+  /\b(hand|hands|grab|grabs|hold|holding|carry|carries|point|points|thumbs up|facepalm|take|takes|pass|catch)\w*/i;
+const OBJECT_INTERACTION =
+  /\b(box|prop|helmet|whiteboard|mallet|phone|book|cake|bag|chair|table|card|sign|object|beans|jar)\w*/i;
+const FACIAL =
+  /\b(reaction|close[- ]up|expression|shock|surprised|grin|smile|frown|eyes wide|stare)\w*/i;
+const ENVIRONMENT =
+  /\b(crowd|street|classroom|office|kitchen|stage|park|market|background full|busy|city)\w*/i;
+const MOTION_COMPLEX =
+  /\b(slapstick|chaos|collapse|explode|tumbl|pile|wobbl|crash|flying|scatter)\w*/i;
 
 /**
  * Many small repeated things.
  *
- * Written as two halves - a QUANTITY word near a SMALL-OBJECT word - rather
- * than one long word list. Listing every possible object would mean adding
- * "lentils" the first time a script says lentils, and the rule has to survive
+ * Built from two halves - a QUANTITY word near a SMALL-OBJECT word - rather
+ * than one long list of nouns. Listing every possible object would mean editing
+ * this file the first time a script says lentils, and the rule has to survive
  * scripts nobody has written yet.
  */
 const MANY_WORDS =
   "(?:many|lots of|hundreds|dozens|piles?|heaps?|covered (?:in|with)|full of|scattered|everywhere|countless|a sea of|strewn)";
 const SMALL_OBJECT_WORDS =
   "(?:beans?|coins?|confetti|leaves|leaf|marbles?|pebbles?|sprinkles?|crumbs?|petals?|seeds?|grains?|rice|balls?|bubbles?|stars?|papers?|cards?|blocks?|candies|candy|sweets?|nuts?|buttons?|feathers?|snowflakes?|droplets?|dots?|pieces?|bits?|specks?|particles?|shreds?|flakes?)";
+
+/**
+ * DOUBLE backslash, deliberately.
+ *
+ * In a template literal `\b` is BACKSPACE (U+0008), not a word boundary. The
+ * first version of this pattern started with that invisible character and
+ * matched nothing at all, silently defeating the signal it was written for.
+ * `String.raw` would also work; the escaped form is used here because the test
+ * that guards this checks for control characters across every pattern, and
+ * seeing the escape written out makes the hazard obvious to the next reader.
+ */
 const REPEATED_SMALL_OBJECTS = new RegExp(
-  // Note the DOUBLE backslash. Inside a template literal `\b` is the BACKSPACE
-  // control character, not a regex word boundary - the first version of this
-  // pattern began with an invisible control code and could never match. It
-  // silently scored every bean-covered scene as having no beans, which is the
-  // exact failure this signal was added to catch.
-  `\\b(?:${MANY_WORDS}[^.]{0,24}${SMALL_OBJECT_WORDS}` +
-    `|${SMALL_OBJECT_WORDS}[^.]{0,24}${MANY_WORDS})`,
+  // Word boundaries on BOTH ends of every half, not just the front. Without
+  // the trailing ones `beans?` matched the "bean" inside "beanbags" and
+  // `cards?` matched the "card" inside "cardigans", so "many beanbags"
+  // scored as a floor covered in beans. A leading boundary guards only the
+  // left edge, and a word list is all right edges.
+  `\\b(?:${MANY_WORDS}\\b[^.]{0,24}\\b${SMALL_OBJECT_WORDS}\\b` +
+    `|${SMALL_OBJECT_WORDS}\\b[^.]{0,24}\\b${MANY_WORDS}\\b)`,
   "i",
 );
 
 /** A dense field of repeated shapes, stated directly rather than by example. */
 const DENSE_FIELD =
   /\b(?:dense|packed|cluttered|littered|crowded)[^.]{0,20}(?:floor|ground|table|background|frame|surface)|\b(?:repeating|repeated|identical)\s+(?:objects?|shapes?|patterns?|items?)/i;
+
 const OCCLUSION =
   /\b(behind|in front of|blocks? the view|overlap\w*|obscur\w*|partially hidden|peek\w* out)/i;
+
 const COMPLEX_PHYSICS =
   /\b(roll|rolls|rolling|bounce|bounces|falling|fall|spill|spills|spilling|pour|pours|splash|topple|slide|slides|fly|flies|drop|drops)\w*/i;
-const TEXT_IN_FRAME =
-  // `appear\\w*` rather than `appears`: the scripts say "text appears" in
-  // one scene and "text appearing" in the next, and a pattern catching only
-  // the first silently under-scores the second.
-  /\b(text\s+appear\w*|caption|sign|signage|label|whiteboard|banner|written|words? on|title card)\w*/i;
+
+/**
+ * Words rendered INSIDE the frame.
+ *
+ * Semantic rather than a list of exact phrases: a text noun near an
+ * appear/display verb, or one of a few standalone phrases that can only mean
+ * on-screen writing. The previous version matched "text appears" and missed
+ * "text appearing" - the same scripts use both - which is what a list of
+ * phrases gets you.
+ *
+ * Note what is NOT here: bare "caption" and bare "subtitle". Those are the
+ * words a pipeline uses about its own output, and matching them would score a
+ * scene for having subtitles, which every scene has.
+ */
+const TEXT_NOUNS = "(?:text|words?|letters?|captions?|titles?|signage|labels?|writing)";
+const APPEAR_VERBS =
+  "(?:appear\\w*|show\\w*|display\\w*|pop\\w*\\s+up|flash\\w*|fade\\w*\\s+in|visible|written|reads?|spell\\w*)";
+const TEXT_IN_FRAME = new RegExp(
+  [
+    // "text appears", "words appearing", "caption displays"
+    `\\b${TEXT_NOUNS}\\s+(?:\\w+\\s+){0,2}${APPEAR_VERBS}`,
+    // "displays text", "showing words", "written words"
+    `\\b${APPEAR_VERBS}\\s+(?:\\w+\\s+){0,2}${TEXT_NOUNS}`,
+    // Objects that exist only to carry writing.
+    "\\b(?:whiteboard|banner|title card|signpost|billboard|name tag)",
+  ].join("|"),
+  "i",
+);
+
+/**
+ * A negation right before a text phrase.
+ *
+ * Prompts say "no text, no captions" and a visual field occasionally echoes it.
+ * Scoring that as "this scene contains text" would be exactly backwards.
+ */
+const TEXT_NEGATED = new RegExp(`\\bno\\s+(?:\\w+\\s+){0,1}${TEXT_NOUNS}`, "i");
+
+/**
+ * Every pattern, exported so a test can hold the whole set to one standard.
+ *
+ * The guard that matters: none of these may contain a control character. That
+ * is the shape the backspace bug took, and it is invisible in a diff.
+ */
+export const COMPLEXITY_PATTERNS = {
+  BODY_MOVEMENT,
+  CAMERA_MOTION,
+  HAND_INTERACTION,
+  OBJECT_INTERACTION,
+  FACIAL,
+  ENVIRONMENT,
+  MOTION_COMPLEX,
+  REPEATED_SMALL_OBJECTS,
+  DENSE_FIELD,
+  OCCLUSION,
+  COMPLEX_PHYSICS,
+  TEXT_IN_FRAME,
+  TEXT_NEGATED,
+} as const;
 
 export interface SceneLike {
   duration: number;
   visualDescription?: string;
   characterAction?: string;
   camera?: string;
-  dialogue?: string;
   characters?: string[];
+  // `dialogue` is deliberately ABSENT. See extractSignals.
 }
 
 export function extractSignals(scene: SceneLike): ComplexitySignals {
@@ -137,9 +224,11 @@ export function extractSignals(scene: SceneLike): ComplexitySignals {
   // Scene 5 came out MEDIUM on a shot Runway had already animated successfully
   // - the classifier contradicting a paid, measured result.
   //
-  // `dialogue` stays on the input type because callers pass whole scenes and
-  // removing it would be a churn-inducing change for no gain; it simply is not
-  // read for anything visual.
+  // So `dialogue` is not on SceneLike at all. A comment asking people not to
+  // pass it would be obeyed until someone was in a hurry; leaving the field off
+  // makes the compiler refuse it, which is the same rule enforced by something
+  // that never gets tired. Dialogue still drives voice, subtitles and timing -
+  // just never a judgement about what the picture contains.
   const text = [
     scene.visualDescription ?? "",
     scene.characterAction ?? "",
@@ -159,7 +248,9 @@ export function extractSignals(scene: SceneLike): ComplexitySignals {
       REPEATED_SMALL_OBJECTS.test(text) || DENSE_FIELD.test(text),
     occlusion: OCCLUSION.test(text),
     complexPhysics: COMPLEX_PHYSICS.test(text),
-    textInFrame: TEXT_IN_FRAME.test(text),
+    // A negation wins. "No text, no captions" describes the ABSENCE of writing,
+    // and scoring it as presence is exactly backwards.
+    textInFrame: TEXT_IN_FRAME.test(text) && !TEXT_NEGATED.test(text),
     independentMovers: countMovers(scene, text),
     durationSeconds: scene.duration,
   };

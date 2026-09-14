@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   const idiom = arg("idiom", "Spill the beans");
   const mode = arg("mode", "BALANCED");
 
-  const { classifyScene, assignSpendPriority } = await import(
+  const { classifyScene, assignSpendPriority, extractSignals } = await import(
     "../src/services/complexity"
   );
   const { routeScene, RoutingError } = await import("../src/services/ai-router");
@@ -92,7 +92,8 @@ async function main(): Promise<void> {
       visualDescription: scene.visualDescription,
       characterAction: scene.characterAction,
       camera: scene.camera,
-      dialogue: scene.dialogue,
+      // Dialogue is NOT passed: what characters say is not evidence about
+      // what the picture contains. See complexity.extractSignals.
     });
     const priority = assignSpendPriority({
       sceneNumber: scene.sceneNumber,
@@ -173,6 +174,42 @@ async function main(): Promise<void> {
       console.log(`        Runway bi loai: ${r.runwayBlocked}`);
     }
   }
+
+  // ---- which signals actually fired --------------------------------------
+  //
+  // Printed as a grid so a score can be audited rather than trusted. Every
+  // column here comes from a VISUAL field; dialogue is not read at all.
+  console.log("");
+  console.log("--- 1b. TIN HIEU HINH ANH THUC SU KICH HOAT ---");
+  console.log("");
+  console.log(
+    "  Canh  NV  Tay  Vat  Vat-nho  Day-dac  Vat-ly  Camera  Chu  Che  Movers",
+  );
+  for (const scene of active) {
+    const sig = extractSignals({
+      duration: scene.duration,
+      visualDescription: scene.visualDescription,
+      characterAction: scene.characterAction,
+      camera: scene.camera,
+      characters: sceneCharacters(scene).present,
+    });
+    const yn = (v: boolean) => (v ? " CO " : "  . ");
+    console.log(
+      `  ${String(scene.sceneNumber).padStart(4)}  ${String(sig.characterCount).padStart(2)} ` +
+        `${yn(sig.handInteraction)} ${yn(sig.objectInteraction)} ` +
+        `${yn(sig.repeatedSmallObjects).padStart(7)}  ` +
+        `${yn(sig.environmentComplex).padStart(6)}   ` +
+        `${yn(sig.complexPhysics).padStart(5)}  ` +
+        `${yn(sig.cameraMotion).padStart(5)}  ` +
+        `${yn(sig.textInFrame)} ${yn(sig.occlusion)} ` +
+        `${String(sig.independentMovers).padStart(5)}`,
+    );
+  }
+  console.log("");
+  console.log(
+    "  (Vat-nho = nhieu vat the nho lap lai. Day-dac = boi canh nhieu chi tiet.)",
+  );
+  console.log("  (Khong doc dialogue - chi doc visualDescription/action/camera.)");
 
   // ---- distribution ------------------------------------------------------
   const counts = { LOW: 0, MEDIUM: 0, HIGH: 0 } as Record<string, number>;

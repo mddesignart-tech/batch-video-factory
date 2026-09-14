@@ -494,7 +494,8 @@ export function withDerivedRouting(script: ScriptDoc): ScriptDoc {
       visualDescription: scene.visualDescription,
       characterAction: scene.characterAction,
       camera: scene.camera,
-      dialogue: scene.dialogue,
+      // Dialogue is NOT passed: what characters say is not evidence about
+      // what the picture contains. See complexity.extractSignals.
       characters: scene.characters,
     });
     const role =
