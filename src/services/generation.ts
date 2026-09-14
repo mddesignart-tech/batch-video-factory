@@ -32,6 +32,8 @@ import {
 import { recordCost, spentOnProject } from "./cost-tracker";
 import { assertCanSpend } from "./spend-guard";
 import { consumeCreateToken } from "./create-token";
+import { parseDialogueLines } from "@/domain/dialogue-lines";
+import { probeDuration } from "@/media/ffmpeg";
 import { isMockMode } from "@/lib/env";
 import { isFreeVideoProvider } from "@/providers/video-config";
 import { availableProviderNames } from "./provider-health";
@@ -901,69 +903,204 @@ function stripSpeakerLabel(line: string): string {
   return line.replace(/^[A-Za-z ]{1,20}:\s*/, "").replace(/^"|"$/g, "");
 }
 
-export async function generateSceneVoice(sceneId: string): Promise<string | null> {
+/**
+ * Resolve every voice setting for one character, falling back sensibly.
+ *
+ * Nothing here names a vendor. The character row decides who speaks for it,
+ * which is what lets an operator switch a character to ElevenLabs later
+ * without a deploy.
+ */
+async function voiceSettingsFor(
+  speaker: string,
+): Promise<{
+  characterId: string | null;
+  provider: string | null;
+  model: string | null;
+  voiceId: string;
+  instructions: string;
+  speed: number;
+  gender: "male" | "female";
+  accent: "US" | "UK";
+}> {
+  const character = await prisma.character.findFirst({ where: { name: speaker } });
+
+  // In Mock Mode the character's real provider/model pair is not routable -
+  // `openai/gpt-4o-mini-tts` is not a mock model - so pinning it would fail
+  // routing outright rather than run free. Mock Mode is a hard gate, so the
+  // router picks a mock voice and the character's choice waits for real mode.
+  const pin = !isMockMode();
+
+  return {
+    characterId: character?.id ?? null,
+    // Null lets the router choose; a value pins it. Both are legitimate.
+    provider: pin ? character?.voiceProvider || null : null,
+    model: pin ? character?.voiceModel || null : null,
+    voiceId: character?.voiceId ?? "mock-male-us",
+    instructions: character?.voiceInstructions ?? "",
+    speed: character?.voiceSpeed ?? 1,
+    gender: character?.voiceGender === "female" ? "female" : "male",
+    accent: character?.voiceAccent === "UK" ? "UK" : "US",
+  };
+}
+
+/**
+ * Generate one audio file per spoken line, not one per scene.
+ *
+ * The old version made a single file and handed it to whoever was first in the
+ * speaking list, so a scene where two characters trade lines - the ordinary
+ * case - either lost the second speaker or had the first one read both parts.
+ *
+ * Returns the paths written, in line order.
+ */
+export async function generateSceneVoice(sceneId: string): Promise<string[]> {
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
 
-  const text = speechTextFor(scene);
-  if (text.length === 0) return null;
-
-  const decision = routeFor(
-    ctx,
-    "voice",
-    { characters: text.length, jobs: 1 },
-    { provider: scene.voiceProvider, model: scene.voiceModel },
-  );
-
-  // Voice follows the SPEAKING list, not presence: a character standing
-  // silently in frame must be drawn but must not be given a line.
+  // Speech follows the SPEAKING list, never the PRESENT list. A character
+  // standing silently in frame must be drawn and must not be given a line.
   const speaking = sceneCharacters(scene).speaking;
-  const character = speaking[0]
-    ? await prisma.character.findFirst({ where: { name: speaking[0] } })
-    : null;
+  const lines = parseDialogueLines(scene.dialogue, scene.narration, speaking);
+  if (lines.length === 0) return [];
 
-  const outputPath = path.join(
-    projectSubdir(project.id, "audio"),
-    uuidFilename(".wav"),
-  );
+  const written: string[] = [];
 
-  const { result, used } = await withFallback(ctx, decision, async (d) => {
-    const provider = getVoiceProvider(d.provider);
-    return runProviderJob({
+  for (const line of lines) {
+    const settings = await voiceSettingsFor(line.speaker);
+
+    const decision = routeFor(
       ctx,
-      kind: "audio",
-      decision: d,
-      prompt: text,
-      outputPath,
-      create: async () =>
-        provider.createVoice({
-          projectId: project.id,
-          sceneId: scene.id,
-          model: d.modelId,
-          text,
-          voiceId: character?.voiceId ?? "mock-male-us",
-          accent: "US",
-          gender: "male",
-          speed: 1,
-          targetDuration: scene.duration,
-          outputPath,
-        }),
-      poll: (id) => provider.getJobStatus(id),
-      download: (id) => provider.downloadResult(id),
-    });
-  });
+      "voice",
+      { characters: line.text.length, jobs: 1 },
+      { provider: settings.provider, model: settings.model },
+    );
 
-  await saveAsset({ ctx, kind: "audio", decision: used, prompt: text, asset: result });
-  await prisma.scene.update({
-    where: { id: scene.id },
-    data: {
-      audioPath: toRelative(result.filePath),
-      voiceProvider: used.provider,
-      voiceModel: used.modelId,
-      status: "audio_ready",
-    },
-  });
-  return result.filePath;
+    const outputPath = path.join(
+      projectSubdir(project.id, "audio"),
+      uuidFilename(extensionForVoice(decision.provider)),
+    );
+
+    // The row exists BEFORE the call, so a crash mid-generation leaves a line
+    // marked pending rather than no trace that the work was attempted.
+    const row = await prisma.dialogueLine.upsert({
+      where: { sceneId_lineNumber: { sceneId: scene.id, lineNumber: line.lineNumber } },
+      create: {
+        sceneId: scene.id,
+        characterId: settings.characterId,
+        lineNumber: line.lineNumber,
+        text: line.text,
+        provider: decision.provider,
+        model: decision.modelId,
+        voiceId: settings.voiceId,
+        instructions: settings.instructions,
+        speed: settings.speed,
+        estimatedCost: decision.estimatedCost,
+        status: "processing",
+      },
+      update: {
+        characterId: settings.characterId,
+        text: line.text,
+        provider: decision.provider,
+        model: decision.modelId,
+        voiceId: settings.voiceId,
+        instructions: settings.instructions,
+        speed: settings.speed,
+        estimatedCost: decision.estimatedCost,
+        status: "processing",
+        error: "",
+      },
+    });
+
+    try {
+      const { result, used } = await withFallback(ctx, decision, async (d) => {
+        const provider = await getVoiceProvider(d.provider, d.modelId);
+        return runProviderJob({
+          ctx,
+          kind: "audio",
+          decision: d,
+          prompt: line.text,
+          // Two lines in one scene differ by speaker and wording, and both are
+          // billable, so both belong in the key.
+          variant: `line${line.lineNumber}:${settings.voiceId}`,
+          outputPath,
+          create: async () =>
+            provider.createVoice({
+              projectId: project.id,
+              sceneId: scene.id,
+              model: d.modelId,
+              text: line.text,
+              voiceId: settings.voiceId,
+              instructions: settings.instructions,
+              accent: settings.accent,
+              gender: settings.gender,
+              speed: settings.speed,
+              targetDuration: scene.duration,
+              outputPath,
+            }),
+          poll: (id) => provider.getJobStatus(id),
+          download: (id) => provider.downloadResult(id),
+        });
+      });
+
+      await saveAsset({
+        ctx,
+        kind: "audio",
+        decision: used,
+        prompt: line.text,
+        asset: result,
+      });
+
+      // Duration is MEASURED, not taken on trust: the mixer needs to know how
+      // long the audio really is, and a provider's promise is not a measurement.
+      let durationSec = 0;
+      try {
+        durationSec = await probeDuration(result.filePath);
+      } catch {
+        durationSec = 0;
+      }
+
+      await prisma.dialogueLine.update({
+        where: { id: row.id },
+        data: {
+          provider: used.provider,
+          model: used.modelId,
+          actualCost: result.actualCost,
+          durationSec,
+          outputPath: toRelative(result.filePath),
+          status: "completed",
+        },
+      });
+      written.push(result.filePath);
+    } catch (err) {
+      await prisma.dialogueLine.update({
+        where: { id: row.id },
+        data: {
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      throw err;
+    }
+  }
+
+  // The scene still carries the FIRST line's audio so existing renderers keep
+  // working. Mixing several lines into one track is the next step, and it needs
+  // the per-line durations this function now records.
+  const first = written[0];
+  if (first) {
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: {
+        audioPath: toRelative(first),
+        status: "audio_ready",
+      },
+    });
+  }
+  return written;
+}
+
+/** Container each vendor returns. Kept beside the adapters it describes. */
+function extensionForVoice(provider: string): string {
+  return provider === "mock" ? ".wav" : ".wav";
 }
 
 // ---------------------------------------------------------------- quality ---

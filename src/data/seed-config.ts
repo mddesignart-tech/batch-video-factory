@@ -23,7 +23,16 @@ export interface SeedCharacter {
   bodyProportions: string;
   accessories: string;
   colorPalette: string;
+  // ---- voice: editable per character in the UI, never hard-coded in code ----
+  voiceProvider: string;
+  voiceModel: string;
   voiceId: string;
+  /// Delivery direction. This is what makes a TTS voice act rather than read,
+  /// and the comedy in these videos lives entirely in the delivery.
+  voiceInstructions: string;
+  voiceSpeed: number;
+  voiceGender: "male" | "female";
+  voiceAccent: "US" | "UK";
   seed: number;
   notes: string;
 }
@@ -53,7 +62,18 @@ export const SEED_CHARACTERS: SeedCharacter[] = [
       "slightly oversized head, short and stocky, noticeably shorter than Leo",
     accessories: "",
     colorPalette: "bright yellow, denim blue, white",
-    voiceId: "mock-male-us",
+    voiceProvider: "openai",
+    voiceModel: "gpt-4o-mini-tts",
+    // Echo is the clearest of the male voices, which matters more than timbre
+    // for an audience learning the language.
+    voiceId: "echo",
+    voiceInstructions:
+      "Speak like an energetic, slightly confused young man. " +
+      "Sound surprised, playful and comedic. " +
+      "Keep the delivery natural, expressive and very clear for English learners.",
+    voiceSpeed: 1,
+    voiceGender: "male",
+    voiceAccent: "US",
     seed: 110022,
     notes:
       "Giữ nguyên áo hoodie vàng và tóc nâu trong mọi cảnh để đảm bảo tính nhất quán.",
@@ -79,7 +99,18 @@ export const SEED_CHARACTERS: SeedCharacter[] = [
     bodyProportions: "slim, upright posture, clearly taller than Max",
     accessories: "round thin-rimmed glasses",
     colorPalette: "teal, dark grey, brown",
-    voiceId: "mock-male-uk",
+    voiceProvider: "openai",
+    voiceModel: "gpt-4o-mini-tts",
+    // Ballad is steadier and lower than Echo, so Leo cannot be mistaken for Max
+    // on audio alone - the two of them share most scenes.
+    voiceId: "ballad",
+    voiceInstructions:
+      "Speak calmly and clearly with a mildly amused tone, " +
+      "as if explaining something obvious to a funny friend. " +
+      "Use natural conversational English.",
+    voiceSpeed: 1,
+    voiceGender: "male",
+    voiceAccent: "US",
     seed: 220033,
     notes: "Luôn đeo kính tròn và mặc áo sơ mi xanh teal.",
   },
@@ -103,7 +134,15 @@ export const SEED_CHARACTERS: SeedCharacter[] = [
     bodyProportions: "petite, shortest of the three, light build",
     accessories: "",
     colorPalette: "coral red, denim blue, dark green, auburn",
-    voiceId: "mock-female-us",
+    voiceProvider: "openai",
+    voiceModel: "gpt-4o-mini-tts",
+    voiceId: "coral",
+    voiceInstructions:
+      "Speak with a bright, playful and slightly sarcastic tone. " +
+      "Friendly, expressive, natural and easy to understand.",
+    voiceSpeed: 1,
+    voiceGender: "female",
+    voiceAccent: "US",
     seed: 330044,
     notes:
       "Thường chỉ đứng phản ứng, không có thoại - đúng trường hợp mà danh sách nhân vật cũ hay bỏ sót.",
@@ -225,6 +264,8 @@ export interface SeedModel {
   /** ISO date a human last checked price and availability against the vendor. */
   lastVerifiedAt?: string;
   supportsAudio?: boolean;
+  /** Voice models that take a free-text delivery direction. */
+  supportsVoiceInstructions?: boolean;
   supports1080p?: boolean;
   supportsUpscale?: boolean;
   maxDuration?: number;
@@ -764,6 +805,31 @@ export const SEED_MODELS: SeedModel[] = [
     lastVerifiedAt: "2026-09-13",
     notes:
       "Chi co image-to-video, bat buoc phai co keyframe. Thoi luong chi 5s hoac 10s.",
+  },
+  // ---- OpenAI, gpt-4o-mini-tts ----
+  // $0.60 per 1M input characters = $0.0006 per 1k characters, from OpenAI's
+  // pricing page 2026-09-14. Cheap enough that a whole video's speech costs
+  // less than one second of Sora, which is why voice is the safe thing to
+  // finish while video is still being argued with.
+  //
+  // Chosen over tts-1 for `instructions`: the older models read a line, this
+  // one acts it, and the comedy here is entirely in the delivery.
+  {
+    provider: "openai",
+    modelId: "gpt-4o-mini-tts",
+    displayName: "OpenAI GPT-4o mini TTS",
+    type: "voice",
+    enabled: false,
+    priceUnit: "per_1k_chars",
+    price: 0.0006,
+    supportsAudio: true,
+    supportsVoiceInstructions: true,
+    qualityRating: 8,
+    speedRating: 9,
+    consistencyRating: 9,
+    lastVerifiedAt: "2026-09-14",
+    notes:
+      "Nhan instructions de dieu khien cach dien. 10 giong co san. Tra ve wav/mp3/opus/aac/flac.",
   },
   {
     provider: "elevenlabs",

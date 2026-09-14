@@ -11,6 +11,7 @@ import { isMockMode } from "@/lib/env";
 import { CharacterEditor, NewCharacterButton } from "./character-forms";
 import { CharacterReferences } from "./character-references";
 import { CharacterSheetForm } from "./character-sheet-form";
+import { CharacterVoiceForm } from "./character-voice-form";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,21 @@ export default async function CharactersPage() {
                   bodyProportions: character.bodyProportions,
                   accessories: character.accessories,
                   colorPalette: character.colorPalette,
+                }}
+              />
+
+              <CharacterVoiceForm
+                characterId={character.id}
+                characterName={character.name}
+                mockMode={mockMode}
+                voice={{
+                  voiceProvider: character.voiceProvider,
+                  voiceModel: character.voiceModel,
+                  voiceId: character.voiceId,
+                  voiceInstructions: character.voiceInstructions,
+                  voiceSpeed: character.voiceSpeed,
+                  voiceGender: character.voiceGender,
+                  voiceAccent: character.voiceAccent,
                 }}
               />
 

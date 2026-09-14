@@ -168,6 +168,14 @@ export interface VoiceRequest {
   model: string;
   text: string;
   voiceId: string;
+  /**
+   * Delivery direction, passed through to vendors that accept one.
+   *
+   * This is what makes a TTS voice act rather than read, and the comedy in
+   * these videos lives in the delivery. Vendors without the feature ignore it,
+   * so it is always carried and never conditionally omitted by callers.
+   */
+  instructions?: string;
   accent: "US" | "UK";
   gender: "male" | "female";
   speed: number;

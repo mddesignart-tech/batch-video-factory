@@ -173,8 +173,29 @@ export async function getVideoProvider(
   return new OpenAIVideoProvider(config);
 }
 
-export function getVoiceProvider(name: string): VoiceProvider {
+/**
+ * Voice, resolved the same way as the others: key, endpoint and price all come
+ * from the database, never from a constant here.
+ *
+ * This is the single plug-in point. Adding ElevenLabs, Deepgram or Google TTS
+ * later is one adapter plus one branch below - nothing in the services layer
+ * names a vendor, which is the property that keeps that true.
+ */
+export async function getVoiceProvider(
+  name: string,
+  model: string,
+): Promise<VoiceProvider> {
   if (isMockMode() || name === "mock") return mockVoice;
+
+  const { VOICE_PROVIDERS, buildVoiceConfig } = await import("./voice-config");
+  if (!VOICE_PROVIDERS.has(name)) notImplemented(name, "voice");
+
+  const config = await buildVoiceConfig(name, model);
+
+  if (name === "openai") {
+    const { OpenAIVoiceProvider } = await import("./openai/openai-voice-provider");
+    return new OpenAIVoiceProvider(config);
+  }
   return notImplemented(name, "voice");
 }
 

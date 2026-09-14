@@ -78,8 +78,19 @@ model Character {
   /// Style preset this character was designed for. Null = project default.
   stylePresetId   String?
 
+  // ---- voice: every field editable in the UI, none hard-coded in code ----
+  /// Which vendor speaks for this character. Changing it must not need a deploy.
   voiceProvider   String   @default("mock")
+  voiceModel      String   @default("mock-voice-std")
+  /// Vendor's voice id. Deliberately a free string: each vendor names its own.
   voiceId         String   @default("mock-male-us")
+  /// Delivery direction, the part that makes a TTS voice act rather than read.
+  /// gpt-4o-mini-tts takes this verbatim; vendors without it ignore it.
+  voiceInstructions String @default("")
+  /// 0.25-4.0 where the vendor supports it. 1 = the voice's natural pace.
+  voiceSpeed      Float    @default(1)
+  voiceGender     String   @default("male")
+  voiceAccent     String   @default("US")
   seed            Int?
   notes           String   @default("")
   enabled         Boolean  @default(true)
@@ -87,8 +98,55 @@ model Character {
   updatedAt       DateTime @updatedAt
 
   references CharacterReference[]
+  dialogueLines DialogueLine[]
 
   @@index([enabled])
+}
+
+/// One spoken line, by one character, in one scene.
+///
+/// Voice used to be one file per scene, spoken by whoever happened to be first
+/// in the speaking list. That cannot represent the ordinary case of two
+/// characters trading lines in the same beat, and it silently dropped the
+/// second speaker's audio.
+///
+/// A row per line also makes each line's cost, voice and settings answerable
+/// individually - which matters because a line is the unit that gets
+/// regenerated when the delivery is wrong.
+model DialogueLine {
+  id           String   @id @default(uuid())
+  sceneId      String
+  characterId  String?
+  /// Order within the scene. Two lines never share one.
+  lineNumber   Int
+  text         String
+
+  // ---- resolved at generation time, kept so a result can be explained ----
+  provider     String   @default("")
+  model        String   @default("")
+  voiceId      String   @default("")
+  instructions String   @default("")
+  speed        Float    @default(1)
+
+  estimatedCost Float   @default(0)
+  actualCost    Float   @default(0)
+  /// Measured from the rendered file, not promised by the provider.
+  durationSec   Float   @default(0)
+  /// Relative path under data/. SQLite stores the path, never the audio.
+  outputPath   String   @default("")
+  status       String   @default("pending")
+  error        String   @default("")
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  scene     Scene      @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  character Character? @relation(fields: [characterId], references: [id], onDelete: SetNull)
+
+  @@unique([sceneId, lineNumber])
+  @@index([sceneId])
+  @@index([characterId])
+  @@index([status])
 }
 
 /// One reference image for a character.
@@ -167,6 +225,9 @@ model ModelRegistry {
   supportsAudio              Boolean  @default(false)
   supports1080p              Boolean  @default(false)
   supportsUpscale            Boolean  @default(false)
+  /// Voice models that take a free-text delivery direction (gpt-4o-mini-tts).
+  /// Without it, a voice reads the line; with it, the voice acts it.
+  supportsVoiceInstructions Boolean @default(false)
   maxDuration                Int      @default(0)
   qualityRating              Int      @default(5)
   speedRating                Int      @default(5)
@@ -295,6 +356,7 @@ model Scene {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   assets  Asset[]
+  dialogueLines DialogueLine[]
 
   @@unique([projectId, sceneNumber])
   @@index([status])

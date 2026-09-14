@@ -69,8 +69,13 @@ async function main(): Promise<void> {
         bodyProportions: character.bodyProportions,
         accessories: character.accessories,
         colorPalette: character.colorPalette,
-        voiceProvider: "mock",
+        voiceProvider: character.voiceProvider,
+        voiceModel: character.voiceModel,
         voiceId: character.voiceId,
+        voiceInstructions: character.voiceInstructions,
+        voiceSpeed: character.voiceSpeed,
+        voiceGender: character.voiceGender,
+        voiceAccent: character.voiceAccent,
         seed: character.seed,
         notes: character.notes,
         enabled: true,
@@ -86,6 +91,16 @@ async function main(): Promise<void> {
         bodyProportions: character.bodyProportions,
         accessories: character.accessories,
         colorPalette: character.colorPalette,
+        // Voice settings are re-seeded on update too. They are defaults an
+        // operator is expected to tune in the UI, and re-seeding is how a
+        // corrected default reaches an existing database.
+        voiceProvider: character.voiceProvider,
+        voiceModel: character.voiceModel,
+        voiceId: character.voiceId,
+        voiceInstructions: character.voiceInstructions,
+        voiceSpeed: character.voiceSpeed,
+        voiceGender: character.voiceGender,
+        voiceAccent: character.voiceAccent,
       },
     });
   }
@@ -165,6 +180,7 @@ async function main(): Promise<void> {
           ? new Date(model.lastVerifiedAt)
           : null,
         supportsAudio: model.supportsAudio ?? false,
+        supportsVoiceInstructions: model.supportsVoiceInstructions ?? false,
         supports1080p: model.supports1080p ?? false,
         supportsUpscale: model.supportsUpscale ?? false,
         maxDuration: model.maxDuration ?? 0,
@@ -196,6 +212,7 @@ async function main(): Promise<void> {
           ? new Date(model.lastVerifiedAt)
           : null,
         supportsAudio: model.supportsAudio ?? false,
+        supportsVoiceInstructions: model.supportsVoiceInstructions ?? false,
         supports1080p: model.supports1080p ?? false,
         supportsUpscale: model.supportsUpscale ?? false,
         maxDuration: model.maxDuration ?? 0,

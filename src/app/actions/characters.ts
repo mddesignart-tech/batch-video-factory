@@ -229,3 +229,154 @@ export async function saveCharacterSheet(
     return { ok: false, message: errorMessage(err) };
   }
 }
+
+// ------------------------------------------------------------------ voice ---
+
+/**
+ * Voice settings, all editable, none hard-coded.
+ *
+ * Provider and model are free text rather than an enum on purpose: adding
+ * ElevenLabs or Deepgram later must be a data change, not a schema migration
+ * plus a deploy. The validation that matters - does this provider exist, is
+ * this model priced and enabled - happens in buildVoiceConfig, which is the
+ * one place that can answer it against the database.
+ */
+const VoiceInput = z.object({
+  voiceProvider: z.string().trim().min(1, "Chọn nhà cung cấp."),
+  voiceModel: z.string().trim().min(1, "Chọn model."),
+  voiceId: z.string().trim().min(1, "Chọn giọng."),
+  voiceInstructions: z.string().trim().max(2000, "Hướng dẫn quá dài."),
+  voiceSpeed: z.coerce
+    .number()
+    .min(0.25, "Tốc độ tối thiểu 0.25.")
+    .max(4, "Tốc độ tối đa 4."),
+  voiceGender: z.enum(["male", "female"]),
+  voiceAccent: z.enum(["US", "UK"]),
+});
+
+export async function saveCharacterVoice(
+  characterId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const parsed = VoiceInput.safeParse(Object.fromEntries(formData.entries()));
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ.",
+    };
+  }
+  try {
+    await prisma.character.update({
+      where: { id: characterId },
+      // Voice does NOT bump the character version. Version tracks appearance,
+      // so that images generated against an older description can be told
+      // apart from current ones; a new voice invalidates no image.
+      data: parsed.data,
+    });
+    revalidatePath("/characters");
+    return { ok: true, message: "Đã lưu cấu hình giọng." };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/** Voices this provider offers, for the dropdown. Never a paid call. */
+export async function listVoices(provider: string, model: string) {
+  try {
+    const { getVoiceProvider } = await import("@/providers/registry");
+    const p = await getVoiceProvider(provider, model);
+    return { ok: true as const, voices: await p.listVoices() };
+  } catch (err) {
+    return { ok: false as const, message: errorMessage(err), voices: [] };
+  }
+}
+
+/**
+ * Speak one short line so the operator can hear the settings before committing
+ * them to a whole project.
+ *
+ * This IS a paid call, so it says what it will cost, checks the cap, and writes
+ * the charge to the ledger like everything else. A preview that quietly skips
+ * the books is how a cap stops matching reality.
+ */
+export async function previewVoice(
+  characterId: string,
+  text: string,
+): Promise<ActionResult & { audioPath?: string; cost?: number }> {
+  const line = text.trim();
+  if (line.length === 0) return { ok: false, message: "Nhập câu muốn nghe thử." };
+  if (line.length > 300) {
+    return { ok: false, message: "Câu nghe thử tối đa 300 ký tự." };
+  }
+
+  try {
+    const character = await prisma.character.findUnique({ where: { id: characterId } });
+    if (!character) return { ok: false, message: "Không tìm thấy nhân vật." };
+
+    const { getVoiceProvider } = await import("@/providers/registry");
+    const { assertCanSpend } = await import("@/services/spend-guard");
+    const { recordCost } = await import("@/services/cost-tracker");
+    const { toAbsolute, toRelative, uuidFilename } = await import("@/lib/paths");
+    const path = await import("node:path");
+
+    const provider = await getVoiceProvider(character.voiceProvider, character.voiceModel);
+    const outputPath = toAbsolute(
+      path.join("voice-preview", uuidFilename(".wav")),
+    );
+
+    const estimate = await provider.estimateCost({
+      projectId: "preview",
+      sceneId: "preview",
+      model: character.voiceModel,
+      text: line,
+      voiceId: character.voiceId,
+      instructions: character.voiceInstructions,
+      accent: character.voiceAccent === "UK" ? "UK" : "US",
+      gender: character.voiceGender === "female" ? "female" : "male",
+      speed: character.voiceSpeed,
+      targetDuration: 5,
+      outputPath,
+    });
+
+    if (!isMockMode()) {
+      await assertCanSpend({
+        provider: character.voiceProvider,
+        model: character.voiceModel,
+        estimatedCost: estimate.amount,
+      });
+    }
+
+    const job = await provider.createVoice({
+      projectId: "preview",
+      sceneId: "preview",
+      model: character.voiceModel,
+      text: line,
+      voiceId: character.voiceId,
+      instructions: character.voiceInstructions,
+      accent: character.voiceAccent === "UK" ? "UK" : "US",
+      gender: character.voiceGender === "female" ? "female" : "male",
+      speed: character.voiceSpeed,
+      targetDuration: 5,
+      outputPath,
+    });
+    const asset = await provider.downloadResult(job.externalId);
+
+    await recordCost({
+      category: "voice",
+      provider: character.voiceProvider,
+      model: character.voiceModel,
+      amount: asset.actualCost,
+      note: `nghe thử giọng ${character.name}`,
+    });
+
+    revalidatePath("/characters");
+    return {
+      ok: true,
+      message: `Đã tạo bản nghe thử (${asset.actualCost.toFixed(6)} USD).`,
+      audioPath: toRelative(asset.filePath),
+      cost: asset.actualCost,
+    };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
