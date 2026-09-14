@@ -11,6 +11,11 @@ import { ProviderError } from "@/providers/types";
 import type { ProviderStatus } from "@/domain/enums";
 import { prepareKeyframe } from "@/providers/openai/openai-video-provider";
 import type { VideoModelConfig } from "@/providers/video-config";
+import { logger } from "@/lib/logger";
+import {
+  fitVideoPrompt,
+  RUNWAY_MAX_PROMPT_CHARS,
+} from "@/domain/video-prompt";
 import {
   createTask,
   downloadTaskOutput,
@@ -76,10 +81,27 @@ export class RunwayVideoProvider implements VideoProvider {
       );
     }
 
+    // Runway caps promptText at 1000 characters. Fit it BEFORE the request so
+    // the outcome is a logged rewrite rather than a 400 on the paid path. The
+    // movement description is preserved verbatim - only the trailing
+    // constraint boilerplate is compacted - so the clip still benchmarks the
+    // same motion as every other vendor.
+    const fitted = fitVideoPrompt(req.prompt, RUNWAY_MAX_PROMPT_CHARS);
+    if (fitted.changed) {
+      await logger.warn({
+        event: "provider.prompt_compacted",
+        provider: this.config.providerName,
+        model: this.config.model,
+        projectId: req.projectId,
+        sceneId: req.sceneId,
+        message: `Prompt ${fitted.note}`,
+      });
+    }
+
     const prepared = prepareKeyframe(req.referenceImagePath, this.config.size);
     try {
       const task = await createTask(this.config, {
-        prompt: req.prompt,
+        prompt: fitted.text,
         seconds: req.durationSeconds,
         keyframePath: prepared.path,
       });

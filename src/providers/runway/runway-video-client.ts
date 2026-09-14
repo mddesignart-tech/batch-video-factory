@@ -99,10 +99,23 @@ async function readError(response: Response): Promise<string> {
   try {
     const text = await response.text();
     try {
-      const json = JSON.parse(text) as { error?: string; message?: string };
-      return (json.error ?? json.message ?? text).slice(0, 300);
+      const json = JSON.parse(text) as Record<string, unknown>;
+      const headline =
+        (typeof json.error === "string" ? json.error : undefined) ??
+        (typeof json.message === "string" ? json.message : undefined) ??
+        "";
+      // Keep the field-level detail. Runway answers a bad body with a bare
+      // "Validation of body failed" in `error` and puts WHICH field failed in a
+      // sibling key. Returning only the headline threw away the one part that
+      // says what to fix, and turned a one-line correction into guesswork.
+      const extras = Object.entries(json)
+        .filter(([k]) => k !== "error" && k !== "message")
+        .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+        .join("; ");
+      const full = [headline, extras].filter((p) => p.length > 0).join(" | ");
+      return (full.length > 0 ? full : text).slice(0, 600);
     } catch {
-      return text.slice(0, 250);
+      return text.slice(0, 400);
     }
   } catch {
     return "";

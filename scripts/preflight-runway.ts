@@ -40,6 +40,9 @@ async function main(): Promise<void> {
   const { billedVideoSeconds, splitModelSize } = await import(
     "../src/domain/video-duration"
   );
+  const { fitVideoPrompt, RUNWAY_MAX_PROMPT_CHARS } = await import(
+    "../src/domain/video-prompt"
+  );
   const { spendStatus } = await import("../src/services/spend-guard");
   const { toAbsolute } = await import("../src/lib/paths");
   const { RUNWAY_API_VERSION } = await import(
@@ -203,6 +206,22 @@ async function main(): Promise<void> {
     );
   }
   check("Canh co videoPrompt", scene.videoPrompt.trim().length > 0, `${scene.videoPrompt.length} ky tu`);
+  // Runway rejects promptText over 1000 characters with a 400. Free, but it is
+  // a failure on the paid path, so it gets caught here instead.
+  try {
+    const fitted = fitVideoPrompt(scene.videoPrompt, RUNWAY_MAX_PROMPT_CHARS);
+    check(
+      "Prompt vua gioi han 1000",
+      true,
+      fitted.changed ? fitted.note : `${fitted.finalChars} ky tu, khong can sua`,
+    );
+  } catch (err) {
+    check(
+      "Prompt vua gioi han 1000",
+      false,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 
   // ---- 5. what it would cost ---------------------------------------------
   console.log("\n--- 5. Chi phi ---");
