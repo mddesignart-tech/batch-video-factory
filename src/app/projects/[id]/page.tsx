@@ -38,6 +38,9 @@ const STATUS_TONE: Record<
   rendering: "warn",
   completed: "ok",
   failed: "danger",
+  needs_review: "warn",
+  budget_exhausted: "warn",
+  cancelled: "neutral",
 };
 
 export default async function ProjectDetailPage({

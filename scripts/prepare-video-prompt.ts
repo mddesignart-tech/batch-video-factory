@@ -79,6 +79,31 @@ const MOTION: Record<
         "blinking once. His hand stays where it is. He does not step or turn.",
       duration: 3,
     },
+    6: {
+      // Written for the h3_max stability benchmark, from what is actually in
+      // the keyframe: Leo on the left in a teal shirt and glasses, one hand
+      // open mid-gesture; Mia on the right in a denim jacket, already looking
+      // at him.
+      //
+      // Deliberately NOT an easy shot. Two faces to hold, two outfits, a
+      // visible open hand and lip movement are exactly where image-to-video
+      // models drift - picking something trivially easy would prove nothing
+      // about whether this model can carry the LOW band. The stored scene text
+      // ("subtitle appears") is dropped on purpose: our renderer burns
+      // subtitles itself, and asking a video model for on-screen text is asking
+      // for the one thing every model in this class does badly.
+      frame:
+        "Leo and Mia stand side by side against a plain background. Leo has " +
+        "one hand open in front of him, mid-explanation. Mia is turned " +
+        "slightly toward him.",
+      motion:
+        "Leo speaks: his mouth moves naturally through a short sentence and " +
+        "his open hand makes one small outward gesture in time with it, then " +
+        "settles. He glances toward Mia as he finishes. Mia listens, then " +
+        "gives one clear nod and her smile widens slightly. Both keep their " +
+        "feet planted; neither steps, turns away or leaves the frame.",
+      duration: 3,
+    },
   },
 };
 
@@ -144,16 +169,40 @@ async function main(): Promise<void> {
   console.log(`\n--- videoPrompt ---\n`);
   console.log(prompt);
 
+  const { billedVideoSeconds, splitModelSize } = await import(
+    "../src/domain/video-duration"
+  );
+
   console.log(`\n--- Uoc tinh neu goi Video API ---`);
   if (videoModels.length === 0) {
     console.log("  Chua co model video nao trong bang Mo hinh AI.");
   }
   for (const m of videoModels) {
-    const cost =
-      m.priceUnit === "per_second" ? m.price * plan.duration : m.price;
+    // Price the duration the vendor BILLS, not the one the scene asks for.
+    //
+    // `price * plan.duration` was wrong for every model with a minimum or a
+    // quantised ladder, and quietly so: h3_max sells nothing shorter than 5
+    // seconds, so a 3-second scene was quoted at $0.24 and would have been
+    // charged $0.40 - a 67% understatement, on the exact screen an operator
+    // reads before deciding what to spend. gen4_turbo rounds 3s up to 5s too.
+    const billed =
+      m.priceUnit === "per_second"
+        ? billedVideoSeconds({
+            provider: m.provider,
+            model: m.modelId,
+            size: splitModelSize(m.modelId).size,
+            requestedSeconds: plan.duration,
+            hasKeyframe: true,
+          })
+        : plan.duration;
+    const cost = m.priceUnit === "per_second" ? m.price * billed : m.price;
+    const note =
+      billed !== plan.duration
+        ? ` (tinh tien ${billed}s, khong phai ${plan.duration}s)`
+        : ` cho ${plan.duration}s`;
     console.log(
       `  ${m.enabled ? "[BAT]" : "[TAT]"} ${m.provider}/${m.modelId}: ` +
-        `$${m.price}/${m.priceUnit} -> $${cost.toFixed(4)} cho ${plan.duration}s`,
+        `$${m.price}/${m.priceUnit} -> $${cost.toFixed(4)}${note}`,
     );
   }
 

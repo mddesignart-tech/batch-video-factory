@@ -271,6 +271,28 @@ export interface SeedModel {
   supportsInputFidelity?: boolean;
   /** ISO date a human last checked price and availability against the vendor. */
   lastVerifiedAt?: string;
+  /** ACTIVE | PIN_ONLY | DEPRECATED | DISABLED. Defaults to ACTIVE. */
+  lifecycle?: "ACTIVE" | "PIN_ONLY" | "DEPRECATED" | "DISABLED";
+  /** ISO date the vendor announced the retirement. */
+  deprecationDate?: string;
+  /** ISO date the vendor stops serving it. */
+  shutdownDate?: string;
+  /** What to use instead, in plain words. */
+  replacementNote?: string;
+  /** The vendor's own name for the model, e.g. "wan3". No size suffix. */
+  providerModelKey?: string;
+  /**
+   * Where the price and the capability flags came from.
+   *
+   * MANUAL is the honest default and usually the only option: Runway serves no
+   * pricing or capability endpoint, so those numbers are read off the public
+   * docs by a person. Only existence and rate limits can ever be LIVE, and
+   * those are stamped on by `applyCatalogToRegistry`, never by this file.
+   */
+  pricingSource?: "MANUAL_DOCS";
+  capabilitySource?: "MANUAL_DOCS";
+  /** URL or endpoint a MANUAL fact was taken from. */
+  sourceNote?: string;
   supportsAudio?: boolean;
   /** Voice models that take a free-text delivery direction. */
   supportsVoiceInstructions?: boolean;
@@ -679,13 +701,22 @@ export const SEED_MODELS: SeedModel[] = [
     supportsTextToVideo: true,
     supportsImageToVideo: true,
     supportsReferenceImage: true,
+    // Sora sells 4, 8 or 12 seconds and rejects everything else. Recorded in
+    // domain/video-duration as SORA_DURATIONS; this is the ceiling only.
     maxDuration: 12,
     qualityRating: 8,
     speedRating: 7,
     consistencyRating: 8,
-    lastVerifiedAt: "2026-09-13",
+    lastVerifiedAt: "2026-09-15",
+    lifecycle: "DEPRECATED",
+    shutdownDate: "2026-09-24",
+    replacementNote:
+      "OpenAI ngung phuc vu Sora API. Khong dung lam mac dinh production; " +
+      "adapter va lich su benchmark van giu de doc du lieu cu.",
     notes:
-      "Khung doc 9:16 dung chuan. Anh keyframe PHAI dung 720x1280 - he thong tu cat truoc khi gui.",
+      "NGUNG DUNG. Chi nhan 4/8/12 giay - moi do dai khac bi tu choi, va do la " +
+      "nguyen nhan that su cua lan hong HTTP 400 o 6 giay. Khung doc 9:16 dung " +
+      "chuan. Anh keyframe PHAI dung 720x1280 - he thong tu cat truoc khi gui.",
   },
   {
     provider: "openai",
@@ -702,6 +733,9 @@ export const SEED_MODELS: SeedModel[] = [
     qualityRating: 9,
     speedRating: 5,
     consistencyRating: 9,
+    lifecycle: "DEPRECATED",
+    shutdownDate: "2026-09-24",
+    replacementNote: "OpenAI ngung phuc vu Sora API.",
     lastVerifiedAt: "2026-09-13",
     notes: "Dat gap 3 lan sora-2 o cung do phan giai.",
   },
@@ -721,6 +755,9 @@ export const SEED_MODELS: SeedModel[] = [
     qualityRating: 10,
     speedRating: 4,
     consistencyRating: 9,
+    lifecycle: "DEPRECATED",
+    shutdownDate: "2026-09-24",
+    replacementNote: "OpenAI ngung phuc vu Sora API.",
     lastVerifiedAt: "2026-09-13",
     notes:
       "Dung do phan giai cuoi cua video, khong phai cat lai. Dat nhat: $0.70/giay.",
@@ -799,6 +836,7 @@ export const SEED_MODELS: SeedModel[] = [
   {
     provider: "runway",
     modelId: "gen4_turbo:720x1280",
+    providerModelKey: "gen4_turbo",
     displayName: "Runway Gen-4 Turbo — dọc 720x1280",
     type: "video",
     enabled: false,
@@ -850,6 +888,7 @@ export const SEED_MODELS: SeedModel[] = [
   {
     provider: "runway",
     modelId: "gen4.5:720x1280",
+    providerModelKey: "gen4.5",
     displayName: "Runway Gen-4.5 — dọc 720x1280",
     type: "video",
     enabled: false,
@@ -861,12 +900,173 @@ export const SEED_MODELS: SeedModel[] = [
     // Ratings are PLACEHOLDERS until a real clip is scored. gen4_turbo earned
     // its 8s from measured output; this model has none yet, so it is seeded at
     // the same numbers rather than flattered with better ones.
+    // PIN_ONLY in data as well as in the evidence table.
+    //
+    // domain/video-suitability already blocks automatic routing here, from two
+    // paid runs that drifted the camera. Recording it on the row too means the
+    // MODELS page shows it, so an operator reading the registry sees the same
+    // answer the router acts on instead of having to know about a table in code.
+    lifecycle: "PIN_ONLY",
+    replacementNote:
+      "Lam duoc canh HIGH nhung con troi khung. Chon tay neu chap nhan chi $0,72/6s.",
     qualityRating: 8,
     speedRating: 7,
     consistencyRating: 8,
     lastVerifiedAt: "2026-09-14",
     notes:
       "Image-to-video. Tinh tien theo giay, 2-10s, KHONG co muc toi thieu 5s nhu gen4_turbo.",
+  },
+  // ------------------------------------------------- candidates, unproven ---
+  //
+  // Existence CONFIRMED on 2026-09-15 by GET /organization, which lists every
+  // model this account may call. Note the endpoint: GET /models does not exist
+  // on the Runway API and answers 404, so any claim sourced from "/models" is
+  // sourced from nothing.
+  //
+  // Everything else below - price, resolutions, durations, audio, aspect ratio
+  // - is MANUAL, read off the public docs. Runway serves no endpoint for any of
+  // it. Credits are $0.01 each; the arithmetic checks out against the two rows
+  // we have already paid for (gen4_turbo 5 credits/s = $0,05; gen4.5 12 = $0,12),
+  // which is the only reason to trust the rest of the table.
+  //
+  // All PIN_ONLY. None of these has produced a single frame for us, and a model
+  // that is cheap on paper and unproven in practice must not become the router's
+  // default by being cheapest. Promotion to ACTIVE happens after a benchmark,
+  // not before one.
+  {
+    provider: "runway",
+    modelId: "wan3:480x854",
+    providerModelKey: "wan3",
+    displayName: "WAN 3.0 480p (chưa benchmark)",
+    type: "video",
+    enabled: true,
+    priceUnit: "per_second",
+    // 5 credits/s x $0,01.
+    price: 0.05,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    supportsTextToVideo: true,
+    supportsAudio: true,
+    maxDuration: 30,
+    lifecycle: "PIN_ONLY",
+    pricingSource: "MANUAL_DOCS",
+    capabilitySource: "MANUAL_DOCS",
+    sourceNote: "docs.dev.runwayml.com/guides/pricing + /assets/inputs (2026-09-15)",
+    // Placeholders. Nothing has been scored, and seeding optimistic numbers is
+    // how an unproven model wins a routing comparison it has not earned.
+    qualityRating: 5,
+    speedRating: 7,
+    consistencyRating: 5,
+    replacementNote:
+      "Ung vien thay gen4_turbo cho canh LOW. CHUA benchmark. Can chinh adapter truoc.",
+    notes:
+      "480p/720p/1080p, 2-30s, co audio goc. MAC DINH cua vendor la auto_1080p = 20 credits/s " +
+      "= $0,20/s, gap 4 lan muc 480p - phai gui resolution tuong minh.",
+  },
+  {
+    provider: "runway",
+    modelId: "wan3:720x1280",
+    providerModelKey: "wan3",
+    displayName: "WAN 3.0 720p (chưa benchmark)",
+    type: "video",
+    enabled: true,
+    priceUnit: "per_second",
+    // 10 credits/s.
+    price: 0.1,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    supportsTextToVideo: true,
+    supportsAudio: true,
+    maxDuration: 30,
+    lifecycle: "PIN_ONLY",
+    pricingSource: "MANUAL_DOCS",
+    capabilitySource: "MANUAL_DOCS",
+    sourceNote: "docs.dev.runwayml.com/guides/pricing + /assets/inputs (2026-09-15)",
+    qualityRating: 6,
+    speedRating: 7,
+    consistencyRating: 5,
+    notes: "720p = 10 credits/s. Cung model wan3, khac muc do phan giai.",
+  },
+  {
+    provider: "runway",
+    modelId: "h3_max:768x1280",
+    providerModelKey: "h3_max",
+    displayName: "MiniMax H3 Max 768p (chưa benchmark)",
+    type: "video",
+    enabled: true,
+    priceUnit: "per_second",
+    // 8 credits/s.
+    price: 0.08,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    supportsTextToVideo: true,
+    supportsAudio: true,
+    maxDuration: 15,
+    lifecycle: "PIN_ONLY",
+    pricingSource: "MANUAL_DOCS",
+    capabilitySource: "MANUAL_DOCS",
+    sourceNote: "docs.dev.runwayml.com/guides/pricing + /assets/inputs (2026-09-15)",
+    qualityRating: 6,
+    speedRating: 6,
+    consistencyRating: 6,
+    replacementNote:
+      "Ung vien manh nhat thay gen4_turbo cho canh LOW. CHUA benchmark.",
+    notes:
+      "480p (5 credits/s) hoac 768p (8). 5-15s. KHONG co tham so ratio: ty le khung hinh " +
+      "chay theo anh dau vao, nen keyframe 9:16 cua ta quyet dinh khung. Audio goc luon bat.",
+  },
+  {
+    provider: "runway",
+    modelId: "h3_max:480x854",
+    providerModelKey: "h3_max",
+    displayName: "MiniMax H3 Max 480p (chưa benchmark)",
+    type: "video",
+    enabled: true,
+    priceUnit: "per_second",
+    // 5 credits/s - the same rate gen4_turbo charges.
+    price: 0.05,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    supportsTextToVideo: true,
+    supportsAudio: true,
+    maxDuration: 15,
+    lifecycle: "PIN_ONLY",
+    pricingSource: "MANUAL_DOCS",
+    capabilitySource: "MANUAL_DOCS",
+    sourceNote: "docs.dev.runwayml.com/guides/pricing + /assets/inputs (2026-09-15)",
+    qualityRating: 4,
+    speedRating: 7,
+    consistencyRating: 6,
+    notes:
+      "Dung gia gen4_turbo nhung canh ngan hon 720p ta dang co - la buoc lui ve chat luong " +
+      "cho ban dung 1080x1920.",
+  },
+  {
+    provider: "runway",
+    modelId: "veo3.1_fast:720x1280",
+    providerModelKey: "veo3.1_fast",
+    displayName: "Veo 3.1 Fast, không audio (chưa benchmark)",
+    type: "video",
+    enabled: true,
+    priceUnit: "per_second",
+    // 10 credits/s without audio; 15 with. We supply our own voice track, so
+    // paying the audio rate would be buying something we then throw away.
+    price: 0.1,
+    supportsImageToVideo: true,
+    supportsReferenceImage: true,
+    supportsTextToVideo: true,
+    supportsAudio: true,
+    maxDuration: 10,
+    lifecycle: "PIN_ONLY",
+    pricingSource: "MANUAL_DOCS",
+    capabilitySource: "MANUAL_DOCS",
+    sourceNote: "docs.dev.runwayml.com/guides/pricing + /assets/inputs (2026-09-15)",
+    qualityRating: 8,
+    speedRating: 6,
+    consistencyRating: 7,
+    notes:
+      "10 credits/s khong audio, 15 co audio. Ty le khung hinh chay theo anh dau vao. " +
+      "Dat gap doi gen4_turbo nen chi xet khi hai ung vien re hon deu truot.",
   },
   {
     provider: "elevenlabs",

@@ -31,6 +31,29 @@ export interface BenchmarkScores {
   camera?: number;
   composition?: number;
   humorReadability?: number;
+
+  // ---- added for the h3_max benchmark ------------------------------------
+  //
+  // These are the failure modes this project has actually been bitten by, and
+  // each was previously scored only in prose - which means it could not be
+  // compared across runs. A number that sits in a notes field is an anecdote.
+  //
+  /** Does the face stay the SAME face from first frame to last? */
+  faceDrift?: number;
+  /** Hands, fingers and limbs: melted, extra, or fused counts against this. */
+  handsBody?: number;
+  /** Same outfit at the end as at the start. */
+  clothingConsistency?: number;
+  /** The subject never wanders out of frame or gets cropped by a reframe. */
+  staysInFrame?: number;
+  /**
+   * How closely frame one matches the keyframe we paid to generate.
+   *
+   * The most important of the new columns for an image-to-video model: a model
+   * that redraws the scene from the prompt has thrown away the still, and every
+   * downstream promise about character consistency with it.
+   */
+  keyframeAdherence?: number;
 }
 
 export interface RecordBenchmarkInput {

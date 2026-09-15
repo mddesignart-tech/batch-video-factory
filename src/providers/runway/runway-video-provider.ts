@@ -180,6 +180,9 @@ export class RunwayVideoProvider implements VideoProvider {
             : "processing",
       progress: task.progress,
       error: task.error,
+      // Passed through, not merged into `error`. See JobStatus.failureCode.
+      failureCode: task.failureCode,
+      billedUnits: task.billedCredits,
     };
   }
 

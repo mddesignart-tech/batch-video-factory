@@ -13,6 +13,11 @@ import { buildPrompt } from "@/lib/prompts";
 import { getTextProvider } from "@/providers/registry";
 import { ProviderError, type ProviderUsage, type ScriptRequest } from "@/providers/types";
 import { assertCanSpend } from "./spend-guard";
+import { assertBatchAuthorized, batchApprovalFor } from "./batch-authorization";
+import {
+  commit as commitReservation,
+  release as releaseReservation,
+} from "./cost-reservation";
 import { recordCost } from "./cost-tracker";
 import { assignSpendPriority, classifyScene } from "./complexity";
 
@@ -278,6 +283,25 @@ export async function generateScript(
   const started = Date.now();
 
   /**
+   * The batch this script is being written FOR, if any.
+   *
+   * Writing a script is a paid call, and a cheap one - a fraction of a cent at
+   * Groq prices. It is still spending, and a batch ceiling that quietly excludes
+   * it is a ceiling that does not mean what it says: ten videos would leak ten
+   * text calls past a figure the operator was told was absolute.
+   *
+   * Resolved once, outside the closure, so a batch lookup does not run three
+   * times for the script, the score and the rewrite.
+   */
+  const project = opts.projectId
+    ? await prisma.project.findUnique({
+        where: { id: opts.projectId },
+        select: { batchId: true },
+      })
+    : null;
+  const batchAuth = await batchApprovalFor(project?.batchId);
+
+  /**
    * One guarded, recorded text call.
    *
    * Everything a paid request needs wrapped around it lives here so no call
@@ -317,6 +341,24 @@ export async function generateScript(
       ].join("|"),
     );
 
+    // Inside a batch, the money is held against the batch ceiling before the
+    // request leaves - the same reserve/commit path scene media uses. The key
+    // is unique per attempt here rather than deterministic, which is correct
+    // for text: each regeneration is a genuinely new purchase, so each gets its
+    // own short-lived hold rather than resuming an earlier one.
+    if (batchAuth) {
+      await assertBatchAuthorized({
+        batchId: batchAuth.batchId,
+        projectId: opts.projectId ?? "",
+        sceneId: "",
+        kind: "text",
+        provider: opts.provider,
+        model: opts.model,
+        estimatedCost: estimate,
+        idempotencyKey: key,
+      });
+    }
+
     const job = await prisma.providerJob.create({
       data: {
         provider: opts.provider,
@@ -352,12 +394,14 @@ export async function generateScript(
 
       await recordCost({
         projectId: opts.projectId ?? null,
+        batchId: batchAuth?.batchId ?? null,
         category: "text",
         provider: opts.provider,
         model: usage.model,
         amount: usage.actualCost,
         note: purpose,
       });
+      if (batchAuth) await commitReservation(key, usage.actualCost, purpose);
 
       return result;
     } catch (err) {
@@ -382,11 +426,20 @@ export async function generateScript(
       if (spent && spent.actualCost > 0) {
         await recordCost({
           projectId: opts.projectId ?? null,
+          batchId: batchAuth?.batchId ?? null,
           category: "text",
           provider: opts.provider,
           model: spent.model,
           amount: spent.actualCost,
           note: `${purpose} (thất bại nhưng vẫn bị tính phí)`,
+        });
+      }
+      // The request reached the provider - `run()` is the HTTP call - so the
+      // hold stands unless the provider reported a cost we can use instead.
+      if (batchAuth) {
+        await releaseReservation(key, {
+          billed: true,
+          actualCost: spent?.actualCost,
         });
       }
       throw err;

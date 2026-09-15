@@ -179,6 +179,20 @@ async function main(): Promise<void> {
         lastVerifiedAt: model.lastVerifiedAt
           ? new Date(model.lastVerifiedAt)
           : null,
+        providerModelKey: model.providerModelKey ?? null,
+        // Provenance defaults to MANUAL, which is the truth for anything typed
+        // into a seed file. Only `applyCatalogToRegistry` may write LIVE.
+        pricingSource: model.pricingSource ?? "MANUAL_DOCS",
+        capabilitySource: model.capabilitySource ?? "MANUAL_DOCS",
+        sourceNote: model.sourceNote ?? "",
+        // A brand new row has no stored value to protect, so a default is safe
+        // here - unlike in `update` below.
+        lifecycle: model.lifecycle ?? "ACTIVE",
+        deprecationDate: model.deprecationDate
+          ? new Date(model.deprecationDate)
+          : null,
+        shutdownDate: model.shutdownDate ? new Date(model.shutdownDate) : null,
+        replacementNote: model.replacementNote ?? "",
         supportsAudio: model.supportsAudio ?? false,
         supportsVoiceInstructions: model.supportsVoiceInstructions ?? false,
         supports1080p: model.supports1080p ?? false,
@@ -211,6 +225,34 @@ async function main(): Promise<void> {
         lastVerifiedAt: model.lastVerifiedAt
           ? new Date(model.lastVerifiedAt)
           : null,
+        providerModelKey: model.providerModelKey ?? null,
+        pricingSource: model.pricingSource ?? "MANUAL_DOCS",
+        capabilitySource: model.capabilitySource ?? "MANUAL_DOCS",
+        sourceNote: model.sourceNote ?? "",
+        // `existenceSource` is NOT written here. A seed file cannot confirm that
+        // an account still has a model - only a live call can, and that is
+        // `applyCatalogToRegistry`'s job.
+        //
+        // Lifecycle is app-owned and IS refreshed on every seed, so a vendor
+        // retirement can be pushed to an install that seeded months ago.
+        //
+        // But only when the seed actually HAS an opinion. `?? "ACTIVE"` was the
+        // bug: a seed row saying nothing about lifecycle would overwrite a
+        // stored DEPRECATED with ACTIVE, so one `npm run seed` handed a retired
+        // model straight back to automatic routing. Silence in the seed means
+        // "no opinion", and no opinion must leave the row alone - it must never
+        // be read as "confirmed fine".
+        //
+        // `reliability` is absent from this branch on purpose: it is earned from
+        // our own paid runs, and a seed file has nothing to say about it.
+        ...(model.lifecycle ? { lifecycle: model.lifecycle } : {}),
+        ...(model.deprecationDate
+          ? { deprecationDate: new Date(model.deprecationDate) }
+          : {}),
+        ...(model.shutdownDate
+          ? { shutdownDate: new Date(model.shutdownDate) }
+          : {}),
+        ...(model.replacementNote ? { replacementNote: model.replacementNote } : {}),
         supportsAudio: model.supportsAudio ?? false,
         supportsVoiceInstructions: model.supportsVoiceInstructions ?? false,
         supports1080p: model.supports1080p ?? false,

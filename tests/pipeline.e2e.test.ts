@@ -15,6 +15,12 @@ import {
   previewProjectCost,
   startMediaGeneration,
 } from "@/services/project-service";
+import {
+  approveAuthorization,
+  createAuthorization,
+} from "@/services/batch-authorization";
+import { planBatch } from "@/services/batch-planner";
+import { savePlan } from "@/services/batch-runner";
 import { claimNext, completeJob, failJob, queueStats } from "@/jobs/queue";
 import { onJobExhausted, runJob } from "@/jobs/handlers";
 import { probeDuration } from "@/media/ffmpeg";
@@ -201,10 +207,20 @@ describe("Milestone 1 acceptance: idiom to MP4", () => {
 
     expect(preview.current.scenes.length).toBeGreaterThanOrEqual(4);
     for (const plan of preview.current.scenes) {
-      expect(plan.video).not.toBeNull();
-      expect(plan.video!.provider).toBe("mock");
-      expect(plan.video!.reason.length).toBeGreaterThan(10);
+      // Every scene gets an answer, but there are now two kinds of answer: a
+      // video model, or an explicit decision to animate the keyframe locally.
+      if (plan.motionSource === "AI_VIDEO") {
+        expect(plan.video).not.toBeNull();
+        expect(plan.video!.provider).toBe("mock");
+        expect(plan.video!.reason.length).toBeGreaterThan(10);
+      } else {
+        expect(plan.video).toBeNull();
+        expect(plan.motionReason.length).toBeGreaterThan(10);
+      }
     }
+    // A BALANCED video must still buy movement somewhere - routing everything
+    // to stills would be a slideshow, not a saving.
+    expect(preview.current.aiVideoScenes).toBeGreaterThan(0);
 
     for (const mode of ["ECONOMY", "BALANCED", "QUALITY"] as const) {
       expect(preview.modes[mode].breakdown.total).toBeGreaterThanOrEqual(0);
@@ -214,7 +230,9 @@ describe("Milestone 1 acceptance: idiom to MP4", () => {
 
   it("routes different scenes to different video models", async () => {
     const preview = await previewProjectCost(projectId);
-    const chosen = preview.current.scenes.map((s) => s.video!.modelId);
+    const chosen = preview.current.scenes
+      .filter((s) => s.video !== null)
+      .map((s) => s.video!.modelId);
     // The mock registry has three video tiers; a 5-6 scene video with a mix of
     // LOW/MEDIUM/HIGH complexity must not collapse onto a single tier.
     expect(new Set(chosen).size).toBeGreaterThan(1);
@@ -244,7 +262,7 @@ describe("Milestone 1 acceptance: idiom to MP4", () => {
     expect(stats.queued).toBeGreaterThan(0);
   });
 
-  it("generates mock image, video and voice for every scene", async () => {
+  it("gives every scene usable media, whether from a video model or a keyframe", async () => {
     const { failed } = await drainQueue();
     expect(failed).toBe(0);
 
@@ -254,17 +272,27 @@ describe("Milestone 1 acceptance: idiom to MP4", () => {
     });
 
     for (const scene of scenes) {
-      expect(scene.videoPath, `scene ${scene.sceneNumber} video`).toBeTruthy();
-      expect(fs.existsSync(toAbsolute(scene.videoPath!))).toBe(true);
-      expect(fs.statSync(toAbsolute(scene.videoPath!)).size).toBeGreaterThan(1000);
-
+      // The image is the one thing EVERY scene needs now. A LOCAL_MOTION scene
+      // has nothing to animate without it, and a scene with neither clip nor
+      // image is silently dropped by the renderer - a missing scene in a
+      // finished video, with no error anywhere to explain it.
       expect(scene.imagePath, `scene ${scene.sceneNumber} image`).toBeTruthy();
       expect(fs.existsSync(toAbsolute(scene.imagePath!))).toBe(true);
+
+      if (scene.motionSource === "LOCAL_MOTION") {
+        // No clip and no video spend, by design.
+        expect(scene.videoPath).toBeNull();
+        expect(scene.videoModel).toBe("local-motion");
+      } else {
+        expect(scene.videoPath, `scene ${scene.sceneNumber} video`).toBeTruthy();
+        expect(fs.existsSync(toAbsolute(scene.videoPath!))).toBe(true);
+        expect(fs.statSync(toAbsolute(scene.videoPath!)).size).toBeGreaterThan(1000);
+        expect(scene.videoModel).toBeTruthy();
+      }
 
       expect(scene.audioPath, `scene ${scene.sceneNumber} audio`).toBeTruthy();
       expect(fs.existsSync(toAbsolute(scene.audioPath!))).toBe(true);
 
-      expect(scene.videoModel).toBeTruthy();
       expect(scene.status).toBe("completed");
     }
   });
@@ -425,11 +453,10 @@ async function restoreMockPrices(): Promise<void> {
 }
 
 describe("batch generation", () => {
-  it("expands a batch into projects, each with its own script and budget share", async () => {
-    const idioms = await prisma.idiom.findMany({ take: 3 });
+  /** A batch row plus a costed plan, with no approval attached yet. */
+  async function planOnlyBatch(amount: number, maxCostPerVideo: number) {
+    const idioms = await prisma.idiom.findMany({ take: amount + 1 });
     expect(idioms.length).toBeGreaterThan(0);
-
-    // Ensure the batch has fresh idioms to draw from.
     await prisma.idiom.updateMany({
       where: { id: { in: idioms.map((i) => i.id) } },
       data: { status: "unused" },
@@ -438,30 +465,82 @@ describe("batch generation", () => {
     const batch = await prisma.batch.create({
       data: {
         name: "E2E Batch",
-        amount: 2,
+        amount,
         qualityMode: "ECONOMY",
         targetDuration: 25,
-        maxBudget: 4,
+        maxCostPerVideo,
+        maxBudget: 0,
         concurrency: 2,
-        status: "queued",
+        status: "PLANNED",
       },
     });
 
-    const job = await prisma.job.create({
-      data: { type: "batch_expand", batchId: batch.id, status: "processing" },
+    const plan = await planBatch(
+      {
+        amount,
+        qualityMode: "ECONOMY",
+        targetDuration: 25,
+        maxCostPerVideo,
+      },
+      batch.id,
+    );
+    await savePlan(batch.id, plan);
+    await createAuthorization({
+      batchId: batch.id,
+      estimatedCost: plan.estimatedTotal,
+      maxCostPerVideo: plan.maxCostPerVideo,
+      providerScope: plan.providerScope,
+      videoCount: plan.runnableCount,
+      qualityMode: "ECONOMY",
     });
-    const outcome = await runJob(job);
+    return { batch, plan };
+  }
+
+  async function runExpand(batchId: string) {
+    const job = await prisma.job.create({
+      data: { type: "batch_expand", batchId, status: "processing" },
+    });
+    return runJob(job);
+  }
+
+  async function cleanup(batchId: string) {
+    const projects = await prisma.project.findMany({ where: { batchId } });
+    for (const project of projects) {
+      await prisma.project.delete({ where: { id: project.id } });
+    }
+    await prisma.batch.delete({ where: { id: batchId } });
+  }
+
+  it("refuses to expand a batch nobody has approved", async () => {
+    const { batch } = await planOnlyBatch(2, 0.2);
+
+    // The authorisation exists but is still DRAFT. This is the whole point of
+    // the two-step flow: a plan on its own must not be able to spend, or
+    // "press the button" and "agree to the money" collapse back into one act.
+    const outcome = await runExpand(batch.id);
     expect(outcome.deferred).toBe(false);
 
-    const projects = await prisma.project.findMany({
-      where: { batchId: batch.id },
-    });
+    const projects = await prisma.project.findMany({ where: { batchId: batch.id } });
+    expect(projects).toHaveLength(0);
+
+    await cleanup(batch.id);
+  });
+
+  it("expands an APPROVED batch into projects, each capped at the per-video ceiling", async () => {
+    const { batch } = await planOnlyBatch(2, 0.2);
+    await approveAuthorization({ batchId: batch.id, authorizedMaxSpend: 0.4 });
+
+    const outcome = await runExpand(batch.id);
+    expect(outcome.deferred).toBe(false);
+
+    const projects = await prisma.project.findMany({ where: { batchId: batch.id } });
     expect(projects.length).toBeGreaterThan(0);
 
     for (const project of projects) {
       expect(project.scriptJson).toBeTruthy();
-      // The batch budget is divided between its projects.
-      expect(project.maxBudget).toBeCloseTo(4 / projects.length, 2);
+      // Each video gets the PER-VIDEO ceiling, not a slice of the batch. The
+      // old even split let one video quietly take a share sized for several.
+      expect(project.maxBudget).toBeCloseTo(0.2, 2);
       const scenes = await prisma.scene.count({ where: { projectId: project.id } });
       expect(scenes).toBeGreaterThanOrEqual(4);
     }
@@ -474,10 +553,24 @@ describe("batch generation", () => {
     // The batch queued real generation work. Drop it here rather than leaving
     // it for a later test to drain, which would make that test's timing depend
     // on this one.
-    for (const project of projects) {
-      await prisma.project.delete({ where: { id: project.id } });
-    }
-    await prisma.batch.delete({ where: { id: batch.id } });
+    await cleanup(batch.id);
+  });
+
+  it("does not create a second project for an idiom it already expanded", async () => {
+    const { batch } = await planOnlyBatch(2, 0.2);
+    await approveAuthorization({ batchId: batch.id, authorizedMaxSpend: 0.4 });
+
+    await runExpand(batch.id);
+    const first = await prisma.project.findMany({ where: { batchId: batch.id } });
+    expect(first.length).toBeGreaterThan(0);
+
+    // Resuming re-runs expansion. A second script per idiom would be a second
+    // paid text call for work already done.
+    await runExpand(batch.id);
+    const second = await prisma.project.findMany({ where: { batchId: batch.id } });
+    expect(second.map((p) => p.id).sort()).toEqual(first.map((p) => p.id).sort());
+
+    await cleanup(batch.id);
   });
 });
 

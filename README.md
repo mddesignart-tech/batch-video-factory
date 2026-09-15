@@ -82,6 +82,34 @@ Phụ đề (SRT + ASS)  →  FFmpeg ghép + ghi phụ đề  →  MP4
 Việc tạo kịch bản **không bao giờ** tự động kéo theo việc tiêu tiền. Đó là hai
 thao tác riêng biệt, và thao tác thứ hai bị chặn nếu vượt ngân sách.
 
+### Batch Video Factory — nhiều video trong một lần duyệt
+
+Trang `/batches` làm việc trên cùng nguyên tắc đó, chỉ mở rộng cho nhiều video:
+
+```
+A. PHÂN TÍCH & DỰ TOÁN   miễn phí, chỉ đọc, làm lại bao nhiêu lần cũng được
+       ↓  bảng: từng video, số cảnh, cảnh nào dùng Video AI, nhà cung cấp, dự toán
+B. DUYỆT & CHẠY BATCH    nhập MAXIMUM AUTHORIZED SPEND rồi bấm  ← bước tiêu tiền
+       ↓
+   chạy tự động hết lô, KHÔNG hỏi lại từng cảnh
+```
+
+Ba lớp hạn mức cùng có hiệu lực, và một request phải qua cả ba:
+
+| Lớp | Ý nghĩa |
+|---|---|
+| Hạn mức toàn ứng dụng | trần của cả công cụ. Lô không vượt qua được. |
+| Hạn mức / video | video nào vượt sẽ dừng **riêng nó**, lô vẫn chạy tiếp |
+| Hạn mức / lô | người dùng tự nhập khi duyệt. Chạm trần thì lô dừng. |
+
+Lô dừng khi: hết hạn mức, nhà cung cấp hết số dư, có cảnh cần provider chưa được
+duyệt, lỗi không tự phục hồi được, hoặc người dùng bấm **DỪNG BATCH**.
+
+**Không phải cảnh nào cũng gọi Video AI.** Cảnh giải thích và cảnh chốt dùng ảnh
+keyframe + chuyển động FFmpeg tại máy — $0 và không thể hỏng ở phía nhà cung cấp.
+Chỉ cảnh thật sự cần chuyển động tạo sinh mới trả tiền. Xem
+`src/domain/local-motion.ts`.
+
 ---
 
 ## Lệnh
@@ -135,7 +163,7 @@ Không có Redis, Docker, hay dịch vụ ngoài nào. Xem
 | [docs/PROVIDERS.md](docs/PROVIDERS.md) | Cách thêm một nhà cung cấp AI thật |
 | [docs/AI_ROUTER.md](docs/AI_ROUTER.md) | Cách chọn mô hình cho từng cảnh |
 | [docs/VIDEO_PIPELINE.md](docs/VIDEO_PIPELINE.md) | Từ kịch bản đến MP4 |
-| [docs/COST_CONTROL.md](docs/COST_CONTROL.md) | Ngân sách, ước tính, chống tính phí hai lần |
+| [docs/COST_CONTROL.md](docs/COST_CONTROL.md) | Ngân sách, ước tính, chống tính phí hai lần, kế toán khi gọi API thất bại |
 | [docs/OFFLINE_MODE.md](docs/OFFLINE_MODE.md) | Những gì chạy được khi mất mạng |
 | [docs/BACKUP.md](docs/BACKUP.md) | Sao lưu và khôi phục |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Lỗi thường gặp |
@@ -145,17 +173,23 @@ Không có Redis, Docker, hay dịch vụ ngoài nào. Xem
 
 ## Tình trạng
 
+**Cập nhật: 2026-09-15.**
+
 **Milestone 1 hoàn tất và đã kiểm chứng.** Toàn bộ quy trình chạy được ở chế độ
 mock, xuất ra MP4 1080x1920 thật.
 
-**Milestone 2 bước 1 (Text AI thật): code xong, CHƯA CHẠY THẬT.** Lớp tích hợp
-đã viết và đã kiểm thử bằng máy chủ giả lập, nhưng chưa gọi nhà cung cấp thật
-nào vì chưa có API key.
+**Milestone 2 hoàn tất.** Text AI (Groq), Image AI (OpenAI `gpt-image-2`),
+Video AI (Runway `gen4_turbo`/`gen4.5`, OpenAI `sora-2`) và Voice AI (OpenAI
+`gpt-4o-mini-tts`) đều đã chạy thật và đã ghi chi phí vào sổ. Chỉ còn Upscale là
+mock.
 
-**Tổng chi phí API thật tính đến giờ: 0,00 USD.**
+**Batch Video Factory V1: xây xong, mới chỉ chạy ở chế độ mock.** Kế hoạch, duyệt
+chi, giữ chỗ tiền, hàng đợi, retry/resume, cancel và LOCAL_MOTION đều đã có test.
+Chưa lô nào được duyệt chi thật.
 
-Image AI, Video AI, Voice AI **vẫn hoàn toàn là mock** — đó là các bước sau của
-Milestone 2. Chọn một nhà cung cấp chưa tích hợp sẽ báo lỗi rõ ràng thay vì im
-lặng chạy mock.
+**Tổng chi phí API thật tính đến giờ: $3,712760 trên hạn mức $8,00.**
+
+Con số trên sẽ cũ đi. Kiểm tra lại bằng `spendStatus()` và
+`providerSpendBreakdown()` — sổ chi phí mới là nguồn đúng, không phải tài liệu.
 
 Chi tiết trong [.ai/STATE.md](.ai/STATE.md).

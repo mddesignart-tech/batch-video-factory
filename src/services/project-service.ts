@@ -277,7 +277,17 @@ export async function previewProjectCost(
     models,
     maxBudget: project.maxBudget,
     availableProviders,
-    needs1080p: true,
+    // Native 1080p is a QUALITY-mode demand, exactly as services/generation
+    // decides it at generation time. Hardcoding `true` here made the PREVIEW
+    // disagree with the RUN: gen4_turbo has no native 1080p, so the preview
+    // reported "no video model fits this scene" for a scene the generator would
+    // have routed to Runway without hesitation.
+    //
+    // An estimate that refuses work the generator would do is not a cautious
+    // estimate - it is a wrong one, and it blocks a video that is fine. The
+    // same reasoning is already written out in `routeFor`; this call site was
+    // simply left behind when that was fixed.
+    needs1080p: project.qualityMode === "QUALITY",
   };
 
   const current = estimateProject({
@@ -345,6 +355,35 @@ export async function startMediaGeneration(
     };
   }
 
+  // A scene that wants a video model nobody has approved for it stops the whole
+  // project, and it stops it even for a batch that said "do not ask me again".
+  //
+  // That exception is deliberate. Skipping the prompt means "I approved the
+  // budget, stop asking about money" - it does not mean "pick something for me".
+  // The two honest alternatives here are both wrong: falling back to a still
+  // ships a slideshow labelled as a video, and reaching for an unapproved model
+  // spends money on evidence nobody gathered. So say what is missing and wait.
+  if (preview.current.needsProvider.length > 0) {
+    await prisma.project.update({
+      where: { id: projectId },
+      data: {
+        status: "needs_review",
+        errorMessage: preview.current.needsProvider.join(" | ").slice(0, 1000),
+      },
+    });
+    await logger.warn({
+      event: "project.needs_provider",
+      projectId,
+      message: preview.current.needsProvider.join(" | "),
+    });
+    return {
+      started: false,
+      jobsQueued: 0,
+      budget: preview.budget,
+      errors: preview.current.needsProvider,
+    };
+  }
+
   // Persist the plan so the storyboard shows exactly what will run.
   for (const plan of preview.current.scenes) {
     const scene = project.scenes.find((s) => s.sceneNumber === plan.sceneNumber);
@@ -353,10 +392,22 @@ export async function startMediaGeneration(
       where: { id: scene.id },
       data: {
         estimatedCost: plan.estimatedCost,
+        // Freeze the movement decision. Generation reads this rather than
+        // deciding again, so a registry change between approval and execution
+        // cannot turn a free scene into a paid one behind the operator.
+        motionSource: plan.motionSource,
         imageProvider: plan.image?.provider ?? scene.imageProvider,
         imageModel: plan.image?.modelId ?? scene.imageModel,
-        videoProvider: plan.video?.provider ?? scene.videoProvider,
-        videoModel: plan.video?.modelId ?? scene.videoModel,
+        // A locally animated scene has no video model, and must not keep a
+        // stale one from an earlier plan - generation would read it as a pin.
+        videoProvider:
+          plan.motionSource === "LOCAL_MOTION"
+            ? null
+            : (plan.video?.provider ?? scene.videoProvider),
+        videoModel:
+          plan.motionSource === "LOCAL_MOTION"
+            ? null
+            : (plan.video?.modelId ?? scene.videoModel),
         voiceProvider: plan.voice?.provider ?? scene.voiceProvider,
         voiceModel: plan.voice?.modelId ?? scene.voiceModel,
       },

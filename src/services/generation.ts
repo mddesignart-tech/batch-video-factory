@@ -32,8 +32,21 @@ import {
 import { recordCost, spentOnProject } from "./cost-tracker";
 import { assertCanSpend } from "./spend-guard";
 import { consumeCreateToken } from "./create-token";
+import {
+  assertBatchAuthorized,
+  batchApprovalFor,
+} from "./batch-authorization";
+import { commit as commitReservation, release as releaseReservation } from "./cost-reservation";
+import { decideMotion, keyframeRequired } from "@/domain/local-motion";
 import { parseDialogueLines } from "@/domain/dialogue-lines";
 import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
+import { classifyCameraIntent } from "@/domain/camera-intent";
+import {
+  applyCameraGuardrails,
+  findPromptContradictions,
+  RUNWAY_MAX_PROMPT_CHARS,
+} from "@/domain/video-prompt";
+import { knownBadInput, recordFailureEvidence } from "./model-reliability";
 import { probeDuration } from "@/media/ffmpeg";
 import { normalizeVoiceClip } from "@/media/audio-normalize";
 import { isMockMode } from "@/lib/env";
@@ -86,6 +99,14 @@ interface SceneContext {
   models: ModelRegistry[];
   availableProviders: string[];
   budgetRemaining: number;
+  /**
+   * Set when this scene belongs to a batch with a LIVE approval.
+   *
+   * Its presence changes which permit model applies - batch authorisation
+   * instead of a single-use create token - so it is resolved once here rather
+   * than re-queried at each spend site, where the two could drift apart.
+   */
+  batchId: string | null;
 }
 
 async function loadContext(sceneId: string): Promise<SceneContext> {
@@ -96,10 +117,11 @@ async function loadContext(sceneId: string): Promise<SceneContext> {
   });
   if (!project) throw new Error(`Không tìm thấy dự án ${scene.projectId}`);
 
-  const [models, availableProviders, spent] = await Promise.all([
+  const [models, availableProviders, spent, batchAuth] = await Promise.all([
     prisma.modelRegistry.findMany({ where: { enabled: true } }),
     availableProviderNames(),
     spentOnProject(project.id),
+    batchApprovalFor(project.batchId),
   ]);
 
   return {
@@ -108,6 +130,7 @@ async function loadContext(sceneId: string): Promise<SceneContext> {
     models,
     availableProviders,
     budgetRemaining: Math.max(0, round(project.maxBudget - spent)),
+    batchId: batchAuth?.batchId ?? null,
   };
 }
 
@@ -201,9 +224,24 @@ export function idempotencyKey(opts: {
  * providers are excluded because there is nothing to authorise, and requiring a
  * permit there would break every offline run and every test for no benefit.
  */
-export function needsCreatePermit(kind: string, provider: string): boolean {
+export function needsCreatePermit(
+  kind: string,
+  provider: string,
+  /**
+   * Whether this create is covered by a live BATCH_SPEND_AUTHORIZATION.
+   *
+   * A batch does NOT get to skip authorisation - it gets a different one. The
+   * token means "one confirmation buys one POST", which cannot express a ten
+   * video run; the batch approval means "spend up to this ceiling on this plan",
+   * checked before every request. Requiring both would make batches impossible;
+   * requiring neither would make them unaccountable. So exactly one applies, and
+   * which one is decided here.
+   */
+  batchAuthorized = false,
+): boolean {
   if (kind !== "video") return false;
   if (isMockMode()) return false;
+  if (batchAuthorized) return false;
   return !isFreeVideoProvider(provider);
 }
 
@@ -276,6 +314,10 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
 
   let externalId: string;
   let record = existing;
+  /** Set once a batch reservation is holding money for this request. */
+  let reservedKey: string | null = null;
+  /** Set once a request may have left this machine. */
+  let createAttempted = false;
 
   if (
     existing &&
@@ -285,6 +327,15 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
     // A previous attempt may still be running on the vendor's side. Attaching to
     // it is the difference between one charge and two.
     externalId = existing.externalId;
+    // The earlier attempt already reserved against the batch under this same
+    // key. Claim it so the outcome of THIS attempt settles that money instead
+    // of leaving it held forever.
+    if (ctx.batchId) reservedKey = key;
+    // And treat it as already sent, because it WAS: this branch only runs when
+    // a previous attempt got an externalId back from the vendor. Leaving the
+    // flag false would make a failed poll look like a request that never left,
+    // and hand the batch back budget for a clip the vendor is billing for.
+    createAttempted = true;
     await logger.warn({
       event: "provider.job.resumed",
       provider: decision.provider,
@@ -294,6 +345,38 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
       message: `Job ${kind} trước đó vẫn đang chạy, tiếp tục theo dõi thay vì tạo mới.`,
     });
   } else {
+    // Never buy the same failure twice.
+    //
+    // Checked BEFORE the budget gate and before any reservation, because the
+    // cheapest possible handling of a request we already know the answer to is
+    // to not make it. The fingerprint covers model + kind + prompt + keyframe +
+    // duration: change any of them and this is a different question, which is
+    // allowed to be asked.
+    const seen = await knownBadInput({
+      model: decision.modelId,
+      kind,
+      prompt,
+      keyframePath: ctx.scene.imagePath,
+      durationSeconds: ctx.scene.duration,
+    });
+    if (seen) {
+      throw new ProviderError(
+        `${decision.provider}/${decision.modelId} đã thất bại với đúng yêu cầu này ` +
+          `(${seen.failureCode}, ${seen.at.toISOString().slice(0, 10)}` +
+          `${seen.taskId ? `, task ${seen.taskId}` : ""}). ` +
+          `Không gửi lại. Hãy đổi mô tả cảnh, keyframe hoặc mô hình.`,
+        decision.provider,
+        // Deliberately NOT retryable, which also means no fallback to a more
+        // expensive model. Reaching this line means routing already failed to
+        // exclude a model it had evidence against - the scene flag should have
+        // done it upstream, for free. Quietly buying a different model to paper
+        // over that would hide the bug and spend money doing it; stopping makes
+        // someone look.
+        false,
+        seen.failureCode,
+      );
+    }
+
     // The spend gate belongs here and only here.
     //
     // This is the single function allowed to start a paid generation, so this
@@ -313,12 +396,48 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
     // "Can we afford it" and "did anyone authorise THIS purchase" are different
     // questions, and the spend guard only answers the first. A create that
     // fails for free spends nothing, so a retry loop passes the guard every
-    // time while issuing one real purchase attempt after another. Video is
-    // where that costs the most, so video creates need a single-use permit.
+    // time while issuing one real purchase attempt after another.
     //
-    // Consumed BEFORE the request leaves, and never refunded on failure: the
-    // attempt is what the permit covers, not the outcome.
-    if (needsCreatePermit(kind, decision.provider)) {
+    // Which instrument answers the second question depends on where this scene
+    // came from, and exactly one of them applies:
+    //
+    //   inside an approved batch  BATCH_SPEND_AUTHORIZATION, checked and
+    //                             RESERVED here so the next concurrent job sees
+    //                             this money as spoken for
+    //   anywhere else             a single-use create token, consumed BEFORE the
+    //                             request leaves and never refunded on failure -
+    //                             the attempt is what it covers, not the outcome
+    //
+    // They are mutually exclusive by construction: `needsCreatePermit` returns
+    // false exactly when a batch approval applies. Requiring both would make
+    // batches impossible; requiring neither would make them unaccountable.
+    if (ctx.batchId) {
+      const gate = await assertBatchAuthorized({
+        batchId: ctx.batchId,
+        projectId: ctx.project.id,
+        sceneId: ctx.scene.id,
+        kind,
+        provider: decision.provider,
+        model: decision.modelId,
+        estimatedCost: decision.estimatedCost,
+        // The SAME key as the ProviderJob above. That is what lets a resume find
+        // its own reservation rather than opening a second one.
+        idempotencyKey: key,
+      });
+      reservedKey = key;
+      await logger.debug({
+        event: "batch.gate_passed",
+        provider: decision.provider,
+        model: decision.modelId,
+        projectId: ctx.project.id,
+        sceneId: ctx.scene.id,
+        message:
+          `Lô còn $${gate.ledger.available.toFixed(6)} trong hạn mức ` +
+          `$${gate.ledger.ceiling.toFixed(6)}${gate.reused ? " (dùng lại chỗ đã giữ)" : ""}.`,
+      });
+    }
+
+    if (needsCreatePermit(kind, decision.provider, Boolean(ctx.batchId))) {
       await consumeCreateToken({
         provider: decision.provider,
         model: decision.modelId,
@@ -328,6 +447,9 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
       });
     }
 
+    // Past this line a request may have reached the vendor, so a failure can no
+    // longer be assumed free. See the catch block.
+    createAttempted = true;
     const created = await create();
     externalId = created.externalId;
 
@@ -387,6 +509,12 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
     });
   }
 
+  // What the vendor told us about ITS side of the failure. Both stay null
+  // unless a terminal failed status actually said so, and `null` means "not
+  // reported" - which is a different answer from `0`, and must stay different.
+  let vendorFailureCode: string | null = null;
+  let vendorBilledUnits: number | null = null;
+
   try {
     // Poll with a ceiling so a stuck vendor job cannot wedge the worker forever.
     const deadline = Date.now() + 10 * 60 * 1000;
@@ -399,11 +527,18 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
       status = await poll(externalId);
     }
     if (status.state === "failed") {
+      // Remember what the vendor said before the exception flattens it.
+      vendorFailureCode = status.failureCode ?? null;
+      vendorBilledUnits =
+        typeof status.billedUnits === "number" ? status.billedUnits : null;
       throw new ProviderError(
         status.error ?? `Nhà cung cấp báo lỗi khi tạo ${kind}.`,
         decision.provider,
         true,
-        "generation_failed",
+        // The vendor's own code, not one of ours. A generic "generation_failed"
+        // here is what made `marksProviderUnsuitable` unreachable in practice:
+        // it looks for BAD_OUTPUT, and BAD_OUTPUT never survived this line.
+        status.failureCode ?? "generation_failed",
       );
     }
     if (status.state !== "completed") {
@@ -428,13 +563,51 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
         }),
       },
     });
+    // Settle the hold against the invoice. The held estimate is replaced by
+    // what the vendor actually charged, which is usually the moment a batch
+    // discovers it has more or less headroom than the plan promised.
+    if (reservedKey) await commitReservation(reservedKey, asset.actualCost);
     return asset;
   } catch (err) {
+    // Settle the hold honestly. `createAttempted` is the only thing we actually
+    // know: it says a request may have reached the vendor. If it did not, the
+    // money goes back to the batch; if it might have, the hold stands, because
+    // handing back budget for a clip that was billed is how a batch overspends
+    // while every figure on screen still adds up.
+    //
+    // Unless the vendor has told us otherwise. `billedUnits === 0` is not a
+    // missing value, it is the vendor stating it charged nothing, and it beats
+    // our inference from `createAttempted` because it is a fact and that is a
+    // guess. The first real paid run is the proof: Runway returned
+    // `cost: { credits: 0 }` on the failed clip and the credit balance was
+    // unchanged at 831 before and after - yet $0.25 stayed committed against
+    // the batch, because the code never looked at the number.
+    //
+    // Note the comparison. `!vendorBilledUnits` would have been true for zero
+    // AND for null, quietly turning "confirmed free" into "unknown" - the exact
+    // truthy check that loses the only value worth having.
+    const vendorConfirmedFree = vendorBilledUnits === 0;
+    if (reservedKey) {
+      await releaseReservation(reservedKey, {
+        billed: vendorConfirmedFree ? false : createAttempted,
+        actualCost: vendorConfirmedFree
+          ? 0
+          : err instanceof ProviderError && typeof err.usage?.actualCost === "number"
+            ? err.usage.actualCost
+            : undefined,
+      });
+    }
+
     await prisma.providerJob.update({
       where: { idempotencyKey: key },
       data: {
         status: "failed",
         error: err instanceof Error ? err.message.slice(0, 500) : String(err),
+        failureCode:
+          vendorFailureCode ??
+          (err instanceof ProviderError ? err.code : null),
+        billedUnits: vendorBilledUnits,
+        actualCost: vendorConfirmedFree ? 0 : undefined,
       },
     });
 
@@ -445,7 +618,53 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
     // was attempted twice with byte-identical requests and failed identically.
     // Recording that stops the router offering the same dead end, and stops the
     // next operator paying to learn it a third time.
-    const code = err instanceof ProviderError ? err.code : null;
+    const code = vendorFailureCode ?? (err instanceof ProviderError ? err.code : null);
+
+    // Write down what this cost us to learn, keyed by the exact request. Only
+    // vendor-side verdicts get recorded - `recordFailureEvidence` drops our own
+    // 400s and transient 5xx, so a bug of ours never convicts a model.
+    //
+    // Guarded: evidence is bookkeeping, and failing to file it must not replace
+    // the real error with a database one.
+    if (code && createAttempted) {
+      try {
+        const verdict = await recordFailureEvidence({
+          provider: decision.provider,
+          model: decision.modelId,
+          kind,
+          prompt,
+          keyframePath: ctx.scene.imagePath,
+          durationSeconds: ctx.scene.duration,
+          failureCode: code,
+          message: err instanceof Error ? err.message : String(err),
+          projectId: ctx.project.id,
+          sceneId: ctx.scene.id,
+          taskId: externalId,
+          billedUnits: vendorBilledUnits,
+          actualCost: vendorConfirmedFree ? 0 : decision.estimatedCost,
+        });
+        if (verdict.recorded && verdict.reliability !== "OK") {
+          await logger.warn({
+            event: "provider.model_unreliable",
+            provider: decision.provider,
+            model: decision.modelId,
+            projectId: ctx.project.id,
+            sceneId: ctx.scene.id,
+            message:
+              `${decision.modelId} bị đánh dấu ${verdict.reliability} sau ` +
+              `${verdict.distinctScenes} cảnh khác nhau thất bại. Router sẽ ` +
+              `không tự chọn mô hình này cho tới khi benchmark lại.`,
+          });
+        }
+      } catch (evidenceErr) {
+        await logger.warn({
+          event: "provider.evidence_failed",
+          provider: decision.provider,
+          model: decision.modelId,
+          message: `Không ghi được bằng chứng thất bại: ${String(evidenceErr)}`,
+        });
+      }
+    }
     const flag = marksProviderUnsuitable(decision.provider, code);
     if (flag) {
       const current = parseJson<string[]>(ctx.scene.providerFlagsJson, []);
@@ -567,13 +786,18 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
 
   const lists = sceneCharacters(scene);
   const characterCount = lists.present.length || 1;
-  if (
-    !shouldGenerateKeyframe(
+  // ECONOMY skips keyframes for simple scenes - but those are exactly the
+  // scenes routed to LOCAL_MOTION, which has nothing to animate without one.
+  // Both rules are right on their own and together they delete the scene.
+  const wantsKeyframe = keyframeRequired(
+    motionSourceFor(ctx),
+    shouldGenerateKeyframe(
       project.qualityMode as QualityMode,
       scene.complexity as "LOW" | "MEDIUM" | "HIGH",
       characterCount,
-    )
-  ) {
+    ),
+  );
+  if (!wantsKeyframe) {
     return null; // deliberately skipped in ECONOMY for simple scenes
   }
 
@@ -904,9 +1128,74 @@ async function resolveStylePrompt(stylePresetId: string | null): Promise<string>
 
 // ------------------------------------------------------------------ video ---
 
-export async function generateSceneVideo(sceneId: string): Promise<string> {
+/**
+ * How this scene gets its movement, as the plan recorded it.
+ *
+ * Read from the scene rather than recomputed, because the stored value is what
+ * the operator approved and paid against. Recomputing at generation time would
+ * let a registry edit between approval and execution silently turn a free scene
+ * into a paid one - the money would move without anyone deciding it should.
+ *
+ * Falls back to deciding live only for scenes written before this field
+ * existed, where there is no recorded answer to honour.
+ */
+function motionSourceFor(ctx: SceneContext): "AI_VIDEO" | "LOCAL_MOTION" {
+  const stored = ctx.scene.motionSource;
+  if (stored === "LOCAL_MOTION" || stored === "AI_VIDEO") return stored;
+  return decideMotion({
+    qualityMode: ctx.project.qualityMode as QualityMode,
+    complexity: ctx.scene.complexity as "LOW" | "MEDIUM" | "HIGH",
+    spendPriority: ctx.scene.spendPriority as "LOW" | "NORMAL" | "HIGH",
+    characterCount: sceneCharacters(ctx.scene).present.length || 1,
+  }).source;
+}
+
+/**
+ * Returns the clip path, or null when the scene is animated locally.
+ *
+ * Null is a success, not a gap: the renderer already turns a keyframe into a
+ * moving shot with scale/crop plus a slow push-in, and that path costs nothing
+ * and cannot fail at a vendor. Most scenes in a six-scene short do not need
+ * more than that, and buying six AI clips when two would do is the single
+ * biggest avoidable cost in this pipeline.
+ */
+export async function generateSceneVideo(sceneId: string): Promise<string | null> {
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
+
+  if (motionSourceFor(ctx) === "LOCAL_MOTION") {
+    // The keyframe is now load-bearing rather than optional: with no clip and
+    // no image the renderer would drop this scene entirely, and a scene missing
+    // from a finished video is the kind of failure nobody notices until upload.
+    if (!scene.imagePath) {
+      throw new GenerationError(
+        `Cảnh ${scene.sceneNumber} dùng chuyển động tại máy (LOCAL_MOTION) nên ` +
+          `BẮT BUỘC phải có ảnh keyframe, nhưng cảnh chưa có ảnh. Hãy tạo ảnh trước.`,
+        "video",
+        "ffmpeg",
+        false,
+      );
+    }
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: {
+        videoPath: null,
+        videoProvider: "ffmpeg",
+        videoModel: "local-motion",
+        status: "video_ready",
+        errorMessage: null,
+      },
+    });
+    await logger.info({
+      event: "scene.local_motion",
+      projectId: project.id,
+      sceneId: scene.id,
+      message:
+        `Cảnh ${scene.sceneNumber} dùng ảnh + chuyển động FFmpeg, không gọi ` +
+        `Video AI. Chi phí video: $0,00.`,
+    });
+    return null;
+  }
 
   const decision = routeFor(
     ctx,
@@ -923,13 +1212,53 @@ export async function generateSceneVideo(sceneId: string): Promise<string> {
     ? path.join(projectSubdir(project.id, "images"), path.basename(scene.imagePath))
     : undefined;
 
+  // The LAST step before the prompt leaves this machine.
+  //
+  // Applied here, once, and reused for the idempotency key, the request body
+  // and the stored asset - so all three describe the same request. Computing it
+  // inside `create()` instead would key the job on a prompt different from the
+  // one actually sent, and a resume would then look like a new purchase.
+  //
+  // This is not cosmetic. The same scene, same keyframe and same model scored
+  // camera 1/10 without a lock guardrail and 10/10 with one; 17 of this
+  // project's 23 scenes were carrying prompts with no camera lock at all.
+  const cameraIntent = classifyCameraIntent(scene);
+  const guarded = applyCameraGuardrails(
+    scene.videoPrompt,
+    cameraIntent,
+    RUNWAY_MAX_PROMPT_CHARS,
+  );
+  const videoPrompt = guarded.text;
+  if (guarded.added.length > 0 || guarded.truncated) {
+    await logger.info({
+      event: "scene.camera_guardrail",
+      projectId: project.id,
+      sceneId: scene.id,
+      message: `${cameraIntent.reason} -> ${guarded.note}`,
+    });
+  }
+  const contradictions = findPromptContradictions(videoPrompt);
+  if (contradictions.length > 0) {
+    // Refuse rather than warn. A prompt that both forbids and requests the same
+    // move makes the model choose, and it chooses differently every run - which
+    // is precisely the instability the guardrails exist to remove. Sending it
+    // would be paying for a coin toss.
+    throw new GenerationError(
+      `Prompt cảnh ${scene.sceneNumber} tự mâu thuẫn: ${contradictions.join("; ")}. ` +
+        `Hãy sửa ý đồ camera trong kịch bản rồi chạy lại.`,
+      "video",
+      decision.provider,
+      false,
+    );
+  }
+
   const { result, used } = await withFallback(ctx, decision, async (d) => {
     const provider = await getVideoProvider(d.provider, d.modelId);
     return runProviderJob({
       ctx,
       kind: "video",
       decision: d,
-      prompt: scene.videoPrompt,
+      prompt: videoPrompt,
       // Duration is billable and is not implied by the model id, so it has to
       // be part of the key: a 5s and a 10s clip of the same scene are two
       // different purchases, not one job to resume.
@@ -940,7 +1269,7 @@ export async function generateSceneVideo(sceneId: string): Promise<string> {
           projectId: project.id,
           sceneId: scene.id,
           model: d.modelId,
-          prompt: scene.videoPrompt,
+          prompt: videoPrompt,
           negativePrompt: "",
           durationSeconds: scene.duration,
           width: target.width,
@@ -954,7 +1283,7 @@ export async function generateSceneVideo(sceneId: string): Promise<string> {
     });
   });
 
-  await saveAsset({ ctx, kind: "video", decision: used, prompt: scene.videoPrompt, asset: result });
+  await saveAsset({ ctx, kind: "video", decision: used, prompt: videoPrompt, asset: result });
   await prisma.scene.update({
     where: { id: scene.id },
     data: {

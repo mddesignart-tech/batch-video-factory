@@ -51,53 +51,53 @@ model Idiom {
 /// matter how good each frame is. Everything here exists to be pasted verbatim
 /// into every prompt rather than re-invented per scene.
 model Character {
-  id              String   @id @default(uuid())
-  name            String   @unique
-  description     String
-  personality     String
+  id          String @id @default(uuid())
+  name        String @unique
+  description String
+  personality String
 
   // ---- canonical appearance: copied into every prompt, never regenerated ----
   visualPrompt    String
-  negativePrompt  String   @default("")
+  negativePrompt  String @default("")
   /// Face shape, eyes, nose, expression tendencies.
-  facialFeatures  String   @default("")
+  facialFeatures  String @default("")
   /// Colour, length, style. The most commonly drifted attribute.
-  hair            String   @default("")
+  hair            String @default("")
   /// Everyday clothing. Changes only when a scene explicitly calls for it.
-  outfit          String   @default("")
+  outfit          String @default("")
   /// Height relative to the other characters, build, head-to-body ratio.
-  bodyProportions String   @default("")
-  accessories     String   @default("")
+  bodyProportions String @default("")
+  accessories     String @default("")
   /// Dominant colours, so a scene cannot silently recolour the character.
-  colorPalette    String   @default("")
+  colorPalette    String @default("")
 
   /// Bumped whenever the canonical description changes, so images generated
   /// against an older description can be told apart from current ones.
-  version         Int      @default(1)
+  version Int @default(1)
 
   /// Style preset this character was designed for. Null = project default.
-  stylePresetId   String?
+  stylePresetId String?
 
   // ---- voice: every field editable in the UI, none hard-coded in code ----
   /// Which vendor speaks for this character. Changing it must not need a deploy.
-  voiceProvider   String   @default("mock")
-  voiceModel      String   @default("mock-voice-std")
+  voiceProvider     String   @default("mock")
+  voiceModel        String   @default("mock-voice-std")
   /// Vendor's voice id. Deliberately a free string: each vendor names its own.
-  voiceId         String   @default("mock-male-us")
+  voiceId           String   @default("mock-male-us")
   /// Delivery direction, the part that makes a TTS voice act rather than read.
   /// gpt-4o-mini-tts takes this verbatim; vendors without it ignore it.
-  voiceInstructions String @default("")
+  voiceInstructions String   @default("")
   /// 0.25-4.0 where the vendor supports it. 1 = the voice's natural pace.
-  voiceSpeed      Float    @default(1)
-  voiceGender     String   @default("male")
-  voiceAccent     String   @default("US")
-  seed            Int?
-  notes           String   @default("")
-  enabled         Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  voiceSpeed        Float    @default(1)
+  voiceGender       String   @default("male")
+  voiceAccent       String   @default("US")
+  seed              Int?
+  notes             String   @default("")
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  references CharacterReference[]
+  references    CharacterReference[]
   dialogueLines DialogueLine[]
 
   @@index([enabled])
@@ -114,38 +114,38 @@ model Character {
 /// individually - which matters because a line is the unit that gets
 /// regenerated when the delivery is wrong.
 model DialogueLine {
-  id           String   @id @default(uuid())
-  sceneId      String
-  characterId  String?
+  id          String  @id @default(uuid())
+  sceneId     String
+  characterId String?
   /// Order within the scene. Two lines never share one.
-  lineNumber   Int
-  text         String
+  lineNumber  Int
+  text        String
 
   // ---- resolved at generation time, kept so a result can be explained ----
-  provider     String   @default("")
-  model        String   @default("")
-  voiceId      String   @default("")
-  instructions String   @default("")
-  speed        Float    @default(1)
+  provider     String @default("")
+  model        String @default("")
+  voiceId      String @default("")
+  instructions String @default("")
+  speed        Float  @default(1)
 
   /// Silence after this line, in milliseconds. Null = use the default, which
   /// is 150ms between lines by one speaker and 280ms at a change of speaker.
   ///
   /// Stored per LINE rather than per scene so a script can hold a beat before a
   /// punchline without slowing every other exchange in the same scene.
-  pauseAfterMs  Int?
+  pauseAfterMs Int?
 
-  estimatedCost Float   @default(0)
-  actualCost    Float   @default(0)
+  estimatedCost Float  @default(0)
+  actualCost    Float  @default(0)
   /// Measured from the rendered file, not promised by the provider.
-  durationSec   Float   @default(0)
+  durationSec   Float  @default(0)
   /// Relative path under data/. SQLite stores the path, never the audio.
-  outputPath   String   @default("")
-  status       String   @default("pending")
-  error        String   @default("")
+  outputPath    String @default("")
+  status        String @default("pending")
+  error         String @default("")
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   scene     Scene      @relation(fields: [sceneId], references: [id], onDelete: Cascade)
   character Character? @relation(fields: [characterId], references: [id], onDelete: SetNull)
@@ -162,26 +162,26 @@ model DialogueLine {
 /// approved, or deleted without rewriting the whole set, and so the approved
 /// master is a queryable fact rather than a convention.
 model CharacterReference {
-  id          String   @id @default(uuid())
-  characterId String
+  id               String   @id @default(uuid())
+  characterId      String
   /// Path relative to the data root. The file itself never lives in SQLite.
-  filePath    String
+  filePath         String
   /// "upload" when a human supplied it, "generated" when an AI did.
-  source      String   @default("upload")
+  source           String   @default("upload")
   /// Exactly one primary per character: the master image prompts refer to.
-  isPrimary   Boolean  @default(false)
+  isPrimary        Boolean  @default(false)
   /// A generated master must be approved by a human before it becomes primary.
-  approved    Boolean  @default(false)
-  provider    String   @default("")
-  model       String   @default("")
-  prompt      String   @default("")
+  approved         Boolean  @default(false)
+  provider         String   @default("")
+  model            String   @default("")
+  prompt           String   @default("")
   /// Character version this image was generated against.
-  characterVersion Int @default(1)
-  width       Int      @default(0)
-  height      Int      @default(0)
-  bytes       Int      @default(0)
-  notes       String   @default("")
-  createdAt   DateTime @default(now())
+  characterVersion Int      @default(1)
+  width            Int      @default(0)
+  height           Int      @default(0)
+  bytes            Int      @default(0)
+  notes            String   @default("")
+  createdAt        DateTime @default(now())
 
   character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
 
@@ -209,43 +209,142 @@ model StylePreset {
 // --------------------------------------------------------------- registry ---
 
 model ModelRegistry {
-  id                         String   @id @default(uuid())
+  id                         String    @id @default(uuid())
   provider                   String
   modelId                    String
   displayName                String
   type                       String
-  enabled                    Boolean  @default(true)
+  enabled                    Boolean   @default(true)
   priceUnit                  String
-  price                      Float    @default(0)
+  price                      Float     @default(0)
   // Text APIs bill input and output tokens at different rates, so a single
   // price field cannot express them. Ignored (left 0) for every other type.
-  priceOutput                Float    @default(0)
-  supportsTextToVideo        Boolean  @default(false)
-  supportsImageToVideo       Boolean  @default(false)
-  supportsReferenceImage     Boolean  @default(false)
-  supportsCharacterReference Boolean  @default(false)
+  priceOutput                Float     @default(0)
+  supportsTextToVideo        Boolean   @default(false)
+  supportsImageToVideo       Boolean   @default(false)
+  supportsReferenceImage     Boolean   @default(false)
+  supportsCharacterReference Boolean   @default(false)
   // Some image models accept an "input_fidelity" hint that asks them to
   // preserve faces and clothing from the reference images; others reject the
   // parameter outright with a 400. Which is which is the vendor's business and
   // changes per model, so it is data here rather than a table in code.
-  supportsInputFidelity      Boolean  @default(false)
-  supportsAudio              Boolean  @default(false)
-  supports1080p              Boolean  @default(false)
-  supportsUpscale            Boolean  @default(false)
+  supportsInputFidelity      Boolean   @default(false)
+  supportsAudio              Boolean   @default(false)
+  supports1080p              Boolean   @default(false)
+  supportsUpscale            Boolean   @default(false)
   /// Voice models that take a free-text delivery direction (gpt-4o-mini-tts).
   /// Without it, a voice reads the line; with it, the voice acts it.
-  supportsVoiceInstructions Boolean @default(false)
-  maxDuration                Int      @default(0)
-  qualityRating              Int      @default(5)
-  speedRating                Int      @default(5)
-  consistencyRating          Int      @default(5)
-  historicalSuccessRate      Float    @default(1)
+  supportsVoiceInstructions  Boolean   @default(false)
+  maxDuration                Int       @default(0)
+  qualityRating              Int       @default(5)
+  speedRating                Int       @default(5)
+  consistencyRating          Int       @default(5)
+  historicalSuccessRate      Float     @default(1)
+  /// Where this model is in its life, as an operator-controlled fact.
+  ///
+  /// ACTIVE      the router may choose it automatically
+  /// PIN_ONLY    usable, but only when a person names it by hand
+  /// DEPRECATED  the vendor is retiring it. Never auto-routed.
+  /// DISABLED    off entirely
+  ///
+  /// Separate from the `enabled` boolean, which answers "is this row switched
+  /// on at all". A model can be perfectly enabled and still be something the
+  /// router must not reach for on its own - Sora-2 is exactly that: it works
+  /// today, and OpenAI shuts it down on 2026-09-24.
+  ///
+  /// Also separate from NEEDS_EXPLICIT_PIN in domain/video-suitability, which
+  /// records what BENCHMARK EVIDENCE says. This column records what the
+  /// OPERATOR says. The router refuses if either one objects.
+  lifecycle                  String    @default("ACTIVE")
+  /// What OUR OWN paid runs say about this model: OK | DEGRADED | UNSUITABLE.
+  ///
+  /// A third axis, independent of `enabled` (is the row on) and `lifecycle`
+  /// (what the vendor and operator say). A model can be enabled, ACTIVE at the
+  /// vendor, well-reviewed in benchmarks, and still be the one that has failed
+  /// BAD_OUTPUT on three different scenes this month. Only repeated failures
+  /// ACROSS DIFFERENT SCENES move this: one scene failing twice says something
+  /// about the scene, not the model.
+  ///
+  /// DEGRADED and UNSUITABLE both stop automatic routing. Neither disables the
+  /// model: a manual pin still reaches it, which is what re-benchmarking needs.
+  /// The vendor's OWN name for this model, e.g. "wan3" or "gen4_turbo".
+  ///
+  /// `modelId` carries our size suffix ("wan3:720x1280") because price varies
+  /// by resolution and each resolution needs its own row. The vendor's account
+  /// listing knows nothing about that suffix, so reconciling the two needs the
+  /// bare key. Null means nobody has mapped this row to a vendor model yet.
+  providerModelKey           String?
+
+  /// WHERE each class of fact came from. Never collapse these into one flag:
+  /// they are refreshed by different mechanisms, at different times, and with
+  /// very different trustworthiness.
+  ///
+  ///   LIVE   - read from the provider's API in this process, just now
+  ///   CACHE  - read from a stored snapshot of a previous live call
+  ///   MANUAL - typed in by us, from documentation or a rate card
+  ///
+  /// The distinction is the whole point. "The account has this model" can be
+  /// LIVE (GET /organization lists it). "It costs 5 credits a second" cannot:
+  /// Runway exposes no pricing or capability endpoint at all, so that fact is
+  /// MANUAL no matter how confident it looks sitting in the same row.
+  /// How far this model has been PROVEN, as distinct from where its data came
+  /// from. Four states, and the gap between the first two is the expensive one:
+  ///
+  ///   CATALOG_LISTED       the account listing names it. That is all it means.
+  ///                        NOT proof the API accepts a create for it, and NOT
+  ///                        proof our adapter can build a valid request - the
+  ///                        endpoint serves several vendors' models and they do
+  ///                        not share a request schema.
+  ///   API_CREATE_VERIFIED  a create request was ACCEPTED and returned a task
+  ///                        id. The schema is right and the account may call it.
+  ///   BENCHMARK_VERIFIED   a clip came back and a person scored it.
+  ///   UNVERIFIED           nothing has confirmed anything.
+  ///
+  /// Deliberately separate from `lifecycle` and `reliability`. A model can be
+  /// BENCHMARK_VERIFIED and still be PIN_ONLY: one good clip proves the pipe
+  /// works, not that the model should be a default.
+  verification               String    @default("UNVERIFIED")
+  verificationNote           String    @default("")
+  verifiedAt                 DateTime?
+
+  /// Where the "does this model exist" answer came from.
+  ///
+  ///   ACCOUNT_LISTING         read from the provider's account API just now
+  ///   ACCOUNT_LISTING_CACHED  read from a stored snapshot of such a call
+  ///   MANUAL_DOCS             typed in from documentation
+  ///
+  /// Named after the ENDPOINT rather than called "LIVE", because "live" was
+  /// read as "verified against GET /models" - and GET /models does not exist on
+  /// the Runway API. It answers 404. The only account-level source is
+  /// GET /organization, which lists names and rate limits and nothing else.
+  existenceSource            String    @default("MANUAL_DOCS")
+  existenceCheckedAt         DateTime?
+  pricingSource              String    @default("MANUAL_DOCS")
+  pricingCheckedAt           DateTime?
+  capabilitySource           String    @default("MANUAL_DOCS")
+  /// Free-text provenance: the URL or endpoint a MANUAL fact was taken from.
+  sourceNote                 String    @default("")
+
+  /// Vendor-imposed rate limits, from the account listing. LIVE when present.
+  maxConcurrent              Int?
+  maxDaily                   Int?
+
+  reliability                String    @default("OK")
+  reliabilityNote            String    @default("")
+  reliabilityUpdatedAt       DateTime?
+  /// When the vendor announced the retirement. Null when not deprecated.
+  deprecationDate            DateTime?
+  /// When the vendor stops serving it. After this, requests simply fail.
+  shutdownDate               DateTime?
+  /// What to use instead, in the operator's own words.
+  replacementNote            String    @default("")
+
   /// When a human last checked this row against the vendor's own pricing and
   /// model list. Null means never verified - treat the price as a guess.
-  lastVerifiedAt             DateTime?
-  notes                      String   @default("")
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  lastVerifiedAt DateTime?
+  notes          String    @default("")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@unique([provider, modelId])
   @@index([type, enabled])
@@ -312,65 +411,77 @@ model Project {
 }
 
 model Scene {
-  id                String   @id @default(uuid())
-  projectId         String
-  sceneNumber       Int
-  duration          Float    @default(4)
-  visualDescription String   @default("")
-  dialogue          String   @default("")
-  narration         String   @default("")
-  subtitle          String   @default("")
-  camera            String   @default("")
-  characterAction   String   @default("")
-  soundEffect       String   @default("")
-  imagePrompt       String   @default("")
-  videoPrompt       String   @default("")
-  complexity        String   @default("LOW")
-  spendPriority     String   @default("NORMAL")
+  id                     String @id @default(uuid())
+  projectId              String
+  sceneNumber            Int
+  duration               Float  @default(4)
+  visualDescription      String @default("")
+  dialogue               String @default("")
+  narration              String @default("")
+  subtitle               String @default("")
+  camera                 String @default("")
+  characterAction        String @default("")
+  soundEffect            String @default("")
+  imagePrompt            String @default("")
+  videoPrompt            String @default("")
+  complexity             String @default("LOW")
+  spendPriority          String @default("NORMAL")
   /// Everyone VISIBLE in the frame, whether they speak or not.
   ///
   /// This is the list that drives image generation. It exists separately from
   /// the speaking list because a character who reacts in the background still
   /// has to be drawn on-model, and deriving presence from dialogue silently
   /// dropped exactly those characters.
-  charactersPresentJson   String   @default("[]")
+  charactersPresentJson  String @default("[]")
   /// Only those with a spoken line. Drives voice generation, not images.
-  speakingCharactersJson  String   @default("[]")
+  speakingCharactersJson String @default("[]")
   /// The focus of the shot. First in line for a reference image when the
   /// provider limits how many can be sent.
-  primaryCharactersJson   String   @default("[]")
-  routingMode       String   @default("AUTO")
+  primaryCharactersJson  String @default("[]")
+  routingMode            String @default("AUTO")
+
+  /// How this scene gets its movement: "AI_VIDEO" or "LOCAL_MOTION".
+  ///
+  /// LOCAL_MOTION means the renderer animates the keyframe with FFmpeg - the
+  /// same scale/crop/push-in path a still has always taken - and no video model
+  /// is called at all. It costs $0 and cannot fail at a vendor.
+  ///
+  /// Stored per scene rather than derived at render time because it is a
+  /// SPENDING decision: it is what the operator approved in the plan, and
+  /// recomputing it later against a changed registry would quietly move money.
+  motionSource String @default("AI_VIDEO")
+
   imageProvider     String?
   imageModel        String?
   videoProvider     String?
   videoModel        String?
   voiceProvider     String?
   voiceModel        String?
-  estimatedCost     Float    @default(0)
-  actualCost        Float    @default(0)
+  estimatedCost     Float   @default(0)
+  actualCost        Float   @default(0)
   imagePath         String?
   videoPath         String?
   audioPath         String?
   qualityScore      Float?
   qualityJson       String?
-  retryCount        Int      @default(0)
-  status            String   @default("pending")
-  approved          Boolean  @default(false)
-  skipped           Boolean  @default(false)
+  retryCount        Int     @default(0)
+  status            String  @default("pending")
+  approved          Boolean @default(false)
+  skipped           Boolean @default(false)
   /// Markers a provider earned on this scene, as a JSON array of strings.
   ///
   /// RUNWAY_UNSUITABLE is written when Runway answers INTERNAL.BAD_OUTPUT: the
   /// model is saying it cannot make something acceptable from this input, and
   /// that does not change on a retry. The router then stops offering Runway
   /// this scene instead of paying to learn the same thing again.
-  providerFlagsJson String   @default("[]")
+  providerFlagsJson String  @default("[]")
 
-  errorMessage      String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  assets  Asset[]
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assets        Asset[]
   dialogueLines DialogueLine[]
 
   @@unique([projectId, sceneNumber])
@@ -404,26 +515,149 @@ model Asset {
 // ------------------------------------------------------------------- jobs ---
 
 model Batch {
-  id             String   @id @default(uuid())
+  id             String  @id @default(uuid())
   name           String
-  amount         Int      @default(5)
+  amount         Int     @default(5)
   category       String?
   difficulty     String?
   stylePresetId  String?
-  qualityMode    String   @default("BALANCED")
-  targetDuration Int      @default(25)
-  voiceProvider  String   @default("mock")
-  voiceId        String   @default("mock-male-us")
-  maxBudget      Float    @default(40)
-  concurrency    Int      @default(2)
-  status         String   @default("queued")
-  estimatedCost  Float    @default(0)
-  actualCost     Float    @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  qualityMode    String  @default("BALANCED")
+  targetDuration Int     @default(25)
+  voiceProvider  String  @default("mock")
+  voiceId        String  @default("mock-male-us")
+  maxBudget      Float   @default(40)
+  concurrency    Int     @default(2)
+  status         String  @default("PLANNED")
+  estimatedCost  Float   @default(0)
+  actualCost     Float   @default(0)
 
-  projects Project[]
-  jobs     Job[]
+  /// Ceiling for ONE video inside this batch. A video whose estimate exceeds it
+  /// is marked OVER_VIDEO_BUDGET and never started, rather than being allowed to
+  /// eat a share of the batch that the operator sized for several videos.
+  maxCostPerVideo Float @default(2.5)
+
+  /// The frozen plan the operator approved, as JSON.
+  ///
+  /// Kept verbatim rather than recomputed on demand: prices, model availability
+  /// and the registry all move, and "what did I agree to" must not move with
+  /// them. A re-plan produces a NEW plan for a new approval.
+  planJson String @default("{}")
+
+  /// Idioms the operator picked by hand, as a JSON array of ids. Empty means
+  /// "choose from the library using category/difficulty".
+  idiomIdsJson String @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects      Project[]
+  jobs          Job[]
+  authorization BatchAuthorization?
+  reservations  CostReservation[]
+}
+
+/// One operator approval covering a whole batch.
+///
+/// This is deliberately NOT the CREATE_ATTEMPT_TOKEN model. That token means
+/// "one confirmation buys exactly one POST create", which is right for a
+/// benchmark and unusable for a batch: fifty videos would need fifty prompts,
+/// and an operator clicking through fifty prompts is not consenting to
+/// anything. So a batch gets a different instrument with a different shape -
+/// one approval, a hard ceiling in dollars, and a running total checked before
+/// every single paid request.
+///
+/// The token is untouched and still governs benchmarks, manual tests and
+/// debugging. A scene generated inside an APPROVED batch uses this instead; a
+/// scene generated anywhere else still needs a token. Neither path can run
+/// without one of the two.
+model BatchAuthorization {
+  id      String @id @default(uuid())
+  batchId String @unique
+
+  /// DRAFT | APPROVED | EXHAUSTED | CANCELLED | COMPLETED. See domain/enums.
+  status String @default("DRAFT")
+
+  /// What the plan said it would cost when the operator looked at it.
+  estimatedCost      Float @default(0)
+  /// The hard ceiling the operator authorised. NEVER raised by the app.
+  authorizedMaxSpend Float @default(0)
+  /// Per-video ceiling in force for this authorisation.
+  maxCostPerVideo    Float @default(2.5)
+  /// Committed spend, summed from this batch's reservations.
+  actualSpend        Float @default(0)
+
+  /// Providers this approval covers, as a JSON array of names. A request to a
+  /// provider outside the scope is refused even if the money would fit: the
+  /// operator approved a plan, and the plan named who would be paid.
+  providerScopeJson String @default("[]")
+
+  videoCount  Int    @default(0)
+  qualityMode String @default("BALANCED")
+
+  approvedAt   DateTime?
+  /// Why the approval ended, when it did. Free text for the audit trail.
+  closedReason String    @default("")
+  closedAt     DateTime?
+  note         String    @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+/// Money held against a batch before a request is sent, and settled after.
+///
+/// Without this, concurrency silently breaks the ceiling: five scene jobs run
+/// at once, each reads "committed spend $3.40 of $4.00", each decides its $0.40
+/// fits, and the batch spends $5.40. Every one of those checks was correct when
+/// it ran; they were just all correct about the same dollars.
+///
+/// So a request reserves first and sends second. The reservation is what the
+/// next check sees, so the money can only be promised once.
+///
+/// `idempotencyKey` is the same key services/generation computes for the
+/// ProviderJob, and it is UNIQUE here too. That is what makes a resume, a
+/// browser refresh and a restart safe: they all recompute the same key and find
+/// the reservation that already exists instead of making a second one.
+model CostReservation {
+  id        String  @id @default(uuid())
+  batchId   String
+  projectId String?
+  sceneId   String?
+
+  /// Same key as the matching ProviderJob. One paid generation, one row.
+  idempotencyKey String @unique
+
+  kind     String
+  provider String
+  model    String
+
+  /// RESERVED | COMMITTED | RELEASED. See domain/enums.
+  status String @default("RESERVED")
+
+  /// What was held. Stays as the held amount even after committing, so the
+  /// gap between forecast and invoice stays visible.
+  estimatedCost Float @default(0)
+  /// What was really billed. Meaningful only once status is COMMITTED.
+  actualCost    Float @default(0)
+
+  /// Set when a failed request may still have been charged. A release with this
+  /// true keeps the money held rather than handing it back - the alternative is
+  /// releasing budget the vendor has already taken.
+  possiblyBilled Boolean @default(false)
+  note           String  @default("")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  settledAt DateTime?
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, status])
+  @@index([projectId])
 }
 
 model Job {
@@ -456,10 +690,10 @@ model Job {
 // from paying twice for one scene: before any retry or fallback we look for a live
 // ProviderJob and resume it instead of submitting a new paid generation.
 model ProviderJob {
-  id             String    @id @default(uuid())
-  provider       String
-  model          String
-  kind           String
+  id                  String @id @default(uuid())
+  provider            String
+  model               String
+  kind                String
   /// Task ids from earlier attempts on this same idempotency key, newest last.
   ///
   /// Runway has NO endpoint that lists tasks: a task id can only be looked up
@@ -474,6 +708,20 @@ model ProviderJob {
   requestJson    String    @default("{}")
   responseJson   String?
   error          String?
+  /// The vendor's MACHINE failure code, kept verbatim (INTERNAL.BAD_OUTPUT.CODE01).
+  ///
+  /// `error` is prose and gets truncated, translated and reworded; this is the
+  /// part a rule can be built on. They were one field until a real failed clip
+  /// proved the cost of that: the code was folded into the message, the
+  /// unsuitability check had nothing to match, and the same model stayed
+  /// routable for a scene it had already refused.
+  failureCode    String?
+  /// What the vendor said it charged, in its own unit. NULL = it did not say.
+  ///
+  /// ZERO IS NOT NULL. Runway answers `cost: { credits: 0 }` on a failed task,
+  /// and that zero is the evidence that lets the hold be released in full
+  /// rather than left standing "just in case".
+  billedUnits    Float?
   projectId      String?
   sceneId        String?
   attempts       Int       @default(0)
@@ -559,45 +807,110 @@ model ConceptHistory {
 /// it came from is a bug - one that already happened twice, and both times was
 /// caught by a person remembering rather than by anything in the code.
 model VideoBenchmark {
-  id            String   @id @default(uuid())
+  id String @id @default(uuid())
 
-  provider      String
-  model         String
+  provider String
+  model    String
   /// Vendor-side task id, so the run can still be looked up at the provider.
-  taskId        String?
+  taskId   String?
 
-  projectId     String?
-  sceneNumber   Int
+  projectId       String?
+  sceneNumber     Int
   /// Complexity as the classifier scored it AT THE TIME of the run.
-  complexity    String
-  complexityScore Float  @default(0)
-  characterCount  Int    @default(0)
+  complexity      String
+  complexityScore Float   @default(0)
+  characterCount  Int     @default(0)
 
   /// The prompt actually sent, after any vendor-specific fitting.
-  promptSent    String   @default("")
-  durationRequested Float @default(0)
+  promptSent        String @default("")
+  durationRequested Float  @default(0)
   /// Seconds the vendor actually billed. Differs from requested for Runway.
-  durationSent  Float    @default(0)
-  keyframePath  String   @default("")
+  durationSent      Float  @default(0)
+  keyframePath      String @default("")
 
-  outcome       String
+  outcome      String
   /// Vendor failure code when it failed, e.g. INTERNAL.BAD_OUTPUT.CODE01.
-  failureCode   String   @default("")
-  credits       Int      @default(0)
-  actualCost    Float    @default(0)
-  generationMs  Int      @default(0)
-  outputPath    String   @default("")
+  failureCode  String @default("")
+  credits      Int    @default(0)
+  actualCost   Float  @default(0)
+  generationMs Int    @default(0)
+  outputPath   String @default("")
 
   /// Human scores, 1-10, as JSON. Null for a run that produced nothing to score.
-  scoresJson    String   @default("{}")
+  scoresJson String @default("{}")
   /// What went wrong, in the reviewer's words.
-  notes         String   @default("")
+  notes      String @default("")
 
-  createdAt     DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([provider, model])
   @@index([sceneNumber])
   @@index([outcome])
+}
+
+/// A paid attempt that the VENDOR said it could not fulfil, keyed by the exact
+/// input that produced it.
+///
+/// Distinct from VideoBenchmark, which records runs made deliberately to learn
+/// something. These are production failures: nobody wanted the information and
+/// it was paid for anyway, so it must not be bought twice. The unique key is
+/// (model, fingerprint) - the same request into the same model is a decision
+/// already made, and `INTERNAL.BAD_OUTPUT.CODE01` does not become a different
+/// answer on a Tuesday.
+model ModelFailureEvidence {
+  id       String @id @default(uuid())
+  provider String
+  model    String
+  kind     String
+
+  /// Hash of what was actually sent: model, kind, prompt, keyframe, duration.
+  /// Change any of those and it is a different request, which is allowed to be
+  /// tried - the rule bans repeating a failure, not using the model again.
+  fingerprint String
+
+  failureCode String
+  message     String @default("")
+
+  projectId String?
+  sceneId   String?
+  /// Vendor task id, so the failure can still be looked up at the provider.
+  taskId    String?
+
+  /// What the vendor said it charged. ZERO IS A REAL ANSWER, null is silence.
+  billedUnits Float?
+  /// What we ended up recording against the ledger for this attempt.
+  actualCost  Float  @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([model, fingerprint])
+  @@index([provider, model])
+  @@index([failureCode])
+  @@index([sceneId])
+}
+
+/// A stored copy of what a provider's account API said, and WHEN it said it.
+///
+/// Exists so that "cached" can never be mistaken for "live". Code that wants
+/// the catalogue asks for it and is told which of the two it got, plus the age;
+/// there is no accessor that returns the models without that label. An offline
+/// machine still gets an answer, but it gets an honest one.
+model ProviderCatalogSnapshot {
+  id       String @id @default(uuid())
+  provider String @unique
+
+  /// Verbatim response body, so a later question can be answered without
+  /// another call - and so a surprising reading can be checked against what
+  /// actually arrived rather than against our parsing of it.
+  payloadJson String @default("{}")
+  /// Model keys extracted from the payload, for cheap lookups.
+  modelKeysJson String @default("[]")
+  /// The endpoint it came from. Runway's is /organization, NOT /models - that
+  /// route does not exist and returns 404.
+  endpoint  String @default("")
+  fetchedAt DateTime @default(now())
+
+  @@index([provider])
 }
 
 model Setting {

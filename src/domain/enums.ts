@@ -46,6 +46,11 @@ export const PROJECT_STATUSES = [
   "rendering",
   "completed",
   "failed",
+  /** Stopped for a human decision rather than by an error. */
+  "needs_review",
+  /** The batch this project belongs to ran out of authorised money. */
+  "budget_exhausted",
+  "cancelled",
 ] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
@@ -83,6 +88,69 @@ export type Complexity = (typeof COMPLEXITIES)[number];
 export const SPEND_PRIORITIES = ["LOW", "NORMAL", "HIGH"] as const;
 export type SpendPriority = (typeof SPEND_PRIORITIES)[number];
 
+/**
+ * Where a model is in its life, as the operator controls it.
+ *
+ * Distinct from `enabled`, which only says whether the row is switched on. A
+ * model can be enabled, priced, working today, and still be something the
+ * router must never reach for by itself - a vendor with a published shutdown
+ * date is the clearest case.
+ */
+export const MODEL_LIFECYCLES = [
+  /** The router may choose it automatically. */
+  "ACTIVE",
+  /** Usable, but only when a person names it by hand. */
+  "PIN_ONLY",
+  /**
+   * Nominated for automatic LOW routing, NOT yet granted it.
+   *
+   * A record that the evidence has been gathered and reviewed, kept distinct
+   * from the switch being thrown. `isAutoRoutable` still says no: a candidate
+   * is a proposal awaiting a person, and a state that quietly started routing
+   * the moment it was written would make the review it exists for impossible.
+   */
+  "LOW_AUTO_CANDIDATE",
+  /** The vendor is retiring it. Never auto-routed. */
+  "DEPRECATED",
+  /** Off entirely. */
+  "DISABLED",
+] as const;
+export type ModelLifecycle = (typeof MODEL_LIFECYCLES)[number];
+
+/**
+ * May the router pick this model on its own?
+ *
+ * Two different absences, deliberately treated differently:
+ *
+ *   null / undefined / ""   ACTIVE. The column is non-nullable with a default
+ *                           of "ACTIVE", so a missing value never comes from
+ *                           the database - it comes from an object built in
+ *                           memory by a script or a test. Blocking those turned
+ *                           one absent optional field into a total routing
+ *                           outage: every model in every fixture became
+ *                           unroutable at once, and the error said
+ *                           "(undefined)".
+ *
+ *   an unrecognised string  BLOCKED. A value that is really there and is not
+ *                           one we know is a state this build cannot reason
+ *                           about, and guessing it is safe to spend on would be
+ *                           the wrong way to be wrong.
+ */
+export function isAutoRoutable(lifecycle: string | null | undefined): boolean {
+  if (lifecycle === null || lifecycle === undefined || lifecycle === "") {
+    return true;
+  }
+  return lifecycle === "ACTIVE";
+}
+
+export const VI_MODEL_LIFECYCLE: Record<ModelLifecycle, string> = {
+  ACTIVE: "Đang dùng",
+  PIN_ONLY: "Chỉ chọn tay",
+  LOW_AUTO_CANDIDATE: "Ứng viên LOW — chờ duyệt, chưa tự định tuyến",
+  DEPRECATED: "Sắp ngừng — không tự định tuyến",
+  DISABLED: "Đã tắt",
+};
+
 export const MODEL_TYPES = [
   "text",
   "image",
@@ -110,6 +178,85 @@ export const PROVIDER_STATUSES = [
   "disabled",
 ] as const;
 export type ProviderStatus = (typeof PROVIDER_STATUSES)[number];
+
+/**
+ * Batch lifecycle, as the operator sees it.
+ *
+ * Wider than a project's because a batch can end for reasons a single project
+ * cannot: it can run out of the money it was authorised for while every video
+ * in it is still perfectly healthy.
+ */
+export const BATCH_STATUSES = [
+  /** Planned and costed, but nobody has approved spending yet. */
+  "PLANNED",
+  "QUEUED",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+  /** Stopped for a decision - over per-video budget, or needs a provider. */
+  "NEEDS_REVIEW",
+  /** The authorised ceiling is reached. Not a failure; a limit working. */
+  "BUDGET_EXHAUSTED",
+  "CANCELLED",
+] as const;
+export type BatchStatus = (typeof BATCH_STATUSES)[number];
+
+/**
+ * Statuses a batch never leaves on its own.
+ *
+ * The progress page polls while a batch can still change and stops when it
+ * cannot. Without this list the page would keep asking every 2.5 seconds, for
+ * ever, about a run that finished hours ago.
+ *
+ * NEEDS_REVIEW is deliberately NOT here: a person can retry a video from that
+ * state, so the numbers can still move.
+ */
+export const TERMINAL_BATCH_STATUSES: readonly BatchStatus[] = [
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+  "BUDGET_EXHAUSTED",
+];
+
+export function isTerminalBatchStatus(status: BatchStatus): boolean {
+  return TERMINAL_BATCH_STATUSES.includes(status);
+}
+
+/** State of the one approval that lets a batch spend. */
+export const BATCH_AUTH_STATUSES = [
+  "DRAFT",
+  "APPROVED",
+  "EXHAUSTED",
+  "CANCELLED",
+  "COMPLETED",
+] as const;
+export type BatchAuthStatus = (typeof BATCH_AUTH_STATUSES)[number];
+
+/** Life of one held-then-settled amount of money. */
+export const RESERVATION_STATUSES = ["RESERVED", "COMMITTED", "RELEASED"] as const;
+export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
+
+/**
+ * Where a scene's movement comes from.
+ *
+ * Not every scene needs a generative video model. A reaction shot or an
+ * explanation card is served just as well by a keyframe with a slow push-in,
+ * which FFmpeg does locally for nothing and cannot fail at a vendor. Treating
+ * that as a first-class routing outcome rather than a fallback is what makes a
+ * six-scene video affordable.
+ */
+export const MOTION_SOURCES = ["AI_VIDEO", "LOCAL_MOTION"] as const;
+export type MotionSource = (typeof MOTION_SOURCES)[number];
+
+/** Why one video inside a batch cannot be started as planned. */
+export const VIDEO_PLAN_STATUSES = [
+  "OK",
+  /** Estimate exceeds the per-video ceiling. Never auto-started. */
+  "OVER_VIDEO_BUDGET",
+  /** A scene wants AI video but no approved model can serve it. */
+  "NEEDS_PROVIDER",
+] as const;
+export type VideoPlanStatus = (typeof VIDEO_PLAN_STATUSES)[number];
 
 export const JOB_STATUSES = [
   "queued",
@@ -169,6 +316,39 @@ export const VI_PROJECT_STATUS: Record<ProjectStatus, string> = {
   rendering: "Đang render",
   completed: "Hoàn thành",
   failed: "Thất bại",
+  needs_review: "Chờ duyệt",
+  budget_exhausted: "Hết ngân sách",
+  cancelled: "Đã huỷ",
+};
+
+export const VI_BATCH_STATUS: Record<BatchStatus, string> = {
+  PLANNED: "Đã dự toán, chờ duyệt",
+  QUEUED: "Đã duyệt, chờ chạy",
+  RUNNING: "Đang chạy",
+  COMPLETED: "Hoàn thành",
+  FAILED: "Thất bại",
+  NEEDS_REVIEW: "Cần xem lại",
+  BUDGET_EXHAUSTED: "Hết ngân sách đã duyệt",
+  CANCELLED: "Đã dừng",
+};
+
+export const VI_BATCH_AUTH_STATUS: Record<BatchAuthStatus, string> = {
+  DRAFT: "Chưa duyệt",
+  APPROVED: "Đã duyệt chi",
+  EXHAUSTED: "Đã dùng hết hạn mức",
+  CANCELLED: "Đã thu hồi",
+  COMPLETED: "Đã đóng",
+};
+
+export const VI_MOTION_SOURCE: Record<MotionSource, string> = {
+  AI_VIDEO: "Video AI",
+  LOCAL_MOTION: "FFmpeg tại máy ($0)",
+};
+
+export const VI_VIDEO_PLAN_STATUS: Record<VideoPlanStatus, string> = {
+  OK: "Sẵn sàng",
+  OVER_VIDEO_BUDGET: "Vượt hạn mức/video",
+  NEEDS_PROVIDER: "Thiếu provider được duyệt",
 };
 
 export const VI_JOB_STATUS: Record<JobStatus, string> = {

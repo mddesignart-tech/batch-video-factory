@@ -170,10 +170,53 @@ describe("project estimation", () => {
     expect(estimate.breakdown.retries).toBeGreaterThan(0);
   });
 
-  it("plans every scene", () => {
+  it("plans every scene, and says where each one's movement comes from", () => {
     const estimate = estimateProject({ ...base, qualityMode: "BALANCED" });
     expect(estimate.scenes).toHaveLength(SCENES.length);
-    for (const scene of estimate.scenes) expect(scene.video).not.toBeNull();
+
+    for (const scene of estimate.scenes) {
+      // A plan with no answer for a scene is the failure this guards against.
+      // "Answer" now means one of two things, not one: a video model, or an
+      // explicit decision to animate the keyframe locally.
+      expect(scene.motionSource).toMatch(/^(AI_VIDEO|LOCAL_MOTION)$/);
+      expect(scene.motionReason.length).toBeGreaterThan(0);
+      if (scene.motionSource === "AI_VIDEO") expect(scene.video).not.toBeNull();
+      // A locally animated scene must carry NO video model. Leaving one behind
+      // would let generation read it as a manual pin and pay for it anyway.
+      else expect(scene.video).toBeNull();
+    }
+
+    expect(estimate.localMotionScenes + estimate.aiVideoScenes).toBe(SCENES.length);
+  });
+
+  it("routes the cheap closing scenes to local motion instead of a video model", () => {
+    const estimate = estimateProject({ ...base, qualityMode: "BALANCED" });
+    // Scenes 5 and 6 are LOW complexity and LOW spend priority - the closing
+    // beats. A push-in on the keyframe is indistinguishable there, so paying a
+    // video model for them is the clearest waste in a six-scene video.
+    const closing = estimate.scenes.filter((s) => s.sceneNumber >= 5);
+    expect(closing).toHaveLength(2);
+    for (const scene of closing) {
+      expect(scene.motionSource).toBe("LOCAL_MOTION");
+    }
+    expect(estimate.localMotionScenes).toBe(2);
+  });
+
+  it("charges nothing for video on a locally animated scene", () => {
+    const localOnly = estimateProject({
+      ...base,
+      scenes: [SCENES[4]!, SCENES[5]!],
+      qualityMode: "ECONOMY",
+    });
+    expect(localOnly.aiVideoScenes).toBe(0);
+    expect(localOnly.breakdown.video).toBe(0);
+  });
+
+  it("spends less on video in ECONOMY than BALANCED because fewer scenes call a model", () => {
+    const economy = estimateProject({ ...base, qualityMode: "ECONOMY" });
+    const balanced = estimateProject({ ...base, qualityMode: "BALANCED" });
+    expect(economy.aiVideoScenes).toBeLessThan(balanced.aiVideoScenes);
+    expect(economy.breakdown.video).toBeLessThan(balanced.breakdown.video);
   });
 
   it("orders the three modes cheapest to most expensive", () => {

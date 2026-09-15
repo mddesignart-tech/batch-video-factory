@@ -41,6 +41,24 @@ export function deriveStatus(
   // Mock mode makes every provider slot answerable locally, so nothing is
   // reported as broken just because the operator has no keys yet.
   if (isMockMode()) return config.name === "mock" ? "connected" : "disabled";
+
+  // Outside mock mode the mock provider is NOT a provider. It is a simulator,
+  // and it must never be something the router can choose.
+  //
+  // This was not theoretical. With mock mode off, `mock` was still enabled and
+  // therefore still "connected", so it stayed in the routable list - and its
+  // simulated prices are far below the real ones. Priced for value, the router
+  // preferred it: a real, authorised run of the first paid video routed every
+  // one of its six images to mock-image-pro ($0.02 against gpt-image-2's
+  // $0.048) and BOTH paid clips to mock-video-std. The batch would have spent
+  // almost nothing, tripped no budget alarm, reported `PRODUCTION_ESTIMATE`,
+  // and produced a finished MP4 made entirely of simulated media.
+  //
+  // The existing safeguard - "the router must not silently use mock in real
+  // mode" - was only ever checked on TEXT, where Groq happens to be cheaper
+  // than the mock row. Image and video are the other way round.
+  if (config.name === "mock") return "disabled";
+
   if (!config.enabled) return "disabled";
   if (!isProviderImplemented(config.name)) return "unavailable";
   const hasKey =
@@ -117,6 +135,40 @@ export async function availableProviderNames(): Promise<string[]> {
     .filter((h) => h.status === "connected")
     .sort((a, b) => a.priority - b.priority)
     .map((h) => h.name);
+}
+
+/**
+ * The providers that WOULD be usable with mock mode switched off.
+ *
+ * `availableProviderNames` answers "who can the router call right now", and in
+ * mock mode that is only `mock`. Every cost estimate filters through it, so in
+ * mock mode every estimate was priced from the mock rows' SIMULATED prices and
+ * then displayed as a forecast of real spending. Those prices are not near the
+ * real ones - mock voice is 25x OpenAI's actual rate, mock image is under half
+ * gpt-image-2's - so the forecast was wrong in both directions.
+ *
+ * This is the list a PRODUCTION estimate must use: real vendors, real prices,
+ * computed while still safely in mock mode. It deliberately ignores
+ * `isMockMode()`, which is exactly why it must never be used to decide who to
+ * actually call - only to decide what a real run would cost.
+ *
+ * Connectivity is ignored too: being offline right now says nothing about what
+ * a run would cost when the network is back.
+ */
+export async function productionProviderNames(): Promise<string[]> {
+  const configs = await prisma.providerConfig.findMany({
+    orderBy: { priority: "asc" },
+  });
+  return configs
+    .filter((config) => {
+      if (config.name === "mock") return false;
+      if (!config.enabled) return false;
+      if (!isProviderImplemented(config.name)) return false;
+      return (
+        config.apiKeyEnc !== null || hasEnvKey(config.name, config.apiKeyEnvVar)
+      );
+    })
+    .map((config) => config.name);
 }
 
 /**

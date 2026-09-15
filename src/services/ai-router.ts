@@ -6,8 +6,10 @@ import type {
   RouterStrategy,
   SpendPriority,
 } from "@/domain/enums";
+import { isAutoRoutable } from "@/domain/enums";
+import { autoRouteBlock } from "./provider-catalog";
 import { costForModel, qualityIndex, valueIndex, type UsageUnits } from "./pricing";
-import { billedVideoSeconds, splitModelSize } from "@/domain/video-duration";
+import { planDuration, splitModelSize } from "@/domain/video-duration";
 import { checkSuitability, requiresExplicitPin } from "@/domain/video-suitability";
 import { round } from "@/lib/utils";
 
@@ -246,9 +248,12 @@ function usageForCandidate(
 ): UsageUnits {
   if (ctx.type !== "video" || ctx.usage.seconds === undefined) return ctx.usage;
   const { size } = splitModelSize(model.modelId);
+  // `willSend` rather than the requested length: a vendor that only sells 4, 8
+  // or 12 seconds will be sent 8 for a 6-second scene, and pricing the 6 would
+  // quote for a request that cannot be made.
   return {
     ...ctx.usage,
-    seconds: billedVideoSeconds({
+    seconds: planDuration({
       provider: model.provider,
       model: model.modelId,
       size,
@@ -256,7 +261,7 @@ function usageForCandidate(
       // Err towards "a keyframe is being sent". For Veo that is the more
       // expensive branch, and over-quoting is the safe direction for a cap.
       hasKeyframe: ctx.keyframeAvailable ?? ctx.needsReferenceImage,
-    }),
+    }).willSend,
   };
 }
 
@@ -339,18 +344,50 @@ export function routeScene(
 
   // Models that can do the work but are not cleared to be CHOSEN. They stayed
   // in `capable` so a manual pin still reaches them; automatic routing steps
-  // over them. See NEEDS_EXPLICIT_PIN in domain/video-suitability.
-  const pinOnly = capable.filter((m) => requiresExplicitPin(m.provider, m.modelId));
-  const automatic = capable.filter((m) => !requiresExplicitPin(m.provider, m.modelId));
+  // over them.
+  //
+  // Two independent objections, and either one is enough:
+  //
+  //   lifecycle              what the OPERATOR says - PIN_ONLY, or a vendor
+  //                          shutdown date that makes the model a dead end
+  //   NEEDS_EXPLICIT_PIN     what the BENCHMARK EVIDENCE says
+  //   reliability            what OUR OWN PAID PRODUCTION RUNS did
+  //
+  // They are kept apart because they answer different questions and can
+  // disagree: Sora-2 has good evidence and is being retired anyway, and a model
+  // can benchmark well and still be the one that has returned BAD_OUTPUT on
+  // three different scenes since.
+  const blocked = (m: ModelRegistry): boolean =>
+    autoRouteBlock(m) !== null ||
+    !isAutoRoutable(m.lifecycle) ||
+    requiresExplicitPin(m.provider, m.modelId) !== null;
+  const pinOnly = capable.filter(blocked);
+  const automatic = capable.filter((m) => !blocked(m));
   if (automatic.length === 0) {
     // Do NOT fall through to the pin-only model. Silently spending on a
     // candidate that is under review is exactly what marking it was meant to
     // prevent - so name it and let a person decide.
-    const names = pinOnly.map((m) => `${m.provider}/${m.modelId}`).join(", ");
+  const names = pinOnly
+      .map((m) => `${m.provider}/${m.modelId}${m.lifecycle ? ` (${m.lifecycle})` : ""}`)
+      .join(", ");
+    const first = pinOnly[0];
+    const why = first
+      ? autoRouteBlock(first)
+        ? `${first.provider}/${first.modelId}: ${autoRouteBlock(first)}. ` +
+          `${first.reliabilityNote || first.replacementNote}`.trimEnd()
+        : !isAutoRoutable(first.lifecycle)
+        ? first.lifecycle === "DEPRECATED"
+          ? `${first.provider}/${first.modelId} đã bị đánh dấu NGỪNG DÙNG` +
+            (first.shutdownDate
+              ? ` (nhà cung cấp tắt ngày ${first.shutdownDate.toISOString().slice(0, 10)})`
+              : "") +
+            `. ${first.replacementNote}`.trimEnd()
+          : `${first.provider}/${first.modelId} chỉ được chọn tay.`
+        : (requiresExplicitPin(first.provider, first.modelId) ?? "")
+      : "";
     throw new RoutingError(
       pinOnly.length > 0
-        ? `Cảnh này chỉ còn ứng viên chưa được chốt: ${names}. ` +
-          `${requiresExplicitPin(pinOnly[0]!.provider, pinOnly[0]!.modelId)} ` +
+        ? `Cảnh này chỉ còn ứng viên chưa được chốt: ${names}. ${why} ` +
           `Hãy chọn thủ công nếu bạn đồng ý chi.`
         : `Không có mô hình ${ctx.type} nào đáp ứng yêu cầu của cảnh này ` +
           `(${ctx.durationSeconds}s, ${ctx.characterCount} nhân vật).`,

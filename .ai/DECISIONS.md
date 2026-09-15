@@ -206,3 +206,780 @@ chân bằng một cuộn băng gạc hoạt hình khổng lồ trước buổi 
 **Vì sao:** Trường này được chèn thẳng vào prompt tạo ảnh và video. Viết an toàn
 ngay từ dữ liệu gốc khiến mọi prompt phía sau kế thừa sự an toàn đó, thay vì phụ
 thuộc vào việc mô hình có tự kiềm chế hay không.
+
+---
+
+## QĐ-016 · Batch dùng một cơ chế cấp phép RIÊNG, không nới lỏng token cũ
+
+**Bối cảnh:** `CREATE_ATTEMPT_TOKEN` nghĩa là "một lần xác nhận = đúng một lần
+POST create". Đúng cho benchmark. Không dùng được cho batch.
+
+**Quyết định:** Tạo `BATCH_SPEND_AUTHORIZATION` như một công cụ riêng. Token giữ
+nguyên, vẫn quản benchmark / test tay / debug. Một cảnh trong lô đã duyệt dùng
+authorization; cảnh ngoài lô vẫn cần token. `needsCreatePermit()` trả về `false`
+đúng khi authorization được áp dụng, nên không đường nào chi được mà không có
+một trong hai.
+
+**Vì sao không nới token:** 10 video sẽ cần khoảng 50 lần bấm xác nhận. Một
+người bấm qua 50 hộp thoại thì đã ngừng đọc chúng — cơ chế đó **tệ hơn là không
+có**, vì nó trông giống sự đồng ý mà không phải.
+
+---
+
+## QĐ-017 · Giữ chỗ tiền trước khi gửi request
+
+**Bối cảnh:** Năm job song song, lô còn $0,60. Mỗi job đọc sổ, thấy đủ cho $0,40
+của mình, và gửi. Cả năm lần kiểm tra **đều đúng** — chúng chỉ cùng đúng về một
+khoản $0,60. Lô tiêu $2,00.
+
+**Quyết định:** Bảng `CostReservation`. Tiền được giữ chỗ **trước** khi request
+rời máy, và lần kiểm tra sau nhìn thấy chỗ đã giữ.
+
+**Vì sao không sửa bằng cách đọc kỹ hơn:** không lần kiểm tra nào đọc "đã chi"
+sửa được, vì lúc kiểm tra thì tiền chưa chi. Vấn đề không nằm ở việc đọc.
+
+**Khoá theo `idempotencyKey`, unique** — đúng bằng key của `ProviderJob`. Đó là
+thứ khiến resume, refresh và restart tìm thấy chỗ đã giữ thay vì mở chỗ mới.
+
+**Quyết toán nghiêng về phía "đã bị tính phí":** chỉ trả tiền lại cho lô khi
+chắc chắn request chưa rời máy. Không chắc thì giữ nguyên và đánh dấu
+`possiblyBilled`. Nghiêng sai hướng này làm lô mất một ít dư địa; nghiêng hướng
+kia làm lô tiêu vượt trong khi mọi con số trên màn hình vẫn khớp.
+
+---
+
+## QĐ-018 · LOCAL_MOTION là một kết quả định tuyến, không phải phương án dự phòng
+
+**Quyết định:** Router có thêm lựa chọn `LOCAL_MOTION` — ảnh keyframe +
+scale/crop/push-in bằng FFmpeg, $0. Nó được quyết định từ tính chất của cảnh,
+**trước** khi ngân sách được hỏi tới.
+
+**Vì sao không để nó là fallback khi hết tiền:** một cảnh cần chuyển động tạo
+sinh thì cần nó bất kể còn tiền hay không. Trộn hai câu hỏi lại sẽ để một lô gần
+cạn tiền âm thầm định nghĩa lại thế nào là video đạt.
+
+**Con số làm nó đáng làm:** 6 clip Sora = $2,40, đắt hơn toàn bộ ảnh và kịch bản
+cộng lại, và phần lớn số đó mua chuyển động không ai yêu cầu.
+
+---
+
+## QĐ-019 · Luật LOCAL_MOTION hiệu chỉnh theo `spendPriority`, không theo `complexity`
+
+**Bối cảnh:** Luật đầu tiên viết là "cảnh `complexity = LOW` thì dùng ảnh tĩnh".
+Đọc thì hợp lý.
+
+**Đo thì không.** Kịch bản 6 cảnh từ bộ sinh thật trả về
+MEDIUM/MEDIUM/HIGH/HIGH/MEDIUM/MEDIUM — **không cảnh nào là LOW**, vì chỉ cần
+hai nhân vật trong khung đã đủ vượt ngưỡng MEDIUM. Luật đó sẽ kích hoạt gần như
+không bao giờ, trong khi mọi unit test của nó vẫn xanh.
+
+**Quyết định:** Ở chế độ Cân bằng, tín hiệu là `spendPriority = LOW` — thứ mà bộ
+phân loại gán cho vai "meaning" và "example", tức cảnh giải thích và cảnh chốt.
+Đó đúng là hai nhịp tĩnh mỗi video.
+
+**Bài học ghi lại:** một luật định tuyến chỉ đúng khi đã đối chiếu với phân phối
+đầu ra thật của bộ phân loại, không phải với hình dung về nó.
+
+---
+
+## QĐ-020 · Cảnh LOCAL_MOTION thì ảnh keyframe thành BẮT BUỘC
+
+**Bối cảnh:** Chế độ Tiết kiệm vốn bỏ qua keyframe cho cảnh đơn giản một nhân
+vật. Đó đúng là nhóm cảnh được đẩy sang LOCAL_MOTION.
+
+**Hậu quả nếu để nguyên:** cảnh không có clip **và** không có ảnh. Bộ render lọc
+theo `videoPath || imagePath`, nên nó **lặng lẽ bỏ cảnh đó** khỏi video hoàn
+chỉnh — một cảnh biến mất, không lỗi ở đâu cả.
+
+**Quyết định:** `keyframeRequired()` trong `domain/local-motion.ts`. Khi chuyển
+động đến từ ảnh tĩnh, ảnh thôi là tuỳ chọn. `generateSceneVideo` cũng ném lỗi rõ
+ràng nếu gặp cảnh LOCAL_MOTION mà không có ảnh, thay vì trả về im lặng.
+
+---
+
+## QĐ-021 · Xoá `createBatch` cũ thay vì đánh dấu deprecated
+
+**Bối cảnh:** `createBatch` nhận form rồi **lập tức** xếp `batch_expand`, sinh
+kịch bản và bắt đầu chi tiền media trong một bước.
+
+**Quyết định:** Xoá hẳn, cùng với `NewBatchForm`.
+
+**Vì sao không giữ lại:** đó chính là hình dạng "bấm nút là tiền ra" mà Batch V1
+sinh ra để thay thế. Để lại thì đường chi tiền không cần duyệt vẫn còn đó, và
+một đường như vậy sẽ được dùng lại.
+
+---
+
+## QĐ-022 · Dự án `draft` không có kịch bản phải được tự sửa, không phải bỏ mặc
+
+**Bối cảnh:** Trong lần nghiệm thu trên giao diện, một SQLite socket timeout làm
+hỏng bước viết kịch bản của video thứ ba. Dòng dự án vẫn được tạo trước đó, nên
+nó nằm lại ở trạng thái `draft` với **không cảnh nào**.
+
+**Vì sao đó là ngõ cụt:** `startMediaGeneration` từ chối một dự án chưa có kịch
+bản — đúng. Nhưng nghĩa là *chạy tiếp lô* cũng bó tay, và nút *Thử lại* trên
+đúng dòng đó cũng trả về "chưa có kịch bản". Lỗi gốc là **nhất thời**; tình
+trạng kẹt thì **vĩnh viễn**. Hai video kia hoàn thành, video thứ ba không đường
+nào cứu ngoài sửa tay.
+
+**Quyết định:** `handleBatchExpand` và `retryVideo` đều kiểm tra dự án `draft`
+không có `scriptJson`, và **viết lại kịch bản** trước khi tiếp tục.
+
+**Bài học ghi lại:** một nhánh lỗi được xử lý gọn gàng (bắt, ghi log, đi tiếp)
+vẫn có thể để lại trạng thái mà không cơ chế phục hồi nào chạm tới được. Câu hỏi
+phải hỏi không phải "đã bắt lỗi chưa" mà "sau khi bắt, cái còn lại có tự thoát
+ra được không".
+
+---
+
+## QĐ-023 · Nghiệm thu dùng hai tier model MOCK, không dùng tên nhà cung cấp thật
+
+**Bối cảnh:** Cần chứng minh router chọn được giữa một tier rẻ và một tier đắt.
+Cách hiển nhiên là đăng ký `runway` và `openai` rồi để Mock Mode trả về adapter
+mock.
+
+**Vì sao không làm vậy:** nó sẽ ghi vào sổ chi phí những dòng
+`provider=runway, calls=1` cho một cuộc gọi Runway chưa bao giờ nhận — một nhà
+cung cấp giả với số lần gọi giả, nằm đúng trong bảng mà
+`providerSpendBreakdown()` đọc ra.
+
+**Quyết định:** hai tier là hai dòng model dưới provider `mock`, đặt giá bằng
+giá thật ($0,05/giây và $0,10/giây). Router vẫn phải chọn giữa chúng — đó mới là
+hành vi cần kiểm tra — còn mọi dòng sổ vẫn ghi `mock`, đúng sự thật. Việc tách
+ví giữa các nhà cung cấp **thật** được kiểm ở tầng cổng, nơi kiểm được mà không
+ghi gì cả.
+
+---
+
+## QĐ-024 · Ba loại chi phí là KIỂU DỮ LIỆU, không phải chú thích
+
+**Bối cảnh:** `availableProviderNames()` trả `["mock"]` khi `AI_MOCK_MODE=true`,
+và bộ ước tính chỉ định tuyến tới danh sách đó. Nên **mọi** con số "Tổng chi phí
+dự kiến" mà trang lô từng hiển thị đều tính từ giá mock, rồi trình bày như dự
+báo tiền thật.
+
+**Vì sao không chỉ thêm một dòng chữ "(mock)":** giá mock sai theo cả hai chiều
+— voice cao gấp 25 lần giá OpenAI, image và video thấp hơn một nửa. Một con số
+sai không cứu được bằng nhãn; người đọc vẫn sẽ neo vào con số.
+
+**Quyết định:** `CostBasis = MOCK | PRODUCTION_ESTIMATE | ACTUAL` trong
+`domain/cost-basis.ts`. `ProjectEstimate` mang theo nó, và nó được **suy ra từ
+provider đã chọn** chứ không phải do người gọi truyền vào — một cờ phải nhớ đặt
+là một cờ sẽ có ngày bị đặt sai, và đặt sai đúng cờ này là cách giá giả lập lọt
+lên màn hình duyệt chi.
+
+Mỗi kế hoạch tính **hai lần**: `runtime` (chạy được ngay) và `production` (giá
+thật, qua `productionProviderNames()` — cố tình bỏ qua Mock Mode). **Hạn mức đề
+xuất luôn lấy từ `production`.**
+
+---
+
+## QĐ-025 · "$0,40" là con số bịa, và bài học rút ra
+
+**Chuyện đã xảy ra:** bảng nghiệm thu ghi Tiết kiệm ≈ $1,03/video. Hai mục bên
+dưới, phần kết luận lại đề xuất "chạy 1 video với trần khoảng $0,40". Hai con số
+không thể cùng đúng, và người dùng là người phát hiện.
+
+**$0,40 từ đâu ra:** không từ đâu cả. Nó không được suy ra từ phép tính nào, chưa
+bao giờ vào code hay tài liệu, và gần như chắc chắn là do lẫn với giá thật của
+Sora — **$0,40 cho một clip 4 giây** — rồi bị tôi dùng nhầm thành giá cho cả một
+video.
+
+**Cả $1,03 cũng sai**, chỉ là sai kín đáo hơn: nó dùng kịch bản mẫu (hiền hơn
+kịch bản thật) và giá mock. Dải thật đo được là **$1,70–$2,36**.
+
+**Cách phòng:** `recommendAuthorization()` suy ra trần đề xuất **từ chính con số
+dự toán production**, và có test khẳng định `recommendation.estimated` bằng
+`production.estimatedTotal` chứ không bằng con số mock. Một đề xuất không thể
+trôi khỏi phép tính sinh ra nó nữa.
+
+**Bài học:** một con số trong phần kết luận phải truy được về một phép tính
+trong phần thân. Nếu không truy được thì nó là phát biểu, không phải kết quả.
+
+---
+
+## QĐ-026 · Trang tiến trình tự poll và tự dừng
+
+**Quyết định:** `/batches/[id]` render lần đầu ở server (đúng ngay, không
+spinner), rồi client poll `/api/batches/<id>/progress` mỗi 2,5 giây và **dừng
+hẳn** khi lô vào `COMPLETED | FAILED | CANCELLED | BUDGET_EXHAUSTED`.
+
+**Vì sao không reload cả trang:** reload làm mất vị trí cuộn và nháy toàn bộ bố
+cục vài giây một lần — tệ hơn cái F5 mà nó thay thế.
+
+**Vì sao `NEEDS_REVIEW` không phải trạng thái kết thúc:** người dùng còn có thể
+bấm thử lại một video từ đó, nên số liệu vẫn còn thay đổi được.
+
+**Reconnect không cần xử lý riêng:** mọi phản hồi đều dựng từ DB, nên một tab
+đóng mười phút chỉ cần hỏi một lần là đúng lại — không cần biết nó đã bỏ lỡ gì.
+
+---
+
+## QĐ-027 · Độ dài hợp lệ là NĂNG LỰC của provider, không phải phép làm tròn
+
+**Bối cảnh:** `billedVideoSeconds` không có nhánh cho `openai`, nên rơi vào
+`default: return requestedSeconds`. Ta báo giá 3s/5s/6s cho Sora — ba request mà
+API từ chối. Sora chỉ nhận 4/8/12 giây.
+
+**Quyết định:** `allowedDurationsFor()` và `planDuration()` trong
+`domain/video-duration.ts`. Mọi ước tính đi qua
+`độ dài yêu cầu → năng lực provider → độ dài sẽ gửi → giá`.
+
+**Không tự ý đổi độ dài.** `planDuration` trả `DURATION_TRANSFORM_REQUIRED` kèm
+gợi ý, và dừng ở đó. Bóp một cảnh 6 giây xuống 4 giây để vừa API là **thay đổi
+nội dung video**, và làm việc đó ở tầng thấp nhất — tầng ít có tư cách phán xét
+nhất — là sai.
+
+**Nhưng giá thì vẫn tính theo độ dài sẽ gửi.** $0,80 cho clip 8 giây, không phải
+$0,60 cho clip 6 giây không tồn tại. Cost preview phải trung thực về request có
+thật, kể cả khi request đó chưa được phê duyệt.
+
+**Phân biệt PADDED và DURATION_TRANSFORM_REQUIRED bằng bằng chứng, không bằng
+cảm tính:** Runway gen4_turbo tính 4 giây thành 5 — request **được chấp nhận**,
+chỉ bị tính dư, và có clip thật $0,25 chứng minh. Sora ở 6 giây **bị từ chối**,
+có HTTP 400 chứng minh.
+
+---
+
+## QĐ-028 · Sora-2 = DEPRECATED, không xoá adapter
+
+**Bối cảnh:** OpenAI tắt Sora API ngày 2026-09-24.
+
+**Quyết định:** `lifecycle = DEPRECATED`, `shutdownDate = 2026-09-24`. Router
+không bao giờ tự chọn. Adapter **giữ nguyên** — vẫn cần để đọc job cũ và lịch sử
+benchmark, và một model bị khai tử không làm dữ liệu cũ biến mất.
+
+**Chọn tay vẫn tới được.** Deprecate là chặn **router** chọn, không chặn **người**
+chọn. Xoá hẳn đường đó sẽ biến một quyết định có ý thức thành chuyện bất khả thi.
+
+**Hệ quả phải chấp nhận:** MEDIUM và HIGH giờ không có provider nào được duyệt,
+nên **không kịch bản nào đang có chạy được tự động**. Đó là câu trả lời đúng.
+Câu trả lời sai là để router "tạm" dùng Sora cho xong việc.
+
+---
+
+## QĐ-029 · Kịch bản test soạn tay, nhưng độ phức tạp do CLASSIFIER chấm
+
+**Bối cảnh:** cần một kịch bản không có cảnh HIGH để chạy thật, mà bước này
+không được gọi API trả phí — nên không dùng được Text AI.
+
+**Quyết định:** viết tay kịch bản trong `scripts/prepare-first-real-video.ts`,
+rồi chạy `withDerivedRouting()` lên nó. Độ phức tạp và mức ưu tiên chi tiêu
+**bị tính lại từ chính văn bản cảnh**, đúng như với kịch bản do model viết.
+
+**Ranh giới không được vượt:** viết cảnh cho đơn giản là hợp lệ — một nhân vật,
+một đạo cụ lớn, nền trơn, chuyển động nhỏ và rõ. **Cắt bớt mô tả để ép điểm
+xuống thì không.** Nếu một cảnh ra MEDIUM, cách xử lý đúng là **viết lại cảnh**,
+không phải sửa nhãn. Một độ phức tạp do người khai sẽ định tuyến tiền thật dựa
+trên con số chưa ai kiểm.
+
+Kết quả đo: LOW 6, MEDIUM 0, HIGH 0. Hai cảnh có tín hiệu thật (biểu cảm khuôn
+mặt 1,0; vật thể che khuất 1,5) và vẫn dưới ngưỡng MEDIUM là 4,0.
+
+---
+
+## QĐ-030 · Cảnh Runway viết đúng 5 giây, không phải 4
+
+Runway chỉ bán clip 5 hoặc 10 giây. Một cảnh 4 giây bị **gửi đi là 5 và tính
+tiền là 5**, rồi bộ render cắt bỏ một giây hoạt hình đã trả tiền.
+
+Viết thẳng cảnh ở 5 giây mua lại giây đó **miễn phí**, và xoá luôn một dòng cảnh
+báo `DURATION_TRANSFORM_REQUIRED` không mang lại gì.
+
+Năm chứ không phải sáu: bộ phân loại cộng một điểm cho cảnh **dài hơn** 5 giây,
+và cảnh này phải giữ LOW.
+
+---
+
+## QĐ-031 · Lô phải NHẬN kịch bản đã soạn, không sinh lại
+
+`handleBatchExpand` viết kịch bản mới cho idiom nào chưa có project trong lô —
+nghĩa là nó sẽ vứt kịch bản soạn tay và thay bằng thứ Text AI sinh ra.
+
+**Quyết định:** gắn project vào lô **trước**, để expansion rơi vào nhánh "đã có
+project" và nhận kịch bản này.
+
+**Kèm theo, một khoảng trống UI phải bịt:** nút duyệt chi trước đây chỉ nằm
+trong form lập kế hoạch ở `/batches`. Một lô chuẩn bị bằng script hiện ra ở
+`/batches/[id]` với quyền chi DRAFT và **không có cách nào duyệt** — buộc người
+dùng phải chạy script rời để tiêu tiền, đúng con đường mà cổng batch sinh ra để
+đóng lại. Đã thêm `ApprovePanel` vào trang chi tiết.
+
+---
+
+## QĐ-032 · Mã lỗi của nhà cung cấp là dữ liệu, không phải câu chữ
+
+Runway trả về hai thứ khác nhau cho một task hỏng:
+
+```json
+{ "status": "FAILED",
+  "failure": "An unexpected error occurred.",
+  "failureCode": "INTERNAL.BAD_OUTPUT.CODE01" }
+```
+
+Adapter gộp cả hai vào một trường `error`, rồi `runProviderJob` ném lỗi với mã
+tự chế `"generation_failed"`. Hậu quả: `marksProviderUnsuitable` tìm chuỗi
+`BAD_OUTPUT` nhưng chuỗi đó **không bao giờ sống sót tới nơi nó được đọc**. Luật
+"đừng gửi lại cảnh này cho model đã từ chối nó" tồn tại trong code và chưa từng
+chạy một lần nào trong đời.
+
+**Quyết định:** `failureCode` là một trường riêng, đi thẳng từ HTTP response qua
+`JobStatus` → `ProviderError.code` → `ProviderJob.failureCode`. `error` vẫn là
+câu chữ cho người đọc. Hai đối tượng đọc khác nhau thì là hai trường khác nhau.
+
+---
+
+## QĐ-033 · Số 0 do nhà cung cấp báo là câu trả lời, không phải sự im lặng
+
+Cùng response đó còn có `cost: { credits: 0 }` — bằng chứng rằng lần gọi hỏng
+**không bị tính tiền**. Số dư Runway trước và sau lần chạy thật: 831 → 831.
+
+Code đọc nó bằng truthy check, nên `0` biến thành "không rõ", và phần settlement
+rơi về giả định an toàn: "request đã rời máy thì coi như đã bị tính phí". Kết
+quả là $0,25 đứng trong sổ cho một clip chưa bao giờ bị thu tiền.
+
+**Quyết định:**
+
+- `billedUnits: number | null` — `null` là *không báo*, `0` là *báo rằng miễn
+  phí*. So sánh luôn bằng `=== 0`, không bao giờ bằng `!value`.
+- FAILED + `billedUnits === 0` → `release(key, { billed: false })`, trả lại
+  **toàn bộ** tiền giữ chỗ.
+- `correctSettlement()` cho phép sửa một dòng đã COMMITTED, nhưng **bắt buộc có
+  lý do** và được ghi log. `release()` vẫn từ chối động vào dòng đã chốt.
+
+Đoán sai kiểu này tốn của người dùng phần hạn mức họ không tiêu. Đoán sai kiểu
+ngược lại tốn tiền thật. Nhưng khi nhà cung cấp đã **nói rõ**, không còn gì để
+đoán cả.
+
+---
+
+## QĐ-034 · Thất bại đã trả tiền là bằng chứng, ghi lại theo dấu vân tay input
+
+Một lần gọi hỏng là thông tin đã mua rồi. Trước đây nó bị vứt đi, nên lần sau
+lại mua tiếp.
+
+**Hai luật, hai phạm vi khác nhau — đây là phần dễ nhầm:**
+
+| | Phạm vi | Ý nghĩa |
+|---|---|---|
+| Luật INPUT | `(model, fingerprint)` | *Đúng request này* vào *đúng model này* đã hỏng. Không gửi lại. |
+| Luật MODEL | `model` | Model này hỏng trên **nhiều cảnh khác nhau**. Router thôi tự chọn. |
+
+`fingerprint` = hash của model + kind + prompt + keyframe + duration. Đổi bất kỳ
+thứ nào trong số đó là một câu hỏi khác, và được phép hỏi — luật cấm **lặp lại
+một thất bại**, không cấm dùng lại model.
+
+Luật MODEL đếm **số cảnh khác nhau**, không đếm số dòng: một cảnh hỏng bốn lần
+nói về *cảnh đó*; hai cảnh khác nhau cùng hỏng mới nói về *model*. Ngưỡng:
+2 cảnh → DEGRADED, 3 → UNSUITABLE.
+
+Chỉ ghi lỗi **thuộc về model** (dùng chung `failureIsAboutTheModel` với phần
+benchmark). HTTP 400 là lỗi của ta, 429 là hàng đợi, 5xx là nhà cung cấp gặp
+ngày xấu — không cái nào là lời chứng chống lại model.
+
+---
+
+## QĐ-035 · Độ tin cậy là trục thứ ba, tách khỏi `enabled` và `lifecycle`
+
+Ba câu hỏi khác nhau, ba cột khác nhau:
+
+- `enabled` — dòng này có bật không
+- `lifecycle` — **nhà cung cấp và người vận hành** nói gì (DEPRECATED, PIN_ONLY)
+- `reliability` — **các lần chạy trả tiền của chính ta** cho kết quả gì
+
+Chúng có thể mâu thuẫn, và đó là chuyện bình thường: Sora-2 benchmark tốt nhưng
+sắp bị khai tử; gen4_turbo đang ACTIVE, đã từng chạy thành công, mà vẫn là model
+vừa trả `BAD_OUTPUT` trên hai cảnh khác nhau.
+
+DEGRADED/UNSUITABLE **chặn định tuyến tự động** nhưng **không tắt model** — ghim
+tay vẫn tới được. Đó chính là điều kiện cần để benchmark lại; một model bị hạ
+cấp mà không thể ghim tay thì sẽ bị hạ cấp vĩnh viễn.
+
+---
+
+## QĐ-036 · Runway KHÔNG có `GET /models` — nguồn live duy nhất là `/organization`
+
+Đã dò thật, ngày 2026-09-15:
+
+```
+GET /organization        200   tier.models{}, creditBalance, rate limit
+GET /models              404   Cannot GET /v1/models
+GET /organization/usage  404
+GET /pricing             404
+GET /capabilities        404
+```
+
+Nghĩa là **chỉ hai thứ có thể là LIVE**: model nào tồn tại trong tài khoản, và
+rate limit của nó. Giá, độ phân giải, độ dài hợp lệ, tỉ lệ khung hình, có audio
+hay không — **không endpoint nào phục vụ**. Chúng là dữ liệu thủ công đọc từ tài
+liệu công khai.
+
+**Quyết định:** tách nguồn gốc theo từng loại dữ kiện, không gộp một cờ:
+
+| Cột | Ý nghĩa |
+|---|---|
+| `existenceSource` | `LIVE` khi `/organization` vừa xác nhận; `CACHE`; `MANUAL` |
+| `pricingSource` | gần như luôn `MANUAL` — không có endpoint giá |
+| `capabilitySource` | gần như luôn `MANUAL` |
+| `sourceNote` | URL/endpoint của dữ kiện MANUAL |
+
+Bảng `ProviderCatalogSnapshot` lưu nguyên văn response kèm `fetchedAt`. Không có
+hàm nào trả về danh sách model mà **không** kèm nhãn nguồn và tuổi dữ liệu —
+bởi vì ngay khi có một hàm như vậy, sẽ có người coi bản lưu một tháng trước là
+bằng chứng tài khoản hôm nay còn model đó.
+
+`applyCatalogToRegistry()` **từ chối** ghi khi nguồn là CACHE.
+
+---
+
+## QĐ-037 · `?? "ACTIVE"` trong seed là đường hồi sinh model đã chết
+
+Nhánh `update` của seed ghi `lifecycle: model.lifecycle ?? "ACTIVE"`. Một dòng
+seed **không nói gì** về vòng đời sẽ ghi đè `DEPRECATED` đang lưu thành `ACTIVE`.
+Một lệnh `npm run seed` là đủ để trả model đã ngừng dùng về lại auto-routing.
+
+Gốc rễ: `??` biến **"không có ý kiến"** thành **"chắc chắn còn tốt"**. Hai điều
+đó không giống nhau, và chỗ này là nơi khác biệt tốn tiền.
+
+**Quyết định:**
+
+- Nhánh `update` chỉ ghi `lifecycle`/`shutdownDate`/`deprecationDate` khi seed
+  **thực sự có ý kiến**. Im lặng để nguyên dòng đang lưu.
+- Nhánh `create` vẫn mặc định `ACTIVE` — dòng mới không có gì để ghi đè.
+- Seed **không bao giờ** đụng `reliability`: nó kiếm được từ các lần chạy trả
+  tiền của chính ta, seed file không có tư cách phát biểu.
+- `existenceSource` cũng không do seed ghi — chỉ lệnh gọi live mới xác nhận được.
+
+---
+
+## QĐ-038 · Ngày tắt thắng nhãn vòng đời
+
+`autoRouteBlock()` là một hàm duy nhất mọi nơi dùng chung, và nó nghiêm hơn
+chuỗi `lifecycle` đang lưu:
+
+1. `shutdownDate` đã qua → **chặn**, bất kể nhãn ghi gì
+2. `lifecycle !== ACTIVE` → chặn
+3. `reliability !== OK` → chặn
+
+Thứ tự có chủ ý. Nhãn chỉ mới bằng lần cuối có người sửa nó; **ngày là sự thật**.
+Một dòng còn ghi ACTIVE chỉ vì chưa ai cập nhật sau thông báo của nhà cung cấp là
+một dòng sai, và tin nó thì phải trả tiền cho một lần gọi hỏng mới biết.
+
+---
+
+## QĐ-039 · Model mới vào registry ở trạng thái PIN_ONLY, không phải ACTIVE
+
+Đã xác nhận qua `/organization` rằng tài khoản có `wan3`, `wan3_prime`, `h3_max`,
+`hailuo3`, `veo3.1_fast`, `gen4.5`. Đã thêm 5 dòng ứng viên.
+
+**Tất cả đều `PIN_ONLY`.** Chưa model nào tạo ra một khung hình nào cho ta. Một
+model rẻ trên giấy và chưa được kiểm chứng trong thực tế **không được** trở thành
+lựa chọn mặc định của router chỉ vì nó rẻ nhất — đó chính là cách `gen4_turbo`
+trở thành mặc định và rồi hỏng hai lần.
+
+Lên `ACTIVE` là thứ **benchmark kiếm được**, không phải thứ **giá thắng được**.
+
+---
+
+## QĐ-040 · Một endpoint, nhiều schema — body phải dựng theo từng model
+
+`/image_to_video` của Runway là **một** endpoint phục vụ model của nhiều hãng, và
+chúng **không** dùng chung schema request. Adapter cũ gửi đúng một hình dạng
+Gen-4 cho tất cả: `ratio` + `duration`, luôn luôn.
+
+Nguyên văn tài liệu (đọc 2026-09-15):
+
+> "MiniMax H3 Max supports `resolution` of `480p` or `768p`. Durations are 5–15
+> seconds. **There is no `ratio` parameter.**"
+
+Và model anh em `hailuo3` viết `768P` (hoa) **và có** `ratio`. Hai model MiniMax,
+hai schema, lệch đúng một chữ cái.
+
+**Quyết định:** một bảng `SIZE_STYLE`, không phải một câu `if`.
+
+| Kiểu | Model | Gửi gì |
+|---|---|---|
+| `RATIO` | gen4_turbo, gen4.5, gen3a_turbo | `ratio: "720:1280"` |
+| `RESOLUTION` | h3_max, wan3 | `resolution: "768p"`, **không có** `ratio` |
+
+`toRunwayResolution()` lấy **cạnh ngắn** làm bậc (clip dọc 768×1280 là 768p,
+không phải 1280p) và làm tròn **xuống** khi bậc không tồn tại — không bao giờ
+lên. `wan3` là lý do: mặc định của nó là `auto_1080p` = 20 credit/s, gấp **bốn
+lần** mức 480p.
+
+Test khẳng định **chính các byte gửi đi**, không phải ý định. Vì một create bị
+từ chối vẫn là một create, và dự án này chỉ cho phép đúng một POST mỗi lần duyệt
+— sai schema không tốn một lần thử lại, nó tốn cả lượt.
+
+---
+
+## QĐ-041 · `RUNWAY_UNSUITABLE` chỉ buộc tội họ model đã gây ra nó
+
+Cờ này ra đời khi "runway" và "gen4_turbo" là một. Điều đó đã hết đúng: Runway
+bán lại model của MiniMax (`h3_max`, `hailuo3`), Alibaba (`wan3`) và Google
+(`veo3.1*`) qua **cùng** endpoint. "Runway thất bại với cảnh này" không còn là
+mệnh đề về bất cứ thứ gì — nó gọi tên một **cửa hàng**, không phải một model.
+
+**Quyết định:** cờ chỉ chặn họ Gen-4. Một model MiniMax chưa từng thấy cảnh này
+thì không thể đã từ chối nó.
+
+Đây **không** phải nới lỏng an toàn thật. Khoá chính xác vẫn là
+`ModelFailureEvidence` theo `(model, fingerprint)`, và nó vẫn chặn cứng đúng
+request đó vào đúng model đó.
+
+---
+
+## QĐ-042 · "Có trong danh mục" ≠ "gọi được qua API" ≠ "đã benchmark"
+
+Ba mệnh đề khác nhau, trước đây bị gộp vào chữ "LIVE" — và "live" bị đọc thành
+"đã xác minh qua `GET /models`", một endpoint **trả 404**.
+
+Cột `verification`, chỉ **tiến**, không lùi:
+
+| Trạng thái | Nghĩa |
+|---|---|
+| `UNVERIFIED` | chưa có gì xác nhận |
+| `CATALOG_LISTED` | tài khoản có liệt kê. **Chỉ vậy thôi.** |
+| `API_CREATE_VERIFIED` | đã gửi create, được chấp nhận, có task id |
+| `BENCHMARK_VERIFIED` | đã ra clip và có người chấm điểm |
+
+Khoảng cách giữa hai dòng đầu là chỗ tốn tiền: danh mục liệt kê `h3_max` không
+nói gì về việc adapter của ta dựng nổi một request hợp lệ cho nó.
+
+Đồng thời đổi tên nguồn gốc theo **endpoint đã trả lời**, không theo mức độ tự
+tin: `ACCOUNT_LISTING`, `ACCOUNT_LISTING_CACHED`, `MANUAL_DOCS`.
+
+Và ba trục vẫn tách rời: `h3_max` hiện là `BENCHMARK_VERIFIED` **và** vẫn
+`PIN_ONLY`. Một clip chứng minh đường ống thông, không chứng minh model nên làm
+mặc định. `gen4_turbo` đã thành mặc định với đúng chừng đó bằng chứng, rồi hỏng
+hai lần.
+
+---
+
+## QĐ-043 · `h3_max` chưa đủ ổn định cho LOW auto-routing — 3 mẫu, 1 hỏng camera
+
+Ba mẫu, cả ba đều được API chấp nhận và trả về clip. Nhưng "API đạt" không phải
+"dùng được":
+
+| | Mẫu 1 | Mẫu 2 | Mẫu 3 | TB | Ngưỡng |
+|---|---|---|---|---|---|
+| Identity | 10 | 5 | 9 | 8,00 | ≥8 ✅ |
+| Motion | 8 | 3 | 9 | 6,67 | ≥7 ❌ |
+| Artifacts | 9 | 8 | 8 | 8,33 | ≥8 ✅ |
+| Camera | 8 | **1** | 9 | 6,00 | ≥8 ❌ |
+| Composition | 9 | 3 | 9 | 7,00 | ≥8 ❌ |
+
+Mẫu 2: prompt ghi *"Static camera. No camera movement."*, model đẩy từ toàn thân
+sang cận mặt trong 1,3 giây. PSNR đầu-cuối **8,4 dB** so với 15,2 và 16,2.
+
+**Quyết định:** giữ `PIN_ONLY`. Không auto-route.
+
+**Điểm quan trọng về phương pháp:** đừng đọc trung bình 7,4 rồi kết luận "gần
+đạt". Phân bố mới là thứ đáng sợ: **9,1 / 4,3 / 8,9**. Đó không phải một model
+trung bình khá — đó là một model *thỉnh thoảng hỏng nặng*. Với một dây chuyền
+tự động, hỏng nặng một lần trong ba là hỏng cả video, và không ai ngồi xem để
+bắt nó.
+
+`gen4_turbo` cũng đạt ở mẫu đầu rồi hỏng hai lần sau. Đây là **cùng một hình
+dạng dữ liệu**.
+
+---
+
+## QĐ-044 · `h3_max` là PROMPT-SENSITIVE, không phải bất ổn cố hữu
+
+A/B đúng nghĩa: **cùng cảnh 5, cùng keyframe, cùng model/resolution/duration,
+chỉ đổi prompt.**
+
+| | Prompt cũ | Guardrail mới | Chênh |
+|---|---|---|---|
+| Camera | **1** | **10** | **+9** |
+| Composition | 3 | 10 | +7 |
+| Identity | 5 | 9 | +4 |
+| Motion | 3 | 7 | +4 |
+| Artifacts | 8 | 9 | +1 |
+| **Overall** | **4,3** | **9,2** | **+4,9** |
+| PSNR đầu↔cuối | 8,38 dB | **39,69 dB** | +31,3 |
+
+**Kết luận: A — PROMPT-SENSITIVE.** `h3_max` dùng tốt ở LOW **nếu** chuẩn hoá
+prompt camera.
+
+### Tương quan đáng chú ý — giả thuyết, chưa phải kết luận
+
+Trên cả 4 mẫu, **mọi prompt chứa chữ `locked` đều giữ được camera**:
+
+| Mẫu | Câu về camera | `locked` | Camera |
+|---|---|---|---|
+| 1 | "Static **locked** camera." | có | 8 |
+| 2 | "Static camera. No camera movement." | **không** | **1** |
+| 3 | "Camera remains **locked** and stable…" | có | 9 |
+| 4 | "**Locked** tripod camera. No zoom…" | có | 10 |
+
+n=4, tương quan hoàn hảo nhưng mẫu quá nhỏ để gọi là nhân quả. Dù vậy nó **rẻ để
+hành động**: cả hai đường dựng prompt của dự án (`VIDEO_GUARDRAILS` và
+`COMPACT_CONSTRAINTS`) đều đã có chữ `locked`. Cảnh 5 thất bại vì dùng prompt
+**cũ, viết tay**, chưa qua bộ dựng.
+
+**Audit: 17/23 cảnh đang có `videoPrompt` không chứa `locked`**, phần lớn dài
+12–118 ký tự — tức mô tả thô chưa từng qua bộ dựng guardrail. Đó là 17 quả mìn
+cho bất kỳ lần chạy production nào.
+
+### Cái bẫy suýt làm hỏng phép thử
+
+`fitVideoPrompt` **thay toàn bộ khối ràng buộc** bằng bản rút gọn khi prompt vượt
+1000 ký tự. Nếu prompt guardrail dài quá, chính đoạn camera đang được kiểm tra
+sẽ bị xoá và phép đo trở thành vô nghĩa — mà không có lỗi nào báo ra. Prompt mới
+được giữ ở **913 ký tự** và đã xác nhận `changed=false` **trước** khi POST.
+
+### Ngưỡng
+
+| | 4 mẫu | 3 mẫu có `locked` |
+|---|---|---|
+| Identity | 8,25 ✅ | 9,33 ✅ |
+| Motion | 6,75 ❌ | 8,00 ✅ |
+| Artifacts | 8,50 ✅ | 8,67 ✅ |
+| Camera | 7,00 ❌ | 9,00 ✅ |
+| Composition | 7,75 ❌ | 9,33 ✅ |
+| | **KHÔNG ĐẠT** | **ĐẠT** |
+
+Vẫn giữ `PIN_ONLY`. Chuyển `PIN_ONLY -> LOW_AUTO` là quyết định của người dùng,
+và điều kiện đi kèm phải là **chuẩn hoá 17 prompt kia trước**.
+
+---
+
+## QĐ-045 · Guardrail camera dùng chung, hai chế độ, áp ở bước cuối
+
+17/23 cảnh đang mang prompt **không có khoá camera** — tức 17 lần lặp lại đúng
+clip đã chấm 1/10 về camera, đang chờ xảy ra. Sửa tay 17 chỗ là chữa triệu
+chứng; lần thứ 18 vẫn sẽ tới từ một cảnh mới.
+
+**Quyết định:** một bộ guardrail dùng chung trong code, áp **ngay trước khi gửi**
+(`generateSceneVideo`), không phải sửa dữ liệu.
+
+### Hai chế độ, và lý do không được khoá mù
+
+| Chế độ | Khi nào | Guardrail |
+|---|---|---|
+| `LOCKED_CAMERA` | kịch bản chỉ tả cỡ cảnh, hoặc ghi rõ đứng yên | khoá camera + identity + framing + motion + **final frame** |
+| `DIRECTED_CAMERA` | kịch bản yêu cầu pan/zoom/follow/đổi khung | "chỉ thực hiện chuyển động đã mô tả" + identity + framing + motion |
+
+`DIRECTED` **không** nhận câu "No pan"/"No zoom" và **không** nhận luật
+final-frame — một cú pan theo chủ ý được phép kết thúc ở khung khác. Cấm nó
+chính là bắt model chọn giữa hai mệnh lệnh, mà "để model tự chọn" đúng là sự
+bất ổn mà bộ guardrail này sinh ra để dập.
+
+### Tín hiệu phân loại là cấu trúc, không phải dò chữ
+
+Đọc `Scene.camera` — trường ý đồ camera do bộ sinh kịch bản ghi — và khớp theo
+**động từ chuyển động** cùng **cấu trúc đổi khung** (`", then close on"`), chứ
+không phải sự có mặt của chữ "camera". "Wide shot centered on desk" có chữ
+camera-ngữ nhưng không di chuyển gì.
+
+Ranh giới từ (`\b`) là bắt buộc: một cảnh thật của dự án là *"close on Max's
+**panicked** face"* — thiếu `\b` thì nó bị đọc thành một cú **pan** và mất khoá
+camera.
+
+### Ba cái bẫy đã gặp khi xây
+
+1. **Khoá camera phải nhận chữ `locked`, không phải `static`.** Clip chấm 1/10
+   ghi *"Static camera. No camera movement."* rồi vẫn push-in. Mọi clip giữ được
+   camera đều chứa chữ `locked`. Nên `"Static camera"` **không** được tính là đã
+   khoá.
+2. **Bộ dò mâu thuẫn tự báo động nhầm.** Chính câu guardrail *"No push-in."*
+   chứa chuỗi "push-in" nên bị đọc thành một **yêu cầu** push-in — mọi prompt
+   đúng đều bị báo là tự mâu thuẫn. Một cái chuông kêu cả khi không có cháy là
+   cái chuông không ai nghe nữa. Đã thêm lookbehind phủ định.
+3. **Idempotence là chuyện tiền, không phải chuyện gọn gàng.** Prompt nằm trong
+   khoá idempotency; nếu mỗi lần chạy lại guardrail bị nối thêm, mỗi lần thử lại
+   sẽ thành một **lần mua mới**. Có test khẳng định chạy hai lần cho kết quả
+   giống hệt.
+
+### Kết quả audit (miễn phí)
+
+23 cảnh · 20 LOCKED · 3 DIRECTED · 0 chưa phân loại · 0 mâu thuẫn · 0 vượt giới
+hạn · **17/23 thiếu khoá → 0/23**.
+
+---
+
+## QĐ-046 · Bằng chứng: bất ổn của h3_max là do prompt, đo bằng độ phân tán
+
+| | 4 mẫu | 3 mẫu có `locked` |
+|---|---|---|
+| Điểm | 9,1 / **4,3** / 8,9 / 9,2 | 9,1 / 8,9 / 9,2 |
+| Trung bình | 7,87 | **9,07** |
+| **Độ lệch chuẩn** | **2,07** | **0,12** |
+| Biên độ | 4,9 | **0,3** |
+
+Độ lệch chuẩn giảm **17 lần**. Camera theo từng mẫu: 8 (locked) · **1 (không
+locked)** · 9 (locked) · 10 (locked).
+
+Đây mới là con số đáng đọc, không phải trung bình. Trung bình 7,87 gợi ý "model
+khá"; phân tán 2,07 nói đúng bản chất: *"model thỉnh thoảng hỏng nặng"*. Và khi
+biến prompt được kiểm soát, nó biến mất.
+
+**Vẫn giữ `PIN_ONLY`.** Chuyển sang `LOW_AUTO` là quyết định của người dùng.
+
+---
+
+## QĐ-047 · `LOW_AUTO_CANDIDATE` — đề cử, không phải công tắc
+
+Thêm một giá trị vòng đời mới, và điều quan trọng nhất về nó là thứ nó **không**
+làm: `isAutoRoutable("LOW_AUTO_CANDIDATE")` trả **false**.
+
+Đây là bản ghi rằng bằng chứng đã đủ để **xem xét**, tách khỏi việc công tắc đã
+được gạt. Một trạng thái tự động định tuyến ngay khi được ghi sẽ làm cho chính
+cuộc rà soát mà nó sinh ra trở nên bất khả thi.
+
+`autoRouteBlock()` trả lý do riêng: *"ứng viên LOW_AUTO — đã đủ bằng chứng nhưng
+CHƯA được bật"*, để người đọc log phân biệt được với một model bị chặn vì hỏng.
+
+---
+
+## QĐ-048 · Cổng LOW_AUTO hẹp có chủ đích, và LOCAL_MOTION luôn thắng
+
+### Thứ tự là bản chất, không phải chi tiết
+
+`decideMotion` chạy **trước**, và phán quyết LOCAL_MOTION của nó là **cuối
+cùng**. Một cảnh làm được miễn phí thì vẫn làm miễn phí, kể cả khi nó vượt qua
+mọi điều kiện trả phí.
+
+LOW_AUTO sinh ra để **chặn clip trả phí đi nhầm model**, không phải để **tìm
+thêm thứ để mua**. Một hệ thống âm thầm biến việc miễn phí thành việc tính tiền
+là cách dễ nhất để mất ngân sách mà không ai từng ra một quyết định nào.
+
+### Mười điều kiện, và vì sao hẹp
+
+| Điều kiện | Lý do |
+|---|---|
+| `complexity = LOW` | ba mẫu tốt đều là LOW |
+| có keyframe **thật trên đĩa** | mọi mẫu tốt đều là image-to-video; text-to-video chưa từng được đo |
+| ≤ 2 nhân vật | lấy từ `COMFORTABLE_CAST` của module crowding |
+| `LOCKED_CAMERA` | cả ba mẫu tốt đều khoá camera |
+| không vật thể nhỏ dày đặc | đúng tín hiệu đã làm hỏng hai clip trả phí |
+| model không DEGRADED/DEPRECATED | |
+| prompt đã qua guardrail | |
+| không mâu thuẫn prompt | |
+| đủ hạn mức chung | |
+| đủ ví nhà cung cấp | `null` ≠ `0` — xem dưới |
+
+Trung bình 9,07 **không** phải giấy phép định tuyến mọi thứ mang nhãn LOW. Cả ba
+mẫu tốt đều là **1–2 nhân vật, nền phẳng, camera khoá**. Cổng này mô tả đúng
+hình dạng đó và không rộng hơn một chút nào.
+
+### Hai chi tiết dễ làm sai
+
+**`remainingUsd = null` không phải là hết tiền.** Nó nghĩa là nhà cung cấp tự
+quản quota và ta không giữ ví cho họ. Coi null như 0 sẽ chặn vĩnh viễn mọi nhà
+cung cấp tự tính tiền.
+
+**Liệt kê mọi lý do chặn, không dừng ở cái đầu tiên.** Sửa một điều kiện rồi mới
+gặp điều kiện tiếp theo là trải nghiệm tệ hơn hẳn việc được báo cả ba cùng lúc.
+
+### Không đủ điều kiện thì đi đâu
+
+`LOCAL_MOTION` nếu cảnh làm được tại máy → `NEEDS_KEYFRAME` nếu thiếu ảnh →
+`NEEDS_PROVIDER` cho mọi lý do khác.
+
+**Tuyệt đối không sang một model trả phí khác.** `gen4_turbo` DEGRADED sau hai
+lần BAD_OUTPUT, `gen4.5` PIN_ONLY, Sora DEPRECATED — mỗi cái có một lý do đã
+được viết xuống. Âm thầm chọn một trong số đó để cứu một cảnh là huỷ cả ba quyết
+định cùng lúc, lặng lẽ, đúng lúc không ai nhìn.

@@ -3,6 +3,19 @@ import type { PriceUnit } from "@/domain/enums";
 import { round } from "@/lib/utils";
 
 /**
+ * Six decimals, not the four `round()` defaults to.
+ *
+ * Exactly the bug the cost LEDGER was fixed for, left behind in the estimator:
+ * a voice line of 37 characters at $0.0006 per 1k costs $0.0000222, which at
+ * four places is $0.0000. Per scene it disappears; across six scenes the whole
+ * video's speech estimate came out as $0.00 while the real figure is $0.000135.
+ *
+ * The amount is small. The habit of quietly rounding real money to zero is not,
+ * and a 200-scene batch would round away something that matters.
+ */
+const MONEY_DIGITS = 6;
+
+/**
  * Price maths.
  *
  * Every number here comes out of the ModelRegistry table, which is editable in
@@ -23,15 +36,15 @@ export function costForModel(model: ModelRegistry, usage: UsageUnits): number {
   const unit = model.priceUnit as PriceUnit;
   switch (unit) {
     case "per_second":
-      return round(model.price * (usage.seconds ?? 0));
+      return round(model.price * (usage.seconds ?? 0), MONEY_DIGITS);
     case "per_image":
-      return round(model.price * (usage.images ?? 1));
+      return round(model.price * (usage.images ?? 1), MONEY_DIGITS);
     case "per_1k_chars":
-      return round(model.price * ((usage.characters ?? 0) / 1000));
+      return round(model.price * ((usage.characters ?? 0) / 1000), MONEY_DIGITS);
     case "per_1k_tokens":
-      return round(model.price * ((usage.tokens ?? 0) / 1000));
+      return round(model.price * ((usage.tokens ?? 0) / 1000), MONEY_DIGITS);
     case "per_job":
-      return round(model.price * (usage.jobs ?? 1));
+      return round(model.price * (usage.jobs ?? 1), MONEY_DIGITS);
     default:
       return 0;
   }

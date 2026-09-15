@@ -132,6 +132,105 @@ xảy ra sau khi biết chắc job đầu tiên đã chết.
 
 ---
 
+## 7. Quyền chi cho một lô — `BATCH_SPEND_AUTHORIZATION`
+
+`CREATE_ATTEMPT_TOKEN` (mục 2) nghĩa là "một lần xác nhận = đúng một lần POST
+create". Đúng cho benchmark. **Không dùng được cho batch**: 10 video sẽ cần
+khoảng 50 lần bấm, và một người bấm qua 50 hộp thoại thì đã ngừng đọc chúng — cơ
+chế đó tệ hơn là không có, vì nó trông giống sự đồng ý mà không phải.
+
+Nên batch có công cụ riêng. Token giữ nguyên, vẫn quản benchmark / test tay /
+debug. Một cảnh nằm trong lô đã duyệt dùng authorization; cảnh ngoài lô vẫn cần
+token. `needsCreatePermit()` trả `false` đúng khi authorization được áp dụng, nên
+**không đường nào chi được mà không có một trong hai**.
+
+### Sáu câu hỏi trước mỗi request trả phí
+
+`assertBatchAuthorized()` hỏi theo thứ tự rẻ-trước, và request chỉ đi khi cả sáu
+đều "có":
+
+1. Có quyền chi không, và còn ở trạng thái `APPROVED` không?
+2. Request có thuộc đúng lô được duyệt không?
+3. Có làm vượt trần của lô không?
+4. Có làm vượt trần của **video này** không?
+5. Nhà cung cấp có nằm trong phạm vi đã duyệt không?
+6. Hạn mức toàn ứng dụng và **ví riêng của nhà cung cấp đó** còn đủ không?
+
+Câu 5 tồn tại vì bản dự toán được duyệt có nêu tên nhà cung cấp. Duyệt một kế
+hoạch dùng Runway không phải là duyệt việc trả tiền cho OpenAI.
+
+---
+
+## 8. Giữ chỗ tiền — `CostReservation`
+
+Vấn đề chỉ xuất hiện khi chạy song song, tức đúng lúc không ai ngồi nhìn.
+
+Năm job cùng chạy, lô còn $0,60. Mỗi job đọc sổ, thấy $0,60, thấy $0,40 của mình
+vừa đủ, và gửi. **Cả năm lần kiểm tra đều đúng.** Chúng chỉ cùng đúng về một
+khoản $0,60, và lô tiêu $2,00.
+
+Không lần kiểm tra nào đọc "đã chi" sửa được chuyện này, vì lúc kiểm tra thì
+tiền chưa chi. Nên tiền được **giữ chỗ trước, gửi request sau**, và lần kiểm tra
+kế tiếp nhìn thấy chỗ đã giữ.
+
+```
+Lô còn $1,00
+Job A ước tính $0,60  →  giữ chỗ $0,60, available còn $0,40
+Job B ước tính $0,60  →  BỊ CHẶN, không gửi request
+Job A xong, hoá đơn thật $0,55  →  commit $0,55, available còn $0,45
+```
+
+`CostReservation.idempotencyKey` là **unique** và đúng bằng khoá của
+`ProviderJob`. Đó là thứ khiến refresh trình duyệt, khởi động lại ứng dụng và
+resume lô đều tìm thấy chỗ đã giữ thay vì mở chỗ mới.
+
+### Quyết toán nghiêng về phía "đã bị tính phí"
+
+| Tình huống | Xử lý |
+|---|---|
+| Thành công | `commit` theo hoá đơn thật |
+| Hỏng **trước khi** request rời máy | `release` — trả tiền lại cho lô |
+| Hỏng **sau khi** request đã gửi | `commit` theo ước tính, đánh dấu `possiblyBilled` |
+
+Nghiêng sai hướng này làm lô mất một ít dư địa. Nghiêng hướng kia làm lô tiêu
+vượt trong khi mọi con số trên màn hình vẫn khớp — đó mới là hỏng.
+
+---
+
+## 9. Ba lớp hạn mức của một lô
+
+| Lớp | Ở đâu | Chạm trần thì sao |
+|---|---|---|
+| Toàn ứng dụng | `spend-guard.ts` | request bị chặn, lô không vượt qua được |
+| Một video | `BatchAuthorization.maxCostPerVideo` | **chỉ video đó** dừng, đánh dấu `OVER_VIDEO_BUDGET` |
+| Một lô | `BatchAuthorization.authorizedMaxSpend` | lô dừng, `BUDGET_EXHAUSTED` |
+
+Hạn mức/video được kiểm tra **hai lần**: một lần trên bản dự toán (dùng kịch bản
+mẫu khi video chưa có kịch bản), và một lần nữa theo **kịch bản thật** ngay trước
+khi video đó bắt đầu chi tiền media. Dự toán sai làm kế hoạch sai; nó không làm
+việc chi sai.
+
+---
+
+## 10. Cảnh không gọi Video AI thì không tốn gì
+
+Không phải cảnh nào cũng cần model tạo sinh. Cảnh giải thích và cảnh chốt được
+định tuyến sang `LOCAL_MOTION`: ảnh keyframe + scale/crop/push-in bằng FFmpeg tại
+máy. **$0, và không thể hỏng ở phía nhà cung cấp.**
+
+Đây là khoản tiết kiệm lớn nhất trong toàn bộ pipeline: 6 clip Sora là $2,40,
+đắt hơn toàn bộ ảnh và kịch bản cộng lại, và phần lớn số đó mua chuyển động không
+ai yêu cầu.
+
+Quyết định này được **ghi lại trên từng cảnh** (`Scene.motionSource`) tại thời
+điểm lập kế hoạch, không tính lại lúc chạy — nếu tính lại, một thay đổi trong
+bảng model giữa lúc duyệt và lúc chạy sẽ âm thầm biến một cảnh miễn phí thành
+cảnh trả phí.
+
+Xem `src/domain/local-motion.ts`.
+
+---
+
 ## Ước tính
 
 Ước tính hiển thị **cả ba chế độ tự động** cạnh nhau, vì nguyên tắc sản phẩm là
@@ -208,3 +307,94 @@ Nạp sẵn một mức giá đoán mò còn tệ hơn là không nạp gì.
 
 Mặc định 2, chỉnh trong trang Cài đặt. Đây là cái chặn vật lý ngăn một lô 50
 video bắn 50 lệnh gọi API tính phí cùng lúc. Nên giữ ở mức thấp.
+
+---
+
+## Khi một lần gọi trả phí thất bại
+
+Câu hỏi duy nhất cần trả lời: **có bị tính tiền không?** Hệ thống xếp câu trả lời
+theo ba mức, và chỉ mức đầu là *biết*:
+
+| Nhà cung cấp nói | `billedUnits` | Xử lý |
+|---|---|---|
+| `cost: { credits: 0 }` | `0` | **Trả lại toàn bộ** tiền giữ chỗ. Không đoán. |
+| `cost: { credits: 25 }` | `25` | Chốt theo số thật. |
+| không nói gì | `null` | Request đã rời máy → giữ nguyên ước tính, đánh dấu `possiblyBilled`. |
+
+Điểm chết người: `0` và `null` **không giống nhau**, và một phép `if (!value)`
+sẽ trộn hai cái làm một. Đúng lỗi đó đã giữ $0,25 trong sổ cho một clip mà số dư
+Runway chứng minh là chưa bao giờ bị thu tiền (831 credits trước và sau).
+
+### Sửa một dòng sổ đã chốt
+
+`release()` **từ chối** động vào dòng đã COMMITTED — tiền đã tuyên là đã tiêu thì
+không được tự huỷ vì code chạy lại hai lần. Khi bằng chứng mới xuất hiện, dùng:
+
+```ts
+correctSettlement(key, { actualCost: 0, reason: "credits=0, nguồn: runway GET /tasks/..." })
+```
+
+Bắt buộc có `reason`, được ghi log, và `possiblyBilled` bị xoá — vì một lần sửa
+sổ chỉ xảy ra khi câu trả lời đã thôi là phỏng đoán.
+
+### Kiểm tra và sửa sổ
+
+```bash
+npx tsx scripts/audit-ledger.ts                                  # chỉ đọc
+npx tsx scripts/repair-failure-accounting.ts                     # thử khô
+npx tsx scripts/repair-failure-accounting.ts --apply --verify    # hỏi lại nhà cung cấp rồi ghi
+```
+
+`--verify` gọi `GET /tasks/{id}` — **miễn phí**, Runway không tính tiền việc hỏi
+trạng thái. Script **không thể** POST một lệnh sinh video.
+
+Nó **từ chối sửa sổ nếu không có nguồn**: hoặc đọc trực tiếp từ nhà cung cấp,
+hoặc một dòng `VideoBenchmark` ghi tại thời điểm chạy. Một sổ có thể sửa bằng lời
+khẳng định thì không còn là sổ.
+
+## Không mua lại một thất bại
+
+Mỗi lần hỏng được ghi vào `ModelFailureEvidence` theo `(model, fingerprint)`, với
+`fingerprint` = hash của model + kind + prompt + keyframe + duration.
+
+- Gửi lại **đúng** request đó vào **đúng** model đó → bị chặn **trước** khi giữ
+  chỗ và trước khi POST. Không tốn gì.
+- Sửa prompt, đổi keyframe, đổi độ dài → là câu hỏi khác, được phép hỏi.
+- Model hỏng trên **2 cảnh khác nhau** → `DEGRADED`; **3 cảnh** → `UNSUITABLE`.
+  Router thôi tự chọn, nhưng ghim tay vẫn dùng được để benchmark lại.
+
+Chỉ lỗi **thuộc về model** mới được tính. HTTP 400 là lỗi của ta.
+
+---
+
+## Model registry: ba trục, ba nguồn
+
+Một model có được router **tự chọn** hay không phụ thuộc ba câu hỏi độc lập:
+
+| Trục | Ai trả lời | Cột |
+|---|---|---|
+| Dòng này có bật không | người vận hành | `enabled` |
+| Nhà cung cấp còn phục vụ không | vendor + ta | `lifecycle`, `shutdownDate` |
+| Các lần ta trả tiền chạy ra sao | chính ta | `reliability` |
+
+`autoRouteBlock()` là nơi duy nhất tổng hợp cả ba, và nó xét **ngày tắt trước
+nhãn vòng đời**: nhãn chỉ mới bằng lần cuối có người sửa, còn ngày là sự thật.
+
+### Nguồn gốc dữ liệu — không được gộp
+
+Runway **không có** endpoint giá hay capability. `GET /models` trả 404. Nguồn
+live duy nhất là `GET /organization`, và nó chỉ nói được hai điều: model nào tồn
+tại, rate limit bao nhiêu.
+
+Vì thế mỗi loại dữ kiện mang nguồn riêng: `existenceSource`, `pricingSource`,
+`capabilitySource`, kèm `sourceNote`. Giá nằm cùng một dòng database với dữ liệu
+live **không làm nó thành dữ liệu live**.
+
+```bash
+npx tsx scripts/catalog-runway.ts           # đọc live, đối chiếu registry
+npx tsx scripts/catalog-runway.ts --apply   # đóng dấu existence=LIVE
+npx tsx scripts/catalog-runway.ts --offline # cache, luôn có nhãn CACHE + tuổi
+```
+
+`applyCatalogToRegistry()` từ chối ghi khi nguồn là CACHE — một bản lưu hôm qua
+không được biến thành lời khẳng định ở thì hiện tại.

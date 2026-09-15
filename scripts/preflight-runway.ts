@@ -3,10 +3,16 @@ import { PrismaClient } from "@prisma/client";
 /**
  * Free checks before spending anything on Runway.
  *
- * Every request this script makes is a GET or an intentionally-invalid POST -
- * nothing here can start a generation, so nothing here can be billed. The one
- * job is to answer "would the paid call work, and what would it cost" before
- * the paid call is made.
+ * This script makes exactly ONE network request, and it is a GET to
+ * /organization. There is no POST anywhere in this file, so nothing here can
+ * start a generation and nothing here can be billed. The one job is to answer
+ * "would the paid call work, and what would it cost" before the paid call is
+ * made.
+ *
+ * An earlier version of this comment described "a GET or an intentionally
+ * invalid POST". No such POST exists. Leaving that wording in place would tell
+ * the next reader that sending a deliberately malformed create is acceptable
+ * from a preflight - and a malformed create is still a create attempt.
  *
  * It refuses rather than warns. A preflight that prints a warning and carries
  * on is just a slower way of spending the money.

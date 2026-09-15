@@ -1,8 +1,12 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-14
-**Cột mốc hiện tại:** Milestone 2 xong (Text + Image + Video + Voice đã chạy
-thật). **Kế tiếp: Batch Video Factory V1 — đang chờ người dùng chốt phạm vi.**
+**Cập nhật:** 2026-09-15
+**Cột mốc hiện tại:** **Batch Video Factory V1 đã xây xong ở chế độ mock.**
+Milestone 2 xong trước đó (Text + Image + Video + Voice đã chạy thật).
+
+Batch V1 chưa từng chạy với API trả phí: toàn bộ được kiểm chứng bằng mock,
+fixture và FFmpeg tại máy. `CREATE_ATTEMPT_TOKEN = 0`, chưa có lô nào được duyệt
+chi.
 
 Tài liệu này ghi tình trạng **thực tế**. Tính năng chỉ được đánh dấu hoạt động
 khi đã chạy thật và được kiểm chứng, không phải khi đã viết xong mã.
@@ -12,20 +16,148 @@ khi đã chạy thật và được kiểm chứng, không phải khi đã viế
 ## Tiền và quyền chi tiêu
 
 ```
-Hạn mức tổng : $8,00   đã chi $3,712760   còn $4,287240
+Hạn mức tổng : $8,00   đã chi $5,353920   còn $2,646080
 CREATE_ATTEMPT_TOKEN : 0
 ```
+
+**Sổ đã được sửa 2026-09-15.** Lô đầu tiên chạy thật từng ghi `actualSpend`
+$0,291160; trong đó $0,25 là **tiền chưa bao giờ bị thu**. Runway trả
+`cost: { credits: 0 }` cho clip hỏng và số dư đứng yên 831 → 831, nhưng code đọc
+số 0 bằng truthy check nên coi như "không rõ" rồi giữ nguyên ước tính. Con số
+đúng là **$0,041160** (một ảnh gpt-image-2). Xem QĐ-032…QĐ-035.
 
 Ví **tách riêng từng nhà cung cấp, không bao giờ cộng chung**:
 
 | Ví | Đã chi | Số gọi | Số dư |
 |---|---|---|---|
-| openai | $1,993906 | 42 | $6,00 — **khai báo**, không phải live |
+| openai | $2,035066 | 43 | $6,00 — **khai báo**, không phải live |
 | runway | $1,690000 | 3 | 831 credit — live, đọc từ `GET /organization` |
 | groq | $0,028854 | 24 | external, nhà cung cấp tự quản |
 
-Một lần người dùng xác nhận = **đúng một** lần POST create. Token bị tiêu ngay
-khi POST rời máy, bất kể thành công, 400, timeout hay lỗi provider.
+Có **hai** cơ chế cấp phép, và mỗi request trả phí phải có đúng một trong hai:
+
+- **Ngoài lô** (benchmark, test tay, debug): `CREATE_ATTEMPT_TOKEN`. Một lần
+  xác nhận = **đúng một** lần POST create. Token bị tiêu ngay khi POST rời máy,
+  bất kể thành công, 400, timeout hay lỗi provider.
+- **Trong một lô đã duyệt**: `BATCH_SPEND_AUTHORIZATION`. Một lần duyệt, một
+  trần chi, và mỗi request đều bị kiểm tra + giữ chỗ tiền trước khi gửi.
+
+`needsCreatePermit()` trả `false` đúng khi cơ chế thứ hai được áp dụng, nên
+không có đường nào chi được mà không qua một trong hai. Xem mục **Batch Video
+Factory V1** bên dưới.
+
+---
+
+## Kế toán thất bại — sửa 2026-09-15
+
+Ba giá trị mà nhà cung cấp **đã nói** nhưng hệ thống **đã vứt đi**:
+
+| Runway trả về | Trước | Sau |
+|---|---|---|
+| `failureCode: INTERNAL.BAD_OUTPUT.CODE01` | gộp vào `error`, rồi bị thay bằng `"generation_failed"` | trường riêng, đi tới `ProviderJob.failureCode` |
+| `failure: "An unexpected error occurred."` | là thứ duy nhất còn lại | vẫn giữ, nhưng chỉ để người đọc |
+| `cost: { credits: 0 }` | không bao giờ được đọc | `billedUnits = 0` → trả lại toàn bộ tiền giữ chỗ |
+
+Hệ quả dây chuyền của việc mất `failureCode`: `marksProviderUnsuitable()` tìm
+chuỗi `BAD_OUTPUT`, và chuỗi đó chưa từng tới được nơi nó được đọc. Luật "đừng
+gửi lại cảnh này cho model đã từ chối nó" **đã tồn tại trong code từ lâu và chưa
+chạy lần nào**.
+
+Hai bảng mới:
+
+- `ModelFailureEvidence` — mỗi thất bại đã trả tiền, khoá theo
+  `(model, fingerprint)` với fingerprint = model + kind + prompt + keyframe +
+  duration. Chặn gửi lại **trước** khi giữ chỗ và trước khi POST.
+- `ModelRegistry.reliability` — `OK | DEGRADED | UNSUITABLE`, trục thứ ba tách
+  khỏi `enabled` và `lifecycle`. Đếm **số cảnh khác nhau**, không đếm số lần.
+
+Công cụ:
+
+```bash
+npx tsx scripts/audit-ledger.ts                                # chỉ đọc
+npx tsx scripts/repair-failure-accounting.ts --apply --verify  # GET, miễn phí
+```
+
+Script **từ chối sửa sổ nếu không có nguồn** (đọc trực tiếp từ nhà cung cấp,
+hoặc một dòng `VideoBenchmark` ghi tại thời điểm chạy).
+
+---
+
+## h3_max benchmark — 2026-09-15, 1 clip, $0,40
+
+Task `b6fddf11-900b-43f2-9cca-df366f80c6f0`. Credit **831 → 791** = 40 credit.
+Sổ ghi $0,400000; nhà cung cấp trừ $0,400000. **Khớp tuyệt đối, không lệch.**
+
+Cùng cảnh, cùng keyframe mà `gen4_turbo` đã hỏng hai lần với
+`INTERNAL.BAD_OUTPUT.CODE01`. `h3_max` **chạy được ngay lần đầu**.
+
+| Tiêu chí | Điểm |
+|---|---|
+| Character Identity | 10 |
+| Clothing Consistency | 10 |
+| Stays in Frame | 10 |
+| Face Drift | 9 |
+| Hands / Body | 9 |
+| Composition | 9 |
+| Artifacts | 9 |
+| Keyframe Adherence | 9 |
+| Motion | 8 |
+| Camera Stability | 8 |
+| **Trung bình** | **9,1** |
+
+Kỹ thuật: **768×1280 (đúng 9:16)**, h264, 24fps, 124 frame, 5,17s, 3,26 MB.
+Có luồng AAC (audio gốc luôn bật) — pipeline map `[1:a]` là file giọng đọc nên
+audio này bị bỏ đúng cách, không tốn thêm và không cần sửa.
+
+Trừ điểm ở Motion/Camera: prompt yêu cầu *"static locked camera"* và chỉ nghiêng
+**đầu**, nhưng model cho cả thân trên cúi về trước và có dịch khung rất nhẹ.
+
+Trạng thái: `BENCHMARK_VERIFIED` **và vẫn `PIN_ONLY`**. Một mẫu không đủ để
+auto-route.
+
+### Mẫu 2 và 3 — 2026-09-15, $0,80
+
+| | Mẫu 1 | Mẫu 2 | Mẫu 3 |
+|---|---|---|---|
+| Cảnh | Cold feet #1 | Spill beans #5 | Spill beans #6 |
+| Nhân vật | 1 | 1 | **2** |
+| Task | `b6fddf11` | `d45c9a40` | `c744478e` |
+| Identity | 10 | **5** | 9 |
+| Motion | 8 | **3** | 9 |
+| Camera | 8 | **1** | 9 |
+| Composition | 9 | **3** | 9 |
+| Artifacts | 9 | 8 | 8 |
+| **Tổng** | **9,1** | **4,3** | **8,9** |
+
+**Mẫu 2 hỏng camera.** Prompt ghi *"Static camera. No camera movement."* nhưng
+model đẩy từ toàn thân sang cận mặt trong **1,3 giây** và giữ nguyên đến hết —
+mất hẳn bàn tay đang chỉ, tức trọng tâm của cảnh. Đo khách quan: PSNR frame đầu
+vs cuối = **8,4 dB**, so với 15,2 và 16,2 của hai mẫu kia.
+
+### Mẫu 4 — A/B chỉ đổi prompt, cùng cảnh 5 ($0,40)
+
+Task `3a314183`. Camera **1 → 10**, Overall **4,3 → 9,2**. PSNR đầu↔cuối
+**8,38 → 39,69 dB**. Không zoom, không reframe, không crop, frame cuối trùng
+frame đầu, cái gật đầu vẫn xảy ra.
+
+**Kết luận: PROMPT-SENSITIVE**, không phải bất ổn cố hữu. Xem QĐ-044.
+
+Ngưỡng tính trên 3 mẫu có guardrail camera (bỏ mẫu 2): Identity 9,33 · Motion
+8,00 · Artifacts 8,67 · Camera 9,00 · Composition 9,33 — **ĐẠT toàn bộ**.
+Tính trên cả 4 mẫu thì KHÔNG đạt.
+
+**Vẫn giữ `PIN_ONLY`.** Điều kiện tiên quyết trước khi bàn LOW_AUTO: chuẩn hoá
+**17/23 cảnh** đang có prompt thiếu chữ `locked`.
+
+**Kết luận ngưỡng (3 mẫu đầu): KHÔNG ĐẠT.** Camera 6,00 (cần ≥8), Composition 7,00 (cần ≥8),
+Motion 6,67 (cần ≥7). Giữ `PIN_ONLY`.
+
+**Về giả thuyết lỗi do prompt:** mẫu 3 dùng bộ guardrail mới có câu *"no large
+zoom"*; mẫu 1 và 2 thì không. Nhưng mẫu 1 **vẫn giữ được camera (8)** dù thiếu
+câu đó. Vậy prompt không giải thích hết — **cùng một loại prompt cho hai kết quả
+1 và 8**, và đó đúng là định nghĩa của thiếu ổn định.
+
+---
 
 ---
 
@@ -41,6 +173,15 @@ Lưu trong bảng `VideoBenchmark`, seed lại được bằng
 | gen4.5 | 3 | HIGH | đạt — composition **3**, Max rời khung ở 5,9s | $0,72 |
 | gen4.5 | 3 | HIGH | đạt — composition **9**, camera 7, artifacts 7 | $0,72 |
 | sora-2 | 3 | HIGH | **hỏng HTTP 400** `input_reference`, không tạo job | $0 |
+| **h3_max** | **1** | **LOW** | **đạt ngay lần đầu — TB 9,1; identity 10, camera 8** | **$0,40** |
+
+`h3_max` chạy trên **đúng cảnh và đúng keyframe** mà `gen4_turbo` đã hỏng hai
+lần. Đó là lý do phép so sánh này có nghĩa: cùng input, khác model.
+
+**Lưu ý về sora-2:** bảng chỉ ghi một lần hỏng, nhưng `ProviderJob` cho thấy nó
+đã tạo thành công **2 clip** ngày 13/09 ($0,40 mỗi clip) mà **chưa ai chấm điểm**.
+Nên mọi so sánh chất lượng với sora-2 đang dựa trên bằng chứng thiếu — không
+được kết luận nó kém hơn chỉ vì cột điểm trống.
 
 Hai lần gen4.5 là A/B có kiểm soát, **chỉ đổi prompt**: cho phép push-in →
 composition 3; khoá camera → composition 9. Bài học: phần lớn hiện tượng trôi
@@ -53,13 +194,144 @@ từ đó. Khác biệt duy nhất: `seconds` 4 → 6. Giả thuyết là 6 khô
 
 ---
 
-## Định tuyến video — CHƯA CHỐT PRODUCTION
+## ⚠️ Sora-2 NGỪNG DÙNG — 2026-09-15
+
+**OpenAI tắt Sora API ngày 2026-09-24.** Đồng thời, Sora chỉ nhận **4 / 8 / 12
+giây**, không nhận gì khác.
+
+Điều đó giải thích dứt điểm lần hỏng HTTP 400: bảng benchmark từng ghi *"giả
+thuyết là 6 không nằm trong tập độ dài hợp lệ — chưa chứng minh được nếu không
+POST thêm lần nữa"*. Đọc như vậy là đúng, và đây là xác nhận — không tốn đồng nào.
+
+**Nhưng nó cũng phơi ra một lỗi nặng hơn trong bộ ước tính.** `billedVideoSeconds`
+không có nhánh nào cho `openai`, nên rơi vào `default: return requestedSeconds`.
+Hệ quả: ta báo giá $0,30 cho 3 giây, $0,50 cho 5 giây, $0,60 cho 6 giây — **ba
+mức giá cho ba request mà API sẽ từ chối.** Toàn bộ cost preview video của Sora
+là số học trên những độ dài không gửi được.
+
+Giá đúng sau khi sửa:
+
+| Xin | Gửi được | Giá |
+|---|---|---|
+| 3s | 4s (phải đổi) | $0,40 |
+| 4s | 4s | $0,40 |
+| 5s | 8s (phải đổi) | $0,80 |
+| 6s | 8s (phải đổi) | $0,80 |
+| 8s | 8s | $0,80 |
+
+**Không tự ý làm tròn.** `planDuration()` trả `DURATION_TRANSFORM_REQUIRED` kèm
+độ dài gần nhất; đổi hay không là **quyết định về nội dung**, không phải chuyện
+làm tròn ở tầng dưới cùng. Cost preview vẫn tính theo độ dài **sẽ thật sự gửi**.
+
+Adapter Sora **giữ nguyên** để đọc job cũ và lịch sử benchmark.
+
+---
+
+## Guardrail camera — chuẩn hoá 2026-09-15
+
+Một bộ dùng chung trong code, áp ở **bước cuối trước khi gửi**
+(`generateSceneVideo`), không sửa dữ liệu prompt.
+
+```bash
+npx tsx scripts/audit-camera-prompts.ts            # xem trước, miễn phí
+npx tsx scripts/audit-camera-prompts.ts --verbose  # kèm lý do phân loại
+```
+
+| | |
+|---|---|
+| Tổng cảnh | 23 |
+| `LOCKED_CAMERA` | 20 |
+| `DIRECTED_CAMERA` | 3 |
+| Chưa phân loại | 0 |
+| Mâu thuẫn | 0 |
+| Vượt giới hạn ký tự | 0 |
+| Thiếu khoá camera | **17 → 0** |
+
+3 cảnh DIRECTED giữ nguyên chuyển động kịch bản yêu cầu: `738805f7` (follow),
+`d9c9b991` (đổi khung), `5fd45846` (pan). Chúng **không** bị gắn "No pan"/"No
+zoom" — cấm thứ kịch bản vừa yêu cầu là bắt model tự chọn, đúng cái bất ổn cần
+dập.
+
+Phân loại đọc `Scene.camera` (trường ý đồ camera của kịch bản), khớp theo động
+từ chuyển động và cấu trúc đổi khung — không dò chữ "camera".
+
+---
+
+## Danh mục model Runway — kiểm tra live 2026-09-15
+
+**`GET /models` KHÔNG TỒN TẠI** (404). Nguồn live duy nhất là `GET /organization`,
+trả về `tier.models{}` — tên model + rate limit, và `creditBalance`.
+
+```bash
+npx tsx scripts/catalog-runway.ts            # đọc live + đối chiếu registry
+npx tsx scripts/catalog-runway.ts --apply    # đóng dấu existence=LIVE
+npx tsx scripts/catalog-runway.ts --offline  # cache, có nhãn rõ ràng
+```
+
+Tài khoản có **61 model**. Số dư **831 credit** ($8,31). Đã xác nhận có:
+`wan3`, `wan3_prime`, `h3_max`, `hailuo3`, `veo3.1_fast`, `veo3.1`, `veo3`,
+`gen4.5`, `gen4_turbo`, `gen3a_turbo`.
+
+### Nguồn gốc từng loại dữ liệu — không được gộp
+
+| Dữ kiện | Nguồn | Vì sao |
+|---|---|---|
+| model có tồn tại không | **LIVE** | `/organization` liệt kê |
+| rate limit | **LIVE** | cùng response |
+| giá | **MANUAL** | Runway không có endpoint giá |
+| độ phân giải, độ dài, tỉ lệ, audio | **MANUAL** | không có endpoint capability |
+
+Giá MANUAL đối chiếu chéo được: `gen4_turbo` 5 credit/s = $0,05 và `gen4.5`
+12 credit/s = $0,12 — **khớp đúng hai dòng ta đã thực trả tiền**. Đó là lý do
+duy nhất để tin phần còn lại của bảng.
+
+### Ứng viên đã thêm — tất cả PIN_ONLY
+
+| modelId | $/giây | credit/s | Ghi chú capability (MANUAL) |
+|---|---|---|---|
+| `h3_max:480x854` | 0,05 | 5 | 5–15s, tỉ lệ theo ảnh đầu vào, audio luôn bật |
+| `h3_max:768x1280` | 0,08 | 8 | như trên, nét hơn |
+| `wan3:480x854` | 0,05 | 5 | 2–30s, audio gốc. **Mặc định vendor là `auto_1080p` = 20 credit/s** |
+| `wan3:720x1280` | 0,10 | 10 | như trên |
+| `veo3.1_fast:720x1280` | 0,10 | 10 | 10 credit/s không audio, 15 có audio |
+
+---
+
+## Vòng đời model — cột mới trên `ModelRegistry`
+
+| Trạng thái | Router tự chọn? |
+|---|---|
+| `ACTIVE` | có |
+| `PIN_ONLY` | không — chỉ chọn tay |
+| `DEPRECATED` | không |
+| `DISABLED` | không |
+
+Kèm `deprecationDate`, `shutdownDate`, `replacementNote`.
+
+Tách khỏi cờ `enabled` (chỉ nói "hàng này có bật không") và tách khỏi
+`NEEDS_EXPLICIT_PIN` trong `domain/video-suitability` (ghi **bằng chứng
+benchmark** nói gì). Cột này ghi **người vận hành** nói gì. Router từ chối nếu
+**một trong hai** phản đối — Sora-2 là ví dụ: bằng chứng tốt, nhưng sắp bị tắt.
+
+Lifecycle được **ghi đè lại mỗi lần seed**, không chỉ lúc tạo — tin một model bị
+khai tử là tin ứng dụng phải đẩy được xuống máy đã cài từ tháng trước.
+
+---
+
+## Định tuyến video — Batch V1 (tạm chốt 2026-09-15)
 
 | Độ khó | Hiện tại |
 |---|---|
+| Không cần chuyển động tạo sinh | **LOCAL_MOTION** — dùng tối đa |
 | LOW | `runway/gen4_turbo` — có bằng chứng tốt |
-| MEDIUM | **chưa chốt** |
-| HIGH | **chưa chốt** |
+| MEDIUM | **NEEDS_PROVIDER** nếu không LOCAL_MOTION được |
+| HIGH | **NEEDS_PROVIDER** |
+
+`gen4.5` = PIN_ONLY. `sora-2` = DEPRECATED. **Không được vì muốn chạy xong lô mà
+tự chọn model chưa duyệt.**
+
+**Hệ quả đo được:** không kịch bản nào đang có trên máy chạy được tự động — cả
+ba đều chứa cảnh HIGH. Xem `npx tsx scripts/find-cheapest-candidates.ts`.
 
 `runway/gen4.5` ở trạng thái **pin-only**: còn trong registry, chọn tay được,
 router tự động không bao giờ chọn. Xem `NEEDS_EXPLICIT_PIN` trong
@@ -71,6 +343,245 @@ router tự động không bao giờ chọn. Xem `NEEDS_EXPLICIT_PIN` trong
 luật định tuyến mâu thuẫn với một clip đã trả tiền. Nó **chỉ** tính thất bại nói
 lên điều gì đó về model (`BAD_OUTPUT`, từ chối nội dung). Một lỗi 400/429/5xx hay
 timeout là lỗi phía ta hoặc lỗi nhất thời, không phải bản án cho model.
+
+---
+
+## Batch Video Factory V1
+
+Một nút tạo nhiều video, nhưng **tiền không ra ở nút đó**. Quy trình hai bước:
+
+```
+A. PHÂN TÍCH & DỰ TOÁN   miễn phí, chỉ đọc, lặp lại bao nhiêu lần cũng được
+B. DUYỆT & CHẠY BATCH    một lần duyệt, một trần chi, rồi chạy tự động hết
+```
+
+Sau khi duyệt, lô chạy không hỏi lại từng cảnh: script → ảnh → video → giọng →
+phụ đề → trộn → render → MP4.
+
+### Ba lớp ngân sách
+
+| Lớp | Ở đâu | Ý nghĩa |
+|---|---|---|
+| Hạn mức toàn ứng dụng | `spend-guard.ts` | $8,00. Batch không vượt qua được. |
+| Hạn mức / video | `BatchAuthorization.maxCostPerVideo` | mặc định $2,50. Video vượt → `OVER_VIDEO_BUDGET`, dừng **riêng nó**. |
+| Hạn mức / lô | `BatchAuthorization.authorizedMaxSpend` | người dùng tự nhập. Chạm trần → `BUDGET_EXHAUSTED`. |
+
+### BATCH_SPEND_AUTHORIZATION — không phải CREATE_ATTEMPT_TOKEN
+
+`CREATE_ATTEMPT_TOKEN` nghĩa là "một lần xác nhận = đúng một POST create". Đúng
+cho benchmark, **không dùng được cho batch**: 10 video sẽ cần 50 lần bấm, và một
+người bấm qua 50 hộp thoại thì đã ngừng đọc chúng — cái đó trông giống sự đồng ý
+nhưng không phải.
+
+Nên batch có công cụ **riêng**, không phải bản nới lỏng của công cụ cũ. Token
+giữ nguyên, vẫn quản benchmark / test tay / debug. Một cảnh nằm trong lô đã
+duyệt thì dùng authorization; cảnh ở ngoài vẫn cần token. **Không đường nào chi
+được mà không có một trong hai.**
+
+### Reserve / Commit — vì sao cần
+
+Năm job chạy song song, lô còn $0,60. Mỗi job đọc sổ, thấy $0,60, thấy $0,40 của
+mình vừa đủ, và gửi đi. **Cả năm lần kiểm tra đều đúng** — chúng chỉ cùng đúng
+về một khoản $0,60, và lô tiêu $2,00.
+
+Không lần kiểm tra nào đọc "đã chi" sửa được chuyện này, vì lúc kiểm tra thì
+tiền chưa chi. Nên tiền được **giữ chỗ trước, gửi request sau**: bảng
+`CostReservation` khoá theo `idempotencyKey` (unique), đúng bằng key của
+`ProviderJob`. Đó cũng là thứ khiến resume / refresh / restart không mua lại:
+cùng một key thì tìm thấy chỗ đã giữ, không mở chỗ mới.
+
+Quyết toán có hai ngả và khác nhau quan trọng:
+
+- `commit` — nhà cung cấp đã tính phí. Số giữ chỗ được thay bằng hoá đơn thật.
+- `release` — request **chưa rời máy**. Trả tiền lại cho lô.
+
+Nếu không chắc, **giữ nguyên** (commit theo ước tính, đánh dấu `possiblyBilled`).
+Trả lại ngân sách cho một request đã bị tính phí là cách lô tiêu vượt trong khi
+mọi con số trên màn hình vẫn khớp.
+
+### LOCAL_MOTION — không phải cảnh nào cũng cần Video AI
+
+Router có thêm một lựa chọn bằng vai với việc chọn model: `LOCAL_MOTION` — dùng
+ảnh keyframe + scale/crop/push-in bằng FFmpeg. **$0, và không thể hỏng ở phía
+nhà cung cấp.** Bộ render đã làm sẵn việc này cho ảnh tĩnh từ Milestone 1.
+
+| Chế độ | Khi nào gọi Video AI |
+|---|---|
+| Tiết kiệm | chỉ cảnh HIGH có ≥2 nhân vật |
+| Cân bằng | cảnh `spendPriority=HIGH` (hook/punchline) và mọi cảnh không phải LOW priority |
+| Chất lượng | mọi cảnh trừ cảnh LOW + LOW |
+
+**Một hiệu chỉnh quan trọng, đo chứ không đoán:** luật đầu tiên viết theo
+`complexity === "LOW"`. Chạy thử trên kịch bản thật cho thấy **không cảnh nào
+từng là LOW** — hai nhân vật trong khung đã đủ vượt ngưỡng MEDIUM. Luật đó trông
+đúng khi đọc và sẽ kích hoạt gần như không bao giờ. Tín hiệu thật sự phân biệt
+được là `spendPriority = LOW`, thứ mà bộ phân loại gán cho cảnh "giải thích" và
+"ví dụ". Xem `src/domain/local-motion.ts`.
+
+**Cái bẫy đã xử lý:** chế độ Tiết kiệm vốn bỏ qua keyframe cho cảnh đơn giản — mà
+đó đúng là những cảnh được đẩy sang LOCAL_MOTION. Hai luật đều đúng khi đứng
+riêng, ghép lại thì cảnh không có ảnh **và** không có clip, và bộ render lặng lẽ
+bỏ cảnh đó khỏi video. `keyframeRequired()` khiến ảnh thành bắt buộc khi chuyển
+động đến từ ảnh tĩnh.
+
+### Cái đã bị gỡ bỏ
+
+`createBatch` cũ nhận form rồi **lập tức** xếp `batch_expand`, sinh kịch bản và
+chi tiền media trong một bước. Đó chính là hình dạng "bấm nút là tiền ra" mà
+Batch V1 sinh ra để thay thế, nên nó bị **xoá** chứ không đánh dấu deprecated —
+để lại thì đường chi tiền không cần duyệt vẫn còn đó.
+
+### Đường nào đi qua cổng lô, đường nào không
+
+Đã nối: **text (kịch bản), image, video, voice** — tất cả đều giữ chỗ tiền trước
+khi gửi request.
+
+**Chưa nối: chấm điểm chất lượng** (`evaluateScene`). Hiện không rò tiền vì
+`getQualityProvider` chỉ trả về mock; mọi provider khác đều ném
+`notImplemented`. Nhưng nếu sau này thêm một quality model thật thì **phải nối
+vào cổng lô trước**, nếu không nó sẽ chi ngoài trần đã duyệt. Đường này cũng
+chưa có `assertCanSpend` — lỗ hổng có từ trước, không phải do Batch V1.
+
+`character-master.ts` (tạo ảnh chuẩn cho nhân vật) cố ý đứng ngoài: đó là thao
+tác quản trị riêng, không nằm trong luồng lô.
+
+### ⚠️ Dự toán từng là giá MOCK — đã sửa 2026-09-15
+
+`availableProviderNames()` trả về `["mock"]` bất cứ khi nào `AI_MOCK_MODE=true`,
+và bộ ước tính chỉ định tuyến tới các provider trong danh sách đó. Nghĩa là **mọi
+con số "Tổng chi phí dự kiến" mà trang lô từng hiển thị đều được tính từ GIÁ GIẢ
+LẬP** rồi trình bày như dự báo tiền thật.
+
+Giá mock không hề gần giá thật, và sai theo **cả hai chiều**:
+
+| Loại | Giá mock | Giá thật | Lệch |
+|---|---|---|---|
+| voice | $0,015 / 1k ký tự | $0,0006 (`gpt-4o-mini-tts`) | **cao gấp 25 lần** |
+| image | $0,020 / ảnh | $0,048 (`gpt-image-2:medium`) | thấp hơn một nửa |
+| video | $0,045 / giây | $0,100 (`sora-2`) | thấp hơn một nửa |
+
+**Cách sửa:** ba loại chi phí giờ là kiểu dữ liệu, không phải chú thích —
+`MOCK`, `PRODUCTION_ESTIMATE`, `ACTUAL` trong `src/domain/cost-basis.ts`. Mỗi bản
+kế hoạch tính **hai lần**: một theo provider chạy được ngay (mock), một theo
+provider thật ở giá niêm yết (`productionProviderNames()` — bỏ qua Mock Mode).
+Giao diện hiển thị cả hai, có nhãn. **Hạn mức đề xuất luôn lấy từ con số THẬT.**
+
+### Dự toán thật 1 video, chế độ Tiết kiệm
+
+Đo bằng `npx tsx scripts/production-estimate.ts` — chỉ đọc, không gọi API:
+
+| Thành ngữ | Cảnh | Local | Video AI | Image | Video | TOTAL |
+|---|---|---|---|---|---|---|
+| Spill the beans | 6 | **3** | 3 | $0,288 | $1,400 | **$1,7017** |
+| Piece of cake | 6 | 1 | 5 | $0,288 | $1,900 | **$2,2054** |
+| Break a leg | 5 | 1 | 4 | $0,240 | $2,100 | **$2,3586** |
+
+**Bài học quan trọng: LOCAL_MOTION tiết kiệm ít hơn nhiều so với kịch bản mẫu.**
+Bảng nghiệm thu trước ghi "Tiết kiệm = 4 local + 2 AI, $1,03/video". Con số đó
+sai hai lần: nó dùng **kịch bản mẫu** (hiền hơn kịch bản thật) và **giá mock**.
+Kịch bản thật gần như toàn cảnh HIGH có 2 nhân vật, mà `needsGenerativeMotion`
+buộc những cảnh đó dùng Video AI **bất kể chế độ**. Dải thật là **$1,70–$2,36**.
+
+**Hệ quả định tuyến:** `runway/gen4_turbo` bị loại khỏi mọi cảnh HIGH
+(`MAX_COMPLEXITY = LOW`), `gen4.5` vẫn pin-only, nên chế độ Tiết kiệm **không
+dùng được tier rẻ** trên kịch bản thật — tất cả rơi vào `sora-2` ở $0,10/giây.
+
+**Rủi ro cần biết trước khi chạy thật:** một số cảnh tính tiền **6 giây**, mà 6
+giây đúng là độ dài đã trả về HTTP 400 với `sora-2`. Chỉ 4 giây là đã chứng minh.
+
+### Ứng viên chạy thật đầu tiên — đã chuẩn bị 2026-09-15
+
+**"Cold feet"**, project `f2b68443`, lô `11af6ba6`, quyền chi **DRAFT**.
+
+6 cảnh, **HIGH = 0, MEDIUM = 0** — không cảnh nào cần Sora hay gen4.5. Hai cảnh
+dùng `runway/gen4_turbo` (cảnh 1 hook, cảnh 4 punchline), bốn cảnh LOCAL_MOTION.
+
+```
+TEXT $0,0010 · IMAGE $0,2880 · VIDEO $0,5000 · VOICE $0,0001 · RENDER $0
+TOTAL $0,8128   ·   đề xuất trần $0,90
+```
+
+Preflight Runway (chỉ GET, miễn phí): API xác nhận `gen4_turbo` có thật trong
+danh sách live, số dư **831 credit (~$8,31)**, 720x1280 hợp lệ, 5 giây hợp lệ,
+$0,25/cảnh. Mục duy nhất chưa đạt là **"cảnh chưa có keyframe"** — đúng và
+không thể khác, vì gen4_turbo là image-to-video và ảnh chỉ có sau bước Image.
+
+### Ba lỗi phát hiện khi dựng ứng viên này
+
+**1. Bộ ước tính làm tròn 4 chữ số nên chi phí voice biến mất.** Một lời thoại
+37 ký tự ở $0,0006/1k tốn $0,0000222 → làm tròn thành $0,0000. Cả video báo
+voice = $0,00 trong khi số thật là $0,000135. **Đúng lớp lỗi dự án đã sửa một
+lần cho sổ chi phí** (chuyển sang 6 chữ số) — nhưng bỏ sót bộ ước tính.
+
+**2. Bộ ước tính báo lỗi khi thiếu model chấm điểm, còn lúc chạy thật thì bỏ qua
+êm.** `evaluateScene` bắt `RoutingError` và trả null; bộ ước tính thì đánh cả
+cảnh là lỗi. Registry không có quality model thật → mọi cảnh ưu tiên cao báo lỗi
+và cả video đọc ra là không chạy được, **cho một bước mà lúc chạy sẽ bị bỏ qua
+lặng lẽ**. Một dự toán từ chối việc mà bộ sinh sẵn sàng làm thì tệ hơn không có
+dự toán: nó giấu mất một video vốn không sao cả.
+
+**3. Lô sẽ vứt kịch bản soạn tay.** `handleBatchExpand` sinh kịch bản mới cho
+idiom chưa có project trong lô. Đã gắn project vào lô trước. Kèm theo phát hiện
+nút duyệt chi chỉ tồn tại trong form `/batches`, nên lô chuẩn bị sẵn **không
+duyệt được trên UI** — đã thêm `ApprovePanel` vào trang chi tiết.
+
+### Nghiệm thu bằng mock — 2026-09-15
+
+Chạy `tests/batch-acceptance.test.ts`: **26/26 đạt**, một lô 3 video đi trọn
+đường từ dự toán tới MP4, kèm các tình huống cố ý phá:
+
+| Kịch bản | Kết quả |
+|---|---|
+| Dự toán 3 video, không ghi một dòng sổ nào | đạt |
+| Chặn mọi request khi quyền chi còn DRAFT | đạt |
+| Một cảnh cố ý hỏng → thử lại → xong | đạt |
+| Dừng lô → không gửi request mới | đạt |
+| Job đã gửi đi vẫn được theo dõi, không giả vờ huỷ | đạt |
+| Chạy tiếp → giữ nguyên trần và số đã chi | đạt |
+| Mô phỏng khởi động lại → không mua lại gì | đạt |
+| Ví Runway cạn → chặn, dù trần lô và hạn mức tổng còn | đạt |
+| Hai request song song tranh cùng khoản cuối | đúng 1 qua, 1 bị chặn |
+| Cảnh LOCAL_MOTION → $0, không ProviderJob, không giữ chỗ | đạt |
+| Mọi dòng sổ đều ghi `provider=mock`, tiền thật = $0 | đạt |
+
+Ngoài ra đã chạy thật trên giao diện (DB riêng `data/.uidemo`, không đụng dữ
+liệu production): dự toán → duyệt $1,09 → lô chạy → 2 video xuất MP4.
+
+### Hai lỗi nghiệm thu tìm ra và đã sửa
+
+**1. Dự án kẹt ở `draft` không có kịch bản là ngõ cụt vĩnh viễn.** Trong lần
+chạy UI, một SQLite socket timeout làm hỏng kịch bản của video thứ ba. Dòng dự
+án vẫn còn, ở trạng thái `draft`, không có cảnh nào. Lỗi đó là nhất thời — nhưng
+hậu quả thì vĩnh viễn: `startMediaGeneration` từ chối vì "chưa có kịch bản", nên
+cả *chạy tiếp* lẫn nút *Thử lại* đều bó tay. Đã sửa ở hai chỗ: `handleBatchExpand`
+và `retryVideo` đều tự viết lại kịch bản khi gặp dự án `draft` rỗng.
+
+**2. Hai test nghiệm thu hỏng vì mốc thời gian, không phải vì code.** Một bước
+rút cạn cả lô — 18 job mock cộng ba lần render FFmpeg thật — và vượt mốc 300
+giây mặc định. Ban đầu tôi quy cho việc chạy song song bộ test và lô UI; chạy
+riêng vẫn hỏng y hệt, nên giả thuyết đó sai. Đã nâng mốc cho bước đó và thu hẹp
+bước "khởi động lại" để nó không render lại toàn bộ lần nữa.
+
+### Chưa làm trong V1
+
+- Chưa chạy lô nào với API thật. Chỉ mock.
+- Bảng dự toán dùng **kịch bản mẫu 6 cảnh** cho video chưa có kịch bản, và có
+  ghi nhãn. Hạn mức/video được kiểm tra **lại** theo kịch bản thật trước khi
+  video đó chi tiền video — dự toán sai làm kế hoạch sai, không làm việc chi sai.
+- Chưa có nút thử lại **từng cảnh** trên giao diện (service `retryScene` đã có).
+- Trang `/batches/[id]` **không tự làm mới**, và điều hướng tới cùng URL thì
+  trình duyệt không tải lại — phải F5 hoặc đổi URL mới thấy tiến trình mới. Đây
+  là điểm khó chịu thật khi ngồi xem một lô dài.
+- Mỗi lần mở lại trang `/batches` rồi bấm dự toán sẽ tạo một dòng lô PLANNED mới.
+  Trong cùng một phiên thì bấm lại nhiều lần chỉ cập nhật một dòng, nhưng qua
+  lần tải trang mới thì không. Các dòng thừa là DRAFT, không chi được gì.
+- **Chấm điểm chất lượng chưa nối vào cổng lô.** Hiện không rò tiền vì
+  `getQualityProvider` chỉ trả mock, nhưng phải nối trước khi thêm quality model
+  thật.
+- Cơ chế nối tiếp việc giữ chỗ tiền chỉ bảo đảm **trong một tiến trình**. Ứng
+  dụng vốn được thiết kế chạy một tiến trình (worker giả định nó là duy nhất),
+  nhưng nếu sau này chạy hai bản cùng trỏ vào một file SQLite thì phải đổi sang
+  transaction có khoá ghi thật.
 
 ---
 
@@ -91,17 +602,26 @@ FFmpeg 6.1.1 (bản đi kèm ffmpeg-static, có libass + libx264).
 
 ## ⚠️ CHI PHÍ API THẬT
 
-**Đã chi: $2,022494** / hạn mức **$3,00** — còn **$0,977506**.
+**Đã chi: $3,712760** / hạn mức **$8,00** — còn **$4,287240**. Đây là con số
+duy nhất đúng; xem bảng ví từng nhà cung cấp ở đầu tài liệu.
 
 | Loại | Số lần | Chi phí thật |
 |---|---|---|
 | Image AI (OpenAI `gpt-image-2:medium`) | 29 ảnh | $1,193640 |
-| **Video AI (OpenAI `sora-2:720x1280`)** | **2 clip × 4s** | **$0,800000** |
+| Video AI (OpenAI `sora-2:720x1280`) | 2 clip × 4s | $0,800000 |
+| Video AI (Runway `gen4_turbo` + `gen4.5`) | 3 clip | $1,690000 |
+| Voice AI (OpenAI `gpt-4o-mini-tts`) | đã chạy thật | trong ví openai |
 | Text AI (Groq `openai/gpt-oss-120b`) | 24 lần | $0,028854 |
 
-Đây là **tiền thật**. Voice AI vẫn hoàn toàn mock, $0,00.
+Đây là **tiền thật**. Kiểm tra lại bất cứ lúc nào bằng `spendStatus()` và
+`providerSpendBreakdown()` — con số trong tài liệu sẽ cũ đi, sổ chi phí thì không.
 
 `.env` đang ở `AI_MOCK_MODE=true` — chế độ an toàn.
+
+> Bản trước của mục này ghi hạn mức **$3,00** và nói Voice AI còn mock. Cả hai
+> đều đã sai từ lâu: hạn mức được nâng lên $8,00 và Voice AI đã chạy thật. Ghi
+> lại ở đây vì một con số cũ trong tài liệu trạng thái không vô hại — nó là thứ
+> phiên làm việc sau sẽ tin.
 
 ---
 
@@ -415,12 +935,13 @@ Xem bảng đầy đủ: `npm run video:benchmark`
 
 ## Chưa làm (các bước sau)
 
-### Milestone 2 bước 2-4
-- [ ] Image AI thật
-- [ ] Video AI thật (Runway)
-- [ ] Voice AI thật (ElevenLabs / OpenAI)
+### Milestone 2 bước 2-4 — ĐÃ XONG
+- [x] Image AI thật — OpenAI `gpt-image-2`
+- [x] Video AI thật — Runway `gen4_turbo`, `gen4.5`; OpenAI `sora-2`
+- [x] Voice AI thật — OpenAI `gpt-4o-mini-tts`
 
-**Image, Video, Voice, Upscale vẫn hoàn toàn là mock.**
+**Chỉ còn Upscale là mock.** Image, Video, Voice đều đã chạy thật và đã ghi chi
+phí vào sổ.
 
 ### Milestone 3-4
 - [ ] Nhiều nhà cung cấp video, định tuyến thật

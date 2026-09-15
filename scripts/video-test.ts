@@ -61,6 +61,24 @@ function assertKnownFlags(): void {
 const MAX_WAIT_MS = 15 * 60_000;
 const POLL_INTERVAL_MS = 10_000;
 
+/**
+ * Runway's credit balance. Free: GET /organization is not billed.
+ *
+ * Returns null for any provider without such an endpoint, or when anything at
+ * all goes wrong - a benchmark must not fail because a courtesy reading did.
+ */
+async function readRunwayCredits(provider: string): Promise<number | null> {
+  if (provider !== "runway") return null;
+  try {
+    const { fetchRunwayCatalog } = await import(
+      "../src/services/provider-catalog"
+    );
+    return (await fetchRunwayCatalog()).creditBalance;
+  } catch {
+    return null;
+  }
+}
+
 function flag(name: string): boolean {
   return process.argv.includes(`--${name}`);
 }
@@ -304,6 +322,17 @@ async function main(): Promise<void> {
   // the outcome. A failure that costs nothing does NOT hand the permit back:
   // an earlier benchmark authorised as one create issued four, each a real
   // attempt to charge the account, and only luck kept the bill at zero.
+  // ---- the vendor's own meter, before ------------------------------------
+  //
+  // Read FIRST, and read again at the end. Our ledger records what we THINK a
+  // call cost; the credit balance records what the vendor actually took, and
+  // those have already disagreed once by $0.25. A benchmark that reports only
+  // our own arithmetic is a benchmark that cannot catch that.
+  const creditsBefore = await readRunwayCredits(PROVIDER);
+  if (creditsBefore !== null) {
+    console.log(`\n  So du truoc: ${creditsBefore} credit (= $${(creditsBefore * 0.01).toFixed(2)})`);
+  }
+
   const { grantCreateToken } = await import("../src/services/create-token");
   await grantCreateToken({
     provider: PROVIDER,
@@ -332,6 +361,21 @@ async function main(): Promise<void> {
   try {
     const filePath = await generateSceneVideo(scene.id);
     const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+
+    // Null means the scene was routed to LOCAL_MOTION and no video model ran.
+    // This script exists to exercise a PAID adapter, so that is a misfire worth
+    // reporting rather than a pass: it would otherwise print "success" for a run
+    // that never called the provider being tested.
+    if (filePath === null) {
+      console.log(
+        "\n  KHONG GOI API: canh nay dang o che do LOCAL_MOTION (anh + FFmpeg), " +
+          "nen khong co request video nao duoc gui. Dat scene.motionSource = " +
+          '"AI_VIDEO" neu muon test adapter tra phi.',
+      );
+      process.exitCode = 1;
+      return;
+    }
+
     const bytes = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
 
     console.log(`\n  THANH CONG sau ${elapsed}s`);
@@ -369,6 +413,24 @@ async function main(): Promise<void> {
     console.log(`  asset         : ${asset.filePath} (${(asset.bytes / 1024 / 1024).toFixed(2)} MB)`);
     console.log(`  provider/model: ${asset.provider}/${asset.model}`);
   }
+  // ---- the vendor's own meter, after -------------------------------------
+  const creditsAfter = await readRunwayCredits(PROVIDER);
+  if (creditsBefore !== null && creditsAfter !== null) {
+    const used = creditsBefore - creditsAfter;
+    console.log(`\n---------- SO DU NHA CUNG CAP ----------`);
+    console.log(`  Credit truoc : ${creditsBefore}`);
+    console.log(`  Credit sau   : ${creditsAfter}`);
+    console.log(`  Bi tru       : ${used} credit = $${(used * 0.01).toFixed(6)}`);
+    if (job && Math.abs(used * 0.01 - job.actualCost) > 0.005) {
+      // Not a rounding note. When these two disagree one of them is wrong, and
+      // it is always worth knowing which before either is trusted again.
+      console.log(
+        `  *** LECH: so sach ghi $${job.actualCost.toFixed(6)} nhung nha cung cap ` +
+          `tru $${(used * 0.01).toFixed(6)}. Kiem tra truoc khi tin con so nao. ***`,
+      );
+    }
+  }
+
   console.log(`\n  Lan chay nay tieu: $${(after.spent - before.spent).toFixed(6)}`);
   console.log(`  Tong da chi      : $${after.spent.toFixed(6)} / $${after.cap.toFixed(2)}`);
   console.log("");

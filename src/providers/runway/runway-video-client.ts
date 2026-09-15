@@ -50,7 +50,33 @@ export interface RunwayTask {
   progress: number;
   /** Present once the task succeeds. */
   outputUrl?: string;
+  /** The vendor's human-readable message. */
   error?: string;
+  /**
+   * The vendor's MACHINE code, kept separate from the message.
+   *
+   * These used to be collapsed - `error: json.failure ?? json.failureCode` -
+   * and since Runway sends both, the code was thrown away every time. That
+   * silently disabled the one mechanism built to stop the router re-sending a
+   * scene Runway has already refused: `marksProviderUnsuitable` looks for
+   * "BAD_OUTPUT" in the code, and by the time it ran the code had become the
+   * string "generation_failed".
+   *
+   * The cost of that was measured, not theoretical: a real paid run came back
+   * INTERNAL.BAD_OUTPUT.CODE01 and the scene was left unflagged, ready to be
+   * sent to the same model again.
+   */
+  failureCode?: string;
+  /**
+   * Credits the vendor says it charged. NULL means "not reported".
+   *
+   * Zero is a real, useful answer and must survive: Runway returns
+   * `cost: { credits: 0 }` on a failed task, which is proof that nothing was
+   * billed. A truthy check would turn that proof back into "unknown" and leave
+   * the money held. Hence `number | null`, never `number | undefined` with a
+   * `||` fallback.
+   */
+  billedCredits: number | null;
 }
 
 const TERMINAL_OK = new Set(["succeeded"]);
@@ -66,6 +92,109 @@ export function isTerminal(status: string): "ok" | "failed" | null {
 /** Runway wants "720:1280" where the registry stores "720x1280". */
 export function toRunwayRatio(size: string): string {
   return size.replace("x", ":");
+}
+
+/**
+ * How each model wants the output size expressed.
+ *
+ * Runway's /image_to_video is ONE endpoint serving models from several vendors,
+ * and they do not share a request schema. Sending the Gen-4 shape to all of
+ * them is a validation error waiting to happen - and a rejected create is still
+ * a create, which is the one thing this project will not spend.
+ *
+ *   RATIO       gen4_turbo, gen4.5 - `ratio: "720:1280"`, no `resolution`
+ *   RESOLUTION  h3_max, wan3       - `resolution: "768p"`, and NO `ratio` field
+ *                                    at all; the output aspect ratio follows
+ *                                    the input image
+ *
+ * Verbatim from docs.dev.runwayml.com/assets/inputs (read 2026-09-15):
+ *
+ *   "MiniMax H3 Max supports `resolution` of `480p` or `768p`. Durations are
+ *    5-15 seconds. There is no `ratio` parameter. Image-to-video accepts a
+ *    first frame or first and last keyframes (each at least 256 pixels on both
+ *    sides); output aspect ratio follows the input image."
+ *
+ * Note the lower-case `p`. The SIBLING model `hailuo3` spells the same idea
+ * `768P` and does take a `ratio` - two MiniMax models, two schemas, one letter
+ * apart. That is precisely why this is a table and not an if-statement.
+ */
+type SizeStyle = "RATIO" | "RESOLUTION";
+
+const SIZE_STYLE: Record<string, SizeStyle> = {
+  gen4_turbo: "RATIO",
+  "gen4.5": "RATIO",
+  gen3a_turbo: "RATIO",
+  h3_max: "RESOLUTION",
+  wan3: "RESOLUTION",
+};
+
+/** Resolution tiers each RESOLUTION-style model sells, shortest side first. */
+const RESOLUTION_TIERS: Record<string, readonly string[]> = {
+  h3_max: ["480p", "768p"],
+  wan3: ["480p", "720p", "1080p"],
+};
+
+export function sizeStyleFor(model: string): SizeStyle {
+  // Unknown models get the Gen-4 shape, which is what the endpoint has always
+  // meant by default - but they are not silently trusted: nothing reaches this
+  // function without a registry row, and a registry row is added deliberately.
+  return SIZE_STYLE[model] ?? "RATIO";
+}
+
+/**
+ * "768x1280" -> "768p", picking the tier the model actually sells.
+ *
+ * The short side is the tier, because these are portrait clips: a 768x1280
+ * frame is 768p, not 1280p. Getting that backwards would ask for a tier the
+ * model does not sell and buy a 400.
+ */
+export function toRunwayResolution(model: string, size: string): string {
+  const tiers = RESOLUTION_TIERS[model] ?? [];
+  const [w, h] = size.split("x").map(Number);
+  const shortSide = Math.min(w || 0, h || 0);
+  const wanted = `${shortSide}p`;
+  if (tiers.includes(wanted)) return wanted;
+  // Not a tier this model sells. Round DOWN to one it does, so a request can
+  // never silently cost more than the registry row was priced at. wan3 is the
+  // reason: its own default is `auto_1080p` at 20 credits/s, four times the
+  // 480p rate, so an omitted or optimistic value is a 4x bill.
+  const numeric = tiers
+    .map((t) => ({ tier: t, px: Number(t.replace("p", "")) }))
+    .filter((t) => Number.isFinite(t.px))
+    .sort((a, b) => a.px - b.px);
+  const affordable = numeric.filter((t) => t.px <= shortSide).pop();
+  return affordable?.tier ?? numeric[0]?.tier ?? wanted;
+}
+
+export interface RunwayCreateBody {
+  model: string;
+  promptImage: string;
+  promptText: string;
+  duration: number;
+  ratio?: string;
+  resolution?: string;
+}
+
+/**
+ * The exact JSON that will be sent. Built here, and tested here, so the request
+ * can be asserted without a network call and without spending anything.
+ */
+export function buildCreateBody(
+  config: VideoModelConfig,
+  request: { prompt: string; seconds: number; keyframePath: string },
+): RunwayCreateBody {
+  const base = {
+    model: config.model,
+    promptImage: toDataUri(request.keyframePath),
+    promptText: request.prompt,
+    duration: nearestDuration(request.seconds, config.model),
+  };
+  if (sizeStyleFor(config.model) === "RESOLUTION") {
+    // `ratio` is deliberately ABSENT, not empty. These models reject the field
+    // outright rather than ignoring it.
+    return { ...base, resolution: toRunwayResolution(config.model, config.size) };
+  }
+  return { ...base, ratio: toRunwayRatio(config.size) };
 }
 
 /**
@@ -151,13 +280,7 @@ export async function createTask(
     const response = await fetch(url, {
       method: "POST",
       headers: headers(config),
-      body: JSON.stringify({
-        model: config.model,
-        promptImage: toDataUri(request.keyframePath),
-        promptText: request.prompt,
-        ratio: toRunwayRatio(config.size),
-        duration: nearestDuration(request.seconds, config.model),
-      }),
+      body: JSON.stringify(buildCreateBody(config, request)),
       signal: controller.signal,
     });
     const durationMs = Date.now() - started;
@@ -201,7 +324,14 @@ export async function createTask(
       message: `Đã tạo task ${json.id}, ${nearestDuration(request.seconds, config.model)}s ${config.size}`,
     });
 
-    return { id: json.id, status: json.status ?? "PENDING", progress: 0 };
+    // A freshly created task has been billed nothing yet, and has no failure
+    // code. `null` says "not reported", which is the truth at this moment.
+    return {
+      id: json.id,
+      status: json.status ?? "PENDING",
+      progress: 0,
+      billedCredits: null,
+    };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       await logger.warn({
@@ -256,6 +386,7 @@ export async function getTask(
       output?: string[];
       failure?: string;
       failureCode?: string;
+      cost?: { credits?: number };
     };
     return {
       id: json.id ?? taskId,
@@ -264,6 +395,12 @@ export async function getTask(
       progress: Math.round((json.progress ?? 0) * 100),
       outputUrl: json.output?.[0],
       error: json.failure ?? json.failureCode,
+      // Kept SEPARATE from `error`. See RunwayTask.failureCode.
+      failureCode: json.failureCode,
+      // `typeof === "number"`, not `?? null` after a truthy test: zero credits
+      // is the answer that matters most, and any truthy check erases it.
+      billedCredits:
+        typeof json.cost?.credits === "number" ? json.cost.credits : null,
     };
   } finally {
     clearTimeout(timer);

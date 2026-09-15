@@ -1,3 +1,5 @@
+import type { CameraIntent, CameraMode } from "./camera-intent";
+
 /**
  * Fitting a video prompt into a vendor's character budget.
  *
@@ -32,6 +34,59 @@ export const COMPACT_CONSTRAINTS =
 
 /** Paragraph that carries the motion. Everything after it is boilerplate. */
 const MOVEMENT_PREFIX = "Movement:";
+
+// ------------------------------------------------------- guardrail blocks ---
+//
+// One shared set, appended as the LAST step before a prompt goes to a video
+// model. They exist because of a measured failure: the same scene, same
+// keyframe and same model scored camera 1/10 without a lock and 10/10 with one.
+//
+// Split by concern rather than written as one paragraph, so a DIRECTED_CAMERA
+// scene can take the identity, framing and final-frame rules while skipping the
+// movement prohibitions that would contradict its own direction.
+
+/** Only for LOCKED_CAMERA. Contradicts a script that asked for a move. */
+export const CAMERA_LOCK_GUARDRAIL =
+  "Locked tripod camera. No zoom. No push-in. No pull-back. No pan. No tilt. " +
+  "No orbit. No reframing. Keep the exact opening composition for the entire shot.";
+
+/**
+ * For DIRECTED_CAMERA. Says what must NOT happen without forbidding the move
+ * the script asked for.
+ *
+ * The distinction is the whole reason there are two modes: "do not invent
+ * camera movement beyond what is described" permits the scripted pan and bans
+ * everything else, where "No pan" would simply fight the direction and leave
+ * the model to decide which instruction wins.
+ */
+export const CAMERA_DIRECTED_GUARDRAIL =
+  "Perform only the camera movement described above. Do not invent any " +
+  "additional camera movement, and keep the movement smooth and minimal.";
+
+/** Both modes: the subject stays whole and inside the frame. */
+export const FRAMING_GUARDRAIL =
+  "Keep all required characters completely inside the frame at all times. " +
+  "Do not crop heads, hands, arms, legs, or feet.";
+
+/** Both modes. */
+export const IDENTITY_GUARDRAIL =
+  "Preserve exactly the same face, hair, clothing, body proportions, colors, " +
+  "and accessories as the reference image. No morphing. No identity drift.";
+
+/** Both modes. */
+export const MOTION_GUARDRAIL =
+  "Only perform the explicitly requested character action. Do not invent " +
+  "unnecessary body movement.";
+
+/** LOCKED_CAMERA only: a directed shot is allowed to end somewhere else. */
+export const FINAL_FRAME_GUARDRAIL =
+  "The final frame must preserve the same framing, character scale, camera " +
+  "position, and overall composition as the opening frame.";
+
+/** LOCKED_CAMERA only. */
+export const SCALE_GUARDRAIL =
+  "Preserve the same character scale and camera position from the first frame " +
+  "to the final frame.";
 
 export class PromptTooLongError extends Error {
   constructor(message: string) {
@@ -117,4 +172,162 @@ export function fitVideoPrompt(prompt: string, limit: number): FittedPrompt {
  */
 function utf8Bytes(text: string): number {
   return new TextEncoder().encode(text).length;
+}
+
+// ------------------------------------------------ applying the guardrails ---
+
+/**
+ * Sentences already present in a prompt that make a guardrail redundant.
+ *
+ * Matched on MEANING, not on exact text. A legacy prompt saying "Static camera.
+ * No camera movement." already locks the camera; appending the full lock block
+ * on top would produce "Static camera. No camera movement. Locked tripod
+ * camera. No zoom..." - longer, no clearer, and closer to the vendor's 1000
+ * character ceiling for nothing.
+ *
+ * Note what is deliberately NOT here: "Static camera" alone does NOT count as
+ * satisfying the lock. That exact phrasing is the one that failed - the clip
+ * that scored 1/10 said "Static camera. No camera movement." and pushed in
+ * anyway. Every prompt that held the camera contained the word "locked". So a
+ * prompt has to say "locked" (or tripod/fixed) before this code believes it.
+ */
+const ALREADY_SATISFIED: Record<string, RegExp> = {
+  [CAMERA_LOCK_GUARDRAIL]: /\block(?:ed)?\s+(?:tripod\s+)?camera\b|\bcamera\s+(?:remains|is)\s+locked\b|\bstatic\s+locked\b|\blocked\s+(?:static|and stable)\b/i,
+  [CAMERA_DIRECTED_GUARDRAIL]: /\bonly the camera movement described\b|\bdo not invent any additional camera movement\b/i,
+  [FRAMING_GUARDRAIL]: /\bcompletely inside the frame\b|\bdo not crop\b/i,
+  [IDENTITY_GUARDRAIL]: /\bpreserve exactly the same face\b/i,
+  [MOTION_GUARDRAIL]: /\bonly perform the explicitly requested\b/i,
+  [FINAL_FRAME_GUARDRAIL]: /\bfinal frame must preserve\b/i,
+  [SCALE_GUARDRAIL]: /\bsame character scale and camera position\b/i,
+};
+
+export interface GuardedPrompt {
+  text: string;
+  mode: CameraMode;
+  /** Guardrail blocks actually appended, in order. */
+  added: string[];
+  /** Blocks skipped because the prompt already said the same thing. */
+  skipped: string[];
+  chars: number;
+  bytes: number;
+  /** True when the vendor limit forced a block to be left off. */
+  truncated: boolean;
+  note: string;
+}
+
+/**
+ * Append the camera/composition guardrails a prompt is missing. The LAST step
+ * before a prompt is sent.
+ *
+ * Ordered on purpose - action first, constraints after - because a model reads
+ * the opening as the subject and the tail as rules. Putting the rules first
+ * buries the thing being generated:
+ *
+ *   1. the scene's own text (action, characters)   <- untouched
+ *   2. camera intent
+ *   3. identity
+ *   4. framing / composition
+ *   5. final frame
+ *
+ * Budget-aware: blocks are added while they fit and the first one that would
+ * overflow stops the loop. Ordering therefore doubles as priority - the camera
+ * rule is the one that has actually been measured to matter, so it goes first
+ * and is the last thing to be dropped.
+ */
+export function applyCameraGuardrails(
+  prompt: string,
+  intent: CameraIntent,
+  limit = RUNWAY_MAX_PROMPT_CHARS,
+): GuardedPrompt {
+  const blocks =
+    intent.mode === "LOCKED_CAMERA"
+      ? [
+          CAMERA_LOCK_GUARDRAIL,
+          IDENTITY_GUARDRAIL,
+          FRAMING_GUARDRAIL,
+          MOTION_GUARDRAIL,
+          FINAL_FRAME_GUARDRAIL,
+        ]
+      : [
+          // No FINAL_FRAME and no SCALE rule: a directed shot is allowed to end
+          // on a different framing - that is what "then pan to Leo" means.
+          CAMERA_DIRECTED_GUARDRAIL,
+          IDENTITY_GUARDRAIL,
+          FRAMING_GUARDRAIL,
+          MOTION_GUARDRAIL,
+        ];
+
+  const base = prompt.trim();
+  const added: string[] = [];
+  const skipped: string[] = [];
+  let text = base;
+  let truncated = false;
+
+  for (const block of blocks) {
+    const satisfied = ALREADY_SATISFIED[block];
+    if (satisfied && satisfied.test(text)) {
+      skipped.push(block);
+      continue;
+    }
+    const candidate = text === "" ? block : `${text}\n\n${block}`;
+    if (candidate.length > limit) {
+      truncated = true;
+      break;
+    }
+    text = candidate;
+    added.push(block);
+  }
+
+  return {
+    text,
+    mode: intent.mode,
+    added,
+    skipped,
+    chars: text.length,
+    bytes: utf8Bytes(text),
+    truncated,
+    note:
+      `${intent.mode}: thêm ${added.length}, bỏ qua ${skipped.length} (đã có), ` +
+      `${text.length}/${limit} ký tự${truncated ? " — HẾT CHỖ, thiếu guardrail" : ""}`,
+  };
+}
+
+/**
+ * Contradictions a prompt must never contain.
+ *
+ * A prompt that both forbids and requests the same move is worse than one that
+ * does neither: the model picks, and it picks differently each run. This is the
+ * check that stops the guardrail system from creating the very instability it
+ * was built to remove.
+ */
+export function findPromptContradictions(text: string): string[] {
+  const out: string[] = [];
+  const t = text.toLowerCase();
+  // The "asks for it" side must not fire on the PROHIBITION itself.
+  //
+  // `No push-in.` contains the string "push-in", so a naive request pattern
+  // reads the guardrail as a request and reports every correctly locked prompt
+  // as self-contradictory. An alarm that goes off on correct input is one
+  // nobody reads, which is how the alarm stops working at all.
+  const pairs: Array<[RegExp, RegExp, string]> = [
+    [/\bno pan\b/, /(?<!\bno )(?<!\bnot )\b(?:slowly |smoothly )?pans?\s+(?:to|toward|across|left|right)\b/, "vừa cấm pan vừa yêu cầu pan"],
+    [/\bno zoom\b/, /(?<!\bno )(?<!\bnot )\bzooms?\s+(?:in|out)\b/, "vừa cấm zoom vừa yêu cầu zoom"],
+    [/\bno tilt\b/, /(?<!\bno )(?<!\bnot )\btilts?\s+(?:up|down)\b/, "vừa cấm tilt vừa yêu cầu tilt"],
+    [/\bno push-in\b/, /(?<!\bno )(?<!\bnot )\bpush(?:es)?[- ]in\b/, "vừa cấm push-in vừa yêu cầu push-in"],
+    [/\bno reframing\b/, /(?<!\bno )(?<!\bnot )\breframes?\b/, "vừa cấm reframe vừa yêu cầu reframe"],
+    [/\bno orbit\b/, /(?<!\bno )(?<!\bnot )\borbits?\s+(?:around|the)\b/, "vừa cấm orbit vừa yêu cầu orbit"],
+  ];
+  for (const [ban, ask, msg] of pairs) {
+    if (ban.test(t) && ask.test(t)) out.push(msg);
+  }
+  // The same block appended twice - the dedupe failing in the other direction.
+  for (const [name, re] of [
+    ["khoá camera", /locked tripod camera/g],
+    ["identity", /preserve exactly the same face/g],
+    ["final frame", /final frame must preserve/g],
+  ] as Array<[string, RegExp]>) {
+    const n = (t.match(re) ?? []).length;
+    if (n > 1) out.push(`guardrail ${name} bị lặp ${n} lần`);
+  }
+  return out;
 }

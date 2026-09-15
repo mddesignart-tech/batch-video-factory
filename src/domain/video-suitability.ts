@@ -39,6 +39,32 @@ import { splitModelSize } from "./video-duration";
 /** Marker written on a scene that a provider has already refused. */
 export const RUNWAY_UNSUITABLE = "RUNWAY_UNSUITABLE";
 
+/**
+ * Runway's OWN models - the ones the RUNWAY_UNSUITABLE flag actually indicts.
+ *
+ * The flag was written when "runway" and "gen4_turbo" meant the same thing, so
+ * it was recorded against the provider. That has stopped being true: Runway's
+ * /image_to_video now resells MiniMax (`h3_max`, `hailuo3`), Alibaba (`wan3`)
+ * and Google (`veo3.1*`) models through the same endpoint. "Runway failed this
+ * scene" is no longer a statement about anything - it names a shopfront, not a
+ * model.
+ *
+ * So the flag blocks the family that earned it and nothing else. A MiniMax
+ * model has never seen this scene and cannot have refused it.
+ *
+ * This is deliberately NOT a loosening of the real safety rule. The precise
+ * block is `ModelFailureEvidence`, keyed on (model, fingerprint), and it still
+ * stops the exact request that failed from going back to the exact model that
+ * failed it. This flag is the blunt instrument; it should be blunt about the
+ * right thing.
+ */
+const RUNWAY_FIRST_PARTY = /^(gen\d|gen4_aleph|aleph)/i;
+
+export function flagAppliesToModel(model: string | undefined): boolean {
+  if (!model) return true; // No model named: assume the worst, stay strict.
+  return RUNWAY_FIRST_PARTY.test(model);
+}
+
 export interface SuitabilityInput {
   provider: string;
   /**
@@ -154,12 +180,17 @@ export function checkSuitability(input: SuitabilityInput): SuitabilityVerdict {
   // A scene this provider has already refused. Retrying the same input is how
   // a benchmark turns into a bill for nothing: the two scene-4 attempts were
   // byte-identical and failed identically.
-  if (provider === "runway" && sceneFlags.includes(RUNWAY_UNSUITABLE)) {
+  if (
+    provider === "runway" &&
+    sceneFlags.includes(RUNWAY_UNSUITABLE) &&
+    flagAppliesToModel(input.model)
+  ) {
     return {
       allowed: false,
       reason:
-        "Runway đã thất bại với chính cảnh này (INTERNAL.BAD_OUTPUT). " +
-        "Gửi lại y hệt sẽ hỏng y hệt - hãy đổi nhà cung cấp hoặc sửa cảnh.",
+        "Model Gen-4 của Runway đã thất bại với chính cảnh này " +
+        "(INTERNAL.BAD_OUTPUT). Gửi lại y hệt sẽ hỏng y hệt - hãy đổi model " +
+        "hoặc sửa cảnh.",
     };
   }
 

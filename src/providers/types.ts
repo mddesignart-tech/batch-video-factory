@@ -45,7 +45,29 @@ export interface JobStatus {
   externalId: string;
   state: ProviderJobState;
   progress: number;
+  /** The vendor's human-readable message. */
   error?: string;
+  /**
+   * The vendor's MACHINE failure code, e.g. INTERNAL.BAD_OUTPUT.CODE01.
+   *
+   * Separate from `error` because they are read by different audiences and one
+   * of them is load-bearing. `marksProviderUnsuitable` matches on "BAD_OUTPUT"
+   * to stop the router re-sending a scene a model has already refused - and
+   * this field not existing is why that never fired on a real failure: the
+   * adapter folded the code into the message, and `runProviderJob` then threw
+   * with a hardcoded code of its own.
+   */
+  failureCode?: string;
+  /**
+   * What the vendor says it charged, in its own billing unit. NULL = not said.
+   *
+   * Zero is the most valuable value here and the easiest to lose. Runway
+   * answers `cost: { credits: 0 }` on a failed task, which is proof that
+   * nothing was billed and that the money held for it can be given back.
+   * Anything that treats 0 as absent turns that proof into "unknown" and keeps
+   * the money held - which is how a ledger drifts away from the bank.
+   */
+  billedUnits?: number | null;
 }
 
 export interface GeneratedAsset {

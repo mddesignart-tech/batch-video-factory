@@ -7,7 +7,6 @@ import { prisma } from "@/lib/prisma";
 import { encryptionAvailable, encryptSecret, maskSecret } from "@/lib/crypto";
 import { saveSettings } from "@/lib/settings";
 import { errorMessage, slugify } from "@/lib/utils";
-import { enqueue } from "@/jobs/queue";
 import { canEnableModel } from "@/services/spend-guard";
 import type { ActionResult } from "./idioms";
 
@@ -317,55 +316,17 @@ export async function updateSettings(formData: FormData): Promise<ActionResult> 
 
 // ----------------------------------------------------------------- batches ---
 
-const BatchInput = z.object({
-  name: z.string().min(1, "Cần tên lô"),
-  amount: z.coerce.number().min(1).max(200),
-  category: z.string().optional(),
-  difficulty: z.string().optional(),
-  stylePresetId: z.string().optional(),
-  qualityMode: z.enum(QUALITY_MODES).default("BALANCED"),
-  targetDuration: z.coerce.number().min(15).max(60).default(25),
-  maxBudget: z.coerce.number().min(0).max(10000).default(40),
-  concurrency: z.coerce.number().min(1).max(8).default(2),
-});
-
-export async function createBatch(
-  formData: FormData,
-): Promise<ActionResult & { batchId?: string }> {
-  const parsed = BatchInput.safeParse(Object.fromEntries(formData.entries()));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ.",
-    };
-  }
-
-  const batch = await prisma.batch.create({
-    data: {
-      name: parsed.data.name,
-      amount: parsed.data.amount,
-      category: parsed.data.category || null,
-      difficulty: parsed.data.difficulty || null,
-      stylePresetId: parsed.data.stylePresetId || null,
-      qualityMode: parsed.data.qualityMode,
-      targetDuration: parsed.data.targetDuration,
-      maxBudget: parsed.data.maxBudget,
-      concurrency: parsed.data.concurrency,
-      status: "queued",
-    },
-  });
-
-  // Expanding a 50-video batch into projects can take a while, so it happens in
-  // the queue rather than in the request.
-  await enqueue({ type: "batch_expand", batchId: batch.id, priority: 10 });
-
-  revalidatePath("/batches");
-  return {
-    ok: true,
-    message: `Đã tạo lô "${batch.name}" với ${batch.amount} video. Đang chuẩn bị dự án...`,
-    batchId: batch.id,
-  };
-}
+/**
+ * Batch creation now lives in app/actions/batches.ts.
+ *
+ * The old `createBatch` here took a form and immediately queued `batch_expand`,
+ * which generated scripts and started paid media in one step. That is precisely
+ * the "press the button and money leaves" shape the Batch Video Factory was
+ * built to replace, so it is gone rather than deprecated - leaving it reachable
+ * would leave the unapproved path reachable.
+ *
+ * See `analyseBatch` (free) and `approveBatch` (the one that authorises spend).
+ */
 
 export async function deleteBatch(id: string): Promise<ActionResult> {
   await prisma.batch.delete({ where: { id } });

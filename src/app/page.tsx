@@ -34,6 +34,9 @@ const STATUS_TONE: Record<ProjectStatus, "ok" | "info" | "warn" | "danger" | "ne
   rendering: "warn",
   completed: "ok",
   failed: "danger",
+  needs_review: "warn",
+  budget_exhausted: "warn",
+  cancelled: "neutral",
 };
 
 export default async function DashboardPage() {
