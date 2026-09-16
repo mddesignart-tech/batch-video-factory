@@ -508,12 +508,20 @@ describe("routing steps over a model that is under review", () => {
     // The failure mode worth preventing: a HIGH scene where gen4_turbo is
     // excluded on evidence leaves gen4.5 as the only capable model. Using it
     // silently would defeat the point of marking it.
+    //
+    // Asserted on the CODE, not on the sentence. This used to match the phrase
+    // "chưa được chốt" and broke when the refusal was reworded to name every
+    // blocked model separately - a rewording that changed no behaviour at all.
+    // The next test covers the wording; this one covers the refusal, and they
+    // should not fail together for one reason.
     expect(() =>
       routeScene(
         [RUNWAY, GEN45],
         ctx({ strategy: "AUTO", complexity: "HIGH", characterCount: 3 }),
       ),
-    ).toThrowError(/chưa được chốt/);
+    ).toThrowError(
+      expect.objectContaining({ code: "needs_explicit_pin" }) as unknown as Error,
+    );
   });
 
   it("names the model and the reason when it refuses", () => {

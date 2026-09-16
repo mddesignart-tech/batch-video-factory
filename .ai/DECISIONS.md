@@ -1252,3 +1252,57 @@ Dry-run giờ in rời từng số kèm cơ sở của nó (A…I), và chỉ ma
 mới** ra so với **C = hạn mức còn lại**. So D với C là trả lời một câu hỏi không
 ai hỏi, và đọc lên thì giống một phán quyết về cái quyền trong khi nó là phán
 quyết về cái dự án.
+
+---
+
+## QĐ-058 — Lời từ chối phải nói về đúng model bị chặn
+
+**2026-09-16.**
+
+Negative control A hỏi: *"cảnh MEDIUM thì h3_max có bị chặn không?"* Nó **bị
+chặn**, nhưng thông điệp trả về là:
+
+> *Cảnh này chỉ còn ứng viên chưa được chốt: openai/sora-2:720x1280
+> (DEPRECATED), … openai/sora-2:720x1280: đã bị đánh dấu NGỪNG DÙNG (nhà cung
+> cấp tắt ngày 2026-09-24).*
+
+`h3_max` **không hề có tên trong đó**. Người vận hành hỏi vì sao h3_max không
+chạy được trả lời bằng ngày tắt của Sora — một model không ai nhắc tới, bị chặn
+vì một lý do không liên quan.
+
+Hai lỗi riêng biệt, cùng một hình dạng:
+
+**1. `pinOnly[0]` phát biểu thay cho cả danh sách.** Code lấy phần tử đầu tiên —
+tức là dòng nào registry trả về trước — rồi mô tả **chỉ mình nó**. Một lý do cho
+một danh sách ứng viên là thiếu đúng bằng số ứng viên còn lại. Giờ **mỗi model có
+câu của riêng nó**.
+
+**2. Model bị `MAX_COMPLEXITY` loại thì biến mất hoàn toàn.** `isCapable` loại nó
+từ trước, nên nó không bao giờ tới được `pinOnly`. Trần cứng làm đúng việc của
+mình **trong im lặng**, rồi thông điệp đi nói chuyện khác. Giờ những model bị
+`checkSuitability` loại được liệt kê riêng kèm lý do đo được.
+
+**3. Nhánh `no_capable_models` cũng vậy.** *"Không có mô hình nào đáp ứng yêu
+cầu"* mô tả một tập hợp bằng sự rỗng của nó. `explainIncapable()` đã tồn tại sẵn
+cho đúng việc này và **không được gọi ở đây**. Giờ nó được gọi, và chỉ cho model
+đúng `type` — một route video không có việc gì phải giải thích vì sao các model
+giọng đọc không đủ điều kiện.
+
+**Vì sao đáng ghi:** một lỗi báo **sai tên model** tệ hơn một lỗi mơ hồ. Mơ hồ
+thì người ta đi tìm; sai tên thì người ta đi sửa một thứ vốn không hỏng. Và nó
+chỉ lộ ra vì negative control kiểm **nội dung lý do**, không chỉ kiểm "có bị chặn
+không" — cả 9 ca đều trả về cùng một `RoutingError.code`, nên mã lỗi tự nó không
+chứng minh được gì.
+
+**Ghi chú về thứ tự bốn ổ khoá**, phát hiện khi viết control:
+
+| Ca | Ổ khoá bắn trước |
+|---|---|
+| A. complexity MEDIUM | **trần cứng** `MAX_COMPLEXITY` (trước cả cổng) |
+| E. LOW_AUTO_CANDIDATE | **`autoRouteBlock`** (trước cả cổng) |
+| B, C, D, G, H | **cổng** `lowAutoRouteBlock` |
+| F1, F2 | **`autoRouteBlock`** |
+
+Kỳ vọng ban đầu của tôi cho A và E ghi là "cổng chặn" — sai, và test sẽ xanh
+trong khi mô tả một nhánh code chưa từng chạy. Ổ khoá ngoài luôn bắn trước; đó là
+thiết kế, nhưng phải viết đúng thì control mới có nghĩa.

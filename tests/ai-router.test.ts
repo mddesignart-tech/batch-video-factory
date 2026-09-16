@@ -568,3 +568,71 @@ describe("LOW_AUTO không được đè lên lệnh ghim tay", () => {
     expect(d.lowAutoRouted).toBe(false);
   });
 });
+
+describe("lời từ chối phải nói về ĐÚNG model bị chặn", () => {
+  /**
+   * The bug this guards: the refusal used to describe `pinOnly[0]` - whichever
+   * row the registry happened to return first - and nothing else. Asking why
+   * h3_max did not run on a MEDIUM scene was answered with Sora-2's shutdown
+   * date: a model nobody had mentioned, blocked for an unrelated reason, while
+   * the model actually under discussion was not named at all.
+   *
+   * An error that names the wrong model is worse than a vague one, because it
+   * sends someone to fix something that was never broken.
+   */
+  const RETIRED = {
+    ...MID,
+    provider: "openai",
+    modelId: "sora-2:720x1280",
+    lifecycle: "DEPRECATED",
+    shutdownDate: new Date("2026-09-24"),
+    replacementNote: "OpenAI ngừng phục vụ Sora API.",
+  } as ModelRegistry;
+
+  it("nêu tên TỪNG model bị chặn kèm lý do riêng, không chỉ cái đầu tiên", () => {
+    try {
+      routeScene(
+        [RETIRED, LOW_AUTO_MODEL],
+        lowAutoCtx({
+          availableProviders: ["mock", "openai"],
+          lowAuto: facts({ hasKeyframe: false }),
+        }),
+      );
+      throw new Error("đáng lẽ phải ném lỗi");
+    } catch (err) {
+      const msg = (err as Error).message;
+      // Both models named...
+      expect(msg).toContain("openai/sora-2:720x1280");
+      expect(msg).toContain("mock/granted");
+      // ...each with its OWN reason, not one reason borrowed for both.
+      expect(msg).toContain("NGỪNG DÙNG");
+      expect(msg).toContain("keyframe");
+    }
+  });
+
+  it("model bị TRẦN ĐỘ KHÓ loại vẫn phải được nêu tên", () => {
+    // These never reach the pin-only list at all: `isCapable` drops them
+    // earlier, so without explicit handling they vanish from the explanation -
+    // which is exactly how the hard ceiling did its job in silence while the
+    // error talked about something else.
+    const ceilinged = {
+      ...MID,
+      provider: "runway",
+      modelId: "h3_max:768x1280",
+      lifecycle: "LOW_AUTO",
+      reliability: "OK",
+      verification: "BENCHMARK_VERIFIED",
+    } as ModelRegistry;
+    try {
+      routeScene(
+        [ceilinged],
+        lowAutoCtx({ complexity: "MEDIUM", availableProviders: ["runway"] }),
+      );
+      throw new Error("đáng lẽ phải ném lỗi");
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain("runway/h3_max:768x1280");
+      expect(msg).toContain("vượt mức LOW");
+    }
+  });
+});

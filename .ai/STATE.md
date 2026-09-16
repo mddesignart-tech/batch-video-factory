@@ -1116,8 +1116,16 @@ QĐ-052.
   keyframe**. Ghim tay vẫn cho phép DEGRADED (QĐ-035/QĐ-056), nhưng cảnh này sẽ
   hỏng ở bước keyframe. Chưa đụng tới.
 - **Lô `11af6ba6`** vẫn `APPROVED`, còn **$0,458840**, `lowAutoApproved = false`.
-  Không cấp phép được cho LOW_AUTO nữa, nhưng vẫn cấp phép được cho các clip đã
-  nêu tên trong dự toán cũ. Nên đóng lại nếu không còn dùng.
+  **KHÔNG đóng** — đã kiểm tra và nó đang có dependency thật: batch ở trạng thái
+  `RUNNING`, dự án "Cold feet" ở `media_generating`, **5/6 cảnh còn `pending`**
+  và **6 job đang xếp hàng** (5 × `generate_scene_media` + 1 × `render_final`,
+  tạo lúc 2026-09-15T07:56, `JOB_WORKER_ENABLED=true`). Đóng quyền chi sẽ giết
+  một lô đang dở.
+
+  Rủi ro mà việc đóng lẽ ra để phòng **đã được xử lý bằng cấu trúc**: đã kiểm
+  chứng trực tiếp trên chính dòng production đó — request `lowAutoRouted: true`
+  bị ném `low_auto_not_approved` và **không giữ chỗ đồng nào** (reservation
+  3 → 3). Đường clip-đã-nêu-tên vẫn mở, đúng thứ lô đang dở cần.
 
 ### Công cụ
 

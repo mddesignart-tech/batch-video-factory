@@ -353,9 +353,23 @@ export function routeScene(
 
   const capable = models.filter((m) => isCapable(m, ctx));
   if (capable.length === 0) {
+    // Name the models and WHY each one was excluded. "No model meets the
+    // requirements" is true and useless: it describes a set by its emptiness
+    // and leaves the operator to rediscover, one at a time, which capability or
+    // measured limit ruled out which candidate. `explainIncapable` already
+    // exists for exactly this and was not being used here.
+    //
+    // Only models of the right TYPE are listed. A video route has no business
+    // explaining why the voice models did not qualify.
+    const sameType = models.filter((m) => m.type === ctx.type);
+    const why = sameType
+      .map((m) => `${m.provider}/${m.modelId}: ${explainIncapable(m, ctx)}`)
+      .join(" | ");
     throw new RoutingError(
-      `Không có mô hình ${ctx.type} nào đáp ứng yêu cầu của cảnh này ` +
-        `(${ctx.durationSeconds}s, ${ctx.characterCount} nhân vật).`,
+      sameType.length > 0
+        ? `Không mô hình ${ctx.type} nào dùng được cho cảnh này ` +
+          `(${ctx.durationSeconds}s, ${ctx.characterCount} nhân vật). ${why}`
+        : `Chưa có mô hình ${ctx.type} nào trong bảng Mô hình AI.`,
       "no_capable_models",
     );
   }
@@ -497,37 +511,79 @@ export function routeScene(
     // Do NOT fall through to the pin-only model. Silently spending on a
     // candidate that is under review is exactly what marking it was meant to
     // prevent - so name it and let a person decide.
-  const names = pinOnly
-      .map((m) => `${m.provider}/${m.modelId}${m.lifecycle ? ` (${m.lifecycle})` : ""}`)
-      .join(", ");
-    const first = pinOnly[0];
-    const why = first
-      ? autoRouteBlock(first)
-        ? `${first.provider}/${first.modelId}: ${autoRouteBlock(first)}. ` +
-          `${first.reliabilityNote || first.replacementNote}`.trimEnd()
-        : !isAutoRoutable(first.lifecycle, { complexity: ctx.complexity })
-        ? first.lifecycle === "DEPRECATED"
-          ? `${first.provider}/${first.modelId} đã bị đánh dấu NGỪNG DÙNG` +
-            (first.shutdownDate
-              ? ` (nhà cung cấp tắt ngày ${first.shutdownDate.toISOString().slice(0, 10)})`
+    //
+    // EVERY blocked model gets its OWN sentence. This used to take
+    // `pinOnly[0]`, which is the registry's arbitrary first row, and describe
+    // only that one: asking "why did h3_max not run?" on a MEDIUM scene
+    // answered with Sora-2's shutdown date, a model nobody had mentioned and
+    // which had nothing to do with the refusal. One reason for a list of
+    // candidates is one reason too few.
+    const why = (m: ModelRegistry): string => {
+      const auto = autoRouteBlock(m);
+      if (auto) return `${auto}. ${m.reliabilityNote || m.replacementNote}`.trimEnd();
+      if (!isAutoRoutable(m.lifecycle, { complexity: ctx.complexity })) {
+        if (m.lifecycle === "DEPRECATED") {
+          return (
+            `đã bị đánh dấu NGỪNG DÙNG` +
+            (m.shutdownDate
+              ? ` (nhà cung cấp tắt ngày ${m.shutdownDate.toISOString().slice(0, 10)})`
               : "") +
-            `. ${first.replacementNote}`.trimEnd()
-          : first.lifecycle === "LOW_AUTO"
-          ? `${first.provider}/${first.modelId} chỉ tự định tuyến cho cảnh LOW, ` +
-            `cảnh này là ${ctx.complexity}.`
-          : `${first.provider}/${first.modelId} chỉ được chọn tay.`
-        : // The low-auto gate is the last objection checked and the most
-          // specific, so it gets to speak for itself: "không đủ điều kiện" would
-          // hide which of eleven conditions failed, and the operator's next
-          // action depends entirely on which one it was.
-          (lowAutoWhy(first) ??
-            requiresExplicitPin(first.provider, first.modelId) ??
-            "")
-      : "";
+            `. ${m.replacementNote}`
+          ).trimEnd();
+        }
+        if (m.lifecycle === "LOW_AUTO") {
+          return `chỉ tự định tuyến cho cảnh LOW, cảnh này là ${ctx.complexity}`;
+        }
+        return "chỉ được chọn tay";
+      }
+      // The low-auto gate is the most specific objection, so it speaks for
+      // itself: "không đủ điều kiện" would hide which of eleven conditions
+      // failed, and the operator's next action depends entirely on which.
+      return lowAutoWhy(m) ?? requiresExplicitPin(m.provider, m.modelId) ?? "";
+    };
+
+    // Models excluded EARLIER, by a measured limit rather than by an operator's
+    // label. They never reach `pinOnly` because `isCapable` drops them, so
+    // without this they vanish from the explanation entirely - which is exactly
+    // what happened to h3_max on a MEDIUM scene: the hard ceiling did its job
+    // and then the error talked about something else.
+    const ruledOut =
+      ctx.type === "video"
+        ? models.filter(
+            (m) =>
+              m.enabled &&
+              m.type === ctx.type &&
+              ctx.availableProviders.includes(m.provider) &&
+              !capable.includes(m) &&
+              !checkSuitability({
+                provider: m.provider,
+                model: m.modelId,
+                complexity: ctx.complexity,
+                characterCount: ctx.characterCount,
+                sceneFlags: ctx.sceneFlags,
+              }).allowed,
+          )
+        : [];
+
+    const lines = [
+      ...pinOnly.map((m) => `${m.provider}/${m.modelId} (${m.lifecycle}): ${why(m)}`),
+      ...ruledOut.map(
+        (m) =>
+          `${m.provider}/${m.modelId}: ` +
+          checkSuitability({
+            provider: m.provider,
+            model: m.modelId,
+            complexity: ctx.complexity,
+            characterCount: ctx.characterCount,
+            sceneFlags: ctx.sceneFlags,
+          }).reason,
+      ),
+    ];
+
     throw new RoutingError(
-      pinOnly.length > 0
-        ? `Cảnh này chỉ còn ứng viên chưa được chốt: ${names}. ${why} ` +
-          `Hãy chọn thủ công nếu bạn đồng ý chi.`
+      lines.length > 0
+        ? `Không mô hình ${ctx.type} nào được phép tự định tuyến cho cảnh này. ` +
+          `${lines.join(" | ")} — hãy chọn thủ công nếu bạn đồng ý chi.`
         : `Không có mô hình ${ctx.type} nào đáp ứng yêu cầu của cảnh này ` +
           `(${ctx.durationSeconds}s, ${ctx.characterCount} nhân vật).`,
       pinOnly.length > 0 ? "needs_explicit_pin" : "no_capable_models",
