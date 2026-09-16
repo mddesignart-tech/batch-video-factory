@@ -1306,3 +1306,56 @@ chứng minh được gì.
 Kỳ vọng ban đầu của tôi cho A và E ghi là "cổng chặn" — sai, và test sẽ xanh
 trong khi mô tả một nhánh code chưa từng chạy. Ổ khoá ngoài luôn bắn trước; đó là
 thiết kế, nhưng phải viết đúng thì control mới có nghĩa.
+
+---
+
+## QĐ-059 — Bật LOW_AUTO cho h3_max, và cách chứng minh chỉ đúng một thứ đổi
+
+**2026-09-16.** Người dùng đồng ý bật sau khi đọc dry-run 12/12 và 9/9 negative
+control.
+
+```
+runway/h3_max:768x1280   LOW_AUTO_CANDIDATE -> LOW_AUTO
+```
+
+Chạy bằng `npm run lowauto:grant -- --apply`, tức đúng cơ chế đã xây, không phải
+một câu `UPDATE` viết tay. Script tự từ chối nếu model không ở trạng thái ứng
+viên, không `BENCHMARK_VERIFIED`, hoặc `reliability` khác `OK` — ba thứ mà bước
+duyệt lẽ ra phải xác lập.
+
+### Chụp ảnh trước/sau, không tin lời script
+
+Script nói nó đổi một trường. Điều đó **không** chứng minh nó chỉ đổi một trường.
+Nên trước khi chạy, toàn bộ 37 model và 23 cảnh được ghi ra JSON, và sau khi chạy
+được so từng trường:
+
+```
+model bị đổi : 1 / 37   (chỉ runway/h3_max:768x1280, chỉ trường lifecycle)
+scene bị đổi : 0 / 23
+ProviderJob  : 102 -> 102
+Reservation  : 3 -> 3
+CostEntry    : 120 -> 120
+ghim tay     : 6/6 giữ nguyên
+```
+
+Cách làm này đáng giữ cho mọi thay đổi registry về sau. Một script ghi DB và tự
+báo cáo thứ nó ghi là một nguồn duy nhất tự xác nhận chính mình; ảnh chụp
+trước/sau là nguồn thứ hai, và nó rẻ.
+
+### Quyền đã bật nhưng đang ngủ, và đó là chuyện bình thường
+
+Router tự chọn **0 cảnh**. Cả ba cảnh LOW còn muốn clip trả phí đều đang ghim
+tay, mà ghim tay thì short-circuit phần chấm điểm — theo đúng thiết kế.
+
+Đây **không** phải dấu hiệu bật hỏng. Nó là điều dry-run đã báo trước bằng
+`E = $0,000000`, và là lý do việc bật lần này không làm dịch chuyển một đồng nào.
+Quyền sẽ có tác dụng với **cảnh mới**, hoặc khi người dùng chủ động gỡ một ghim
+tay. Không gỡ hộ: ghim tay là một mệnh lệnh, và gỡ nó để cho quyền mới có việc
+làm là đúng kiểu tự ý đổi quyết định của người khác.
+
+### Ba lớp vẫn chặn, kiểm lại sau khi bật chứ không trước
+
+9/9 negative control chạy lại với `lifecycle = LOW_AUTO` **thật trong DB**, không
+phải giả lập trong bộ nhớ. Mỗi ca vẫn bị chặn đúng lớp và đúng lý do. Kiểm trước
+khi bật chứng minh mô phỏng đúng; kiểm sau khi bật chứng minh **production** đúng,
+và chỉ cái thứ hai mới là thứ đang chạy.

@@ -1056,10 +1056,16 @@ lại. Để quay về miễn phí: đặt lại `true`.
 
 ---
 
-## LOW_AUTO cho h3_max — kiến trúc đã xong, quyền CHƯA cấp — 2026-09-16
+## LOW_AUTO cho h3_max — ĐÃ BẬT — 2026-09-16
 
-`runway/h3_max:768x1280` vẫn ở **`LOW_AUTO_CANDIDATE`**. Không có dòng registry
-nào bị đổi. Thứ đã thay đổi là **bộ máy** quanh nó.
+`runway/h3_max:768x1280` đã chuyển **`LOW_AUTO_CANDIDATE` → `LOW_AUTO`** sau khi
+người dùng đồng ý. Đúng **một trường trên 37 model** thay đổi; **0/23 cảnh** bị
+đổi; cả **6 ghim tay giữ nguyên**; `ProviderJob` 102→102, `CostReservation` 3→3,
+`CostEntry` 120→120.
+
+Quyền này **chưa đổi lấy quyết định nào**: router tự chọn **0 cảnh**. Cả 3 cảnh
+LOW còn muốn clip trả phí đều đang ghim tay, và ghim tay thì short-circuit phần
+chấm điểm. Quyền chỉ có tác dụng với **cảnh mới hoặc cảnh không ghim tay**.
 
 ### Vì sao không thể chỉ đổi một cờ
 
@@ -1134,3 +1140,38 @@ npm run lowauto:dryrun     # mô phỏng, chỉ 1 GET miễn phí
 npm run runway:balance     # đọc lại số dư live
 npm run lowauto:grant      # thử khô; cần --apply mới ghi
 ```
+
+### Route thật của 23 cảnh sau khi bật
+
+| | |
+|---|---|
+| **auto h3_max** (router tự chọn) | **0** |
+| manual h3_max (ghim tay) | 2 — `4dd22035` #5, `71cd51f2` #1 |
+| LOCAL_MOTION ($0) | 6 |
+| bị chặn, không route được | 13 |
+| model trả phí khác (ghim tay) | 2 — `d9c9b991` gen4.5, `63acb558` gen4_turbo |
+| cảnh MEDIUM/HIGH | 16 |
+
+13 cảnh bị chặn là **trạng thái đúng**, không phải lỗi: MEDIUM/HIGH không còn
+provider nào được duyệt kể từ QĐ-028 (Sora DEPRECATED, gen4.5 PIN_ONLY,
+gen4_turbo DEGRADED), và LOW_AUTO cố ý không mở rộng sang đó.
+
+### Quyền chi cũ `11af6ba6` — vẫn mở, đã kiểm chứng ba đường
+
+```
+status APPROVED · trần $0,90 · đã chi $0,441160 · CÒN $0,458840
+lowAutoApproved = false · duyệt 2026-09-15 · chưa đóng
+providerScope ["groq","openai","runway"] · maxCostPerVideo $1,50
+```
+
+**Dependency đang giữ nó:** batch `RUNNING`, project `f2b68443` "Cold feet" ở
+`media_generating`, **5 cảnh còn `pending`**, **6 job đang xếp hàng**. Đóng sẽ
+giết một lô đang dở.
+
+**Lô mới có kế thừa được không?** Không. Đã thử thật: tạo một batch mới, gọi
+`assertBatchAuthorized` với `lowAutoRouted: true` → `no_authorization`. Quyền chi
+khoá theo `batchId`, nên một lô mới không tìm thấy gì cả — không phải tìm thấy
+cái "có" cũ. Batch probe đã xoá sạch sau khi thử.
+
+**Lô cũ có trả cho clip LOW_AUTO được không?** Không. `low_auto_not_approved`,
+reservation 3 → 3, không giữ chỗ đồng nào.
