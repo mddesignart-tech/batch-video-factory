@@ -110,6 +110,19 @@ export const MODEL_LIFECYCLES = [
    * the moment it was written would make the review it exists for impossible.
    */
   "LOW_AUTO_CANDIDATE",
+  /**
+   * Granted automatic routing for LOW scenes ONLY.
+   *
+   * The narrowest grant in this list, and the only one whose answer depends on
+   * the scene rather than on the model alone. `ACTIVE` would have been the easy
+   * way to express "the router may now pick h3_max", and it would have been
+   * wrong: nothing in this registry limits an ACTIVE model by complexity, so
+   * the same edit that let it take a one-character locked-camera LOW scene
+   * would have let it take a three-character HIGH action beat it has never been
+   * measured on. The grant has to carry its own limit or it is not the grant
+   * anyone reviewed.
+   */
+  "LOW_AUTO",
   /** The vendor is retiring it. Never auto-routed. */
   "DEPRECATED",
   /** Off entirely. */
@@ -117,8 +130,26 @@ export const MODEL_LIFECYCLES = [
 ] as const;
 export type ModelLifecycle = (typeof MODEL_LIFECYCLES)[number];
 
+/** What `isAutoRoutable` needs to know about the scene, when it needs anything. */
+export interface AutoRouteScope {
+  /**
+   * The scene's complexity, or null when the caller does not have one.
+   *
+   * Null is not a wildcard. A LOW_AUTO model asked "may you be auto-routed?"
+   * with no scene in hand gets NO, because the grant is conditional and an
+   * unanswered condition has not been met.
+   */
+  complexity?: Complexity | string | null;
+}
+
 /**
- * May the router pick this model on its own?
+ * May the router pick this model on its own, for THIS scene?
+ *
+ * The scene half of the signature is new, and it is the point. A function that
+ * reads only the lifecycle can answer for ACTIVE and PIN_ONLY, because those
+ * are properties of the model. It cannot answer for LOW_AUTO, which is a
+ * property of the pairing - and an earlier build that tried anyway had exactly
+ * one way to express the grant, `ACTIVE`, which silently granted every scene.
  *
  * Two different absences, deliberately treated differently:
  *
@@ -131,22 +162,37 @@ export type ModelLifecycle = (typeof MODEL_LIFECYCLES)[number];
  *                           unroutable at once, and the error said
  *                           "(undefined)".
  *
+ *                           It reads as ACTIVE and NEVER as LOW_AUTO. Inferring
+ *                           the conditional grant from an absent field would
+ *                           hand the narrowest permission in the system to
+ *                           every object that forgot to set one.
+ *
  *   an unrecognised string  BLOCKED. A value that is really there and is not
  *                           one we know is a state this build cannot reason
  *                           about, and guessing it is safe to spend on would be
  *                           the wrong way to be wrong.
+ *
+ * This is a NECESSARY condition, never a sufficient one. `lowAutoRouteBlock` in
+ * domain/low-auto holds the rest of the gate - keyframe, cast size, camera,
+ * budgets - and the router must pass both.
  */
-export function isAutoRoutable(lifecycle: string | null | undefined): boolean {
+export function isAutoRoutable(
+  lifecycle: string | null | undefined,
+  scope: AutoRouteScope = {},
+): boolean {
   if (lifecycle === null || lifecycle === undefined || lifecycle === "") {
     return true;
   }
-  return lifecycle === "ACTIVE";
+  if (lifecycle === "ACTIVE") return true;
+  if (lifecycle === "LOW_AUTO") return scope.complexity === "LOW";
+  return false;
 }
 
 export const VI_MODEL_LIFECYCLE: Record<ModelLifecycle, string> = {
   ACTIVE: "Đang dùng",
   PIN_ONLY: "Chỉ chọn tay",
   LOW_AUTO_CANDIDATE: "Ứng viên LOW — chờ duyệt, chưa tự định tuyến",
+  LOW_AUTO: "Tự định tuyến CHỈ cho cảnh LOW",
   DEPRECATED: "Sắp ngừng — không tự định tuyến",
   DISABLED: "Đã tắt",
 };

@@ -51,7 +51,8 @@ export class BatchAuthorizationError extends Error {
       | "over_video_budget"
       | "provider_out_of_scope"
       | "global_cap"
-      | "provider_wallet",
+      | "provider_wallet"
+      | "low_auto_not_approved",
   ) {
     super(message);
     this.name = "BatchAuthorizationError";
@@ -115,6 +116,16 @@ export async function approveAuthorization(opts: {
   batchId: string;
   authorizedMaxSpend: number;
   note?: string;
+  /**
+   * Does the operator also agree the ROUTER may choose models by itself here?
+   *
+   * A SEPARATE yes, defaulting to no. Approving a ceiling is agreeing to an
+   * amount; agreeing that a model may be picked automatically is agreeing to a
+   * mechanism, and folding the second into the first would mean nobody ever
+   * consciously granted it. Every approval signed before low-auto existed keeps
+   * the default and can never fund a router-chosen clip.
+   */
+  lowAutoApproved?: boolean;
 }): Promise<BatchAuthorization> {
   const auth = await prisma.batchAuthorization.findUnique({
     where: { batchId: opts.batchId },
@@ -151,6 +162,10 @@ export async function approveAuthorization(opts: {
       approvedAt: new Date(),
       closedAt: null,
       closedReason: "",
+      // Explicit every time. Not `?? auth.lowAutoApproved`: re-approving a batch
+      // is a fresh decision, and silently carrying the permission forward would
+      // let one deliberate yes become permanent.
+      lowAutoApproved: opts.lowAutoApproved === true,
       note: opts.note ?? auth.note,
     },
   });
@@ -160,6 +175,7 @@ export async function approveAuthorization(opts: {
     message:
       `Lô ${opts.batchId} được duyệt chi tối đa $${ceiling.toFixed(2)} cho ` +
       `${auth.videoCount} video (dự toán $${auth.estimatedCost.toFixed(4)}). ` +
+      `Router tự chọn model (LOW_AUTO): ${opts.lowAutoApproved === true ? "CÓ" : "KHÔNG"}. ` +
       `Nhà cung cấp trong phạm vi: ${parseJson<string[]>(auth.providerScopeJson, []).join(", ") || "không có"}.`,
   });
 
@@ -225,6 +241,14 @@ export interface BatchGateInput {
   estimatedCost: number;
   /** The same key used for the ProviderJob. Ties the reservation to the request. */
   idempotencyKey: string;
+  /**
+   * Did the ROUTER pick this model by itself under a LOW_AUTO grant?
+   *
+   * Defaults false, which is the shape of every call that existed before the
+   * grant did. When true the approval must say, in its own row, that it covers
+   * router-chosen clips - see `lowAutoApproved`.
+   */
+  lowAutoRouted?: boolean;
 }
 
 export interface BatchGateResult {
@@ -241,6 +265,7 @@ export interface BatchGateResult {
  *
  *   1. is there an approval at all, and is it still APPROVED?
  *   2. does this request belong to the batch that was approved?
+ *   2b. if the ROUTER chose this model itself, does the approval cover that?
  *   3. would it push the batch past its authorised ceiling?
  *   4. would it push THIS VIDEO past the per-video ceiling?
  *   5. is the provider inside the approved scope?
@@ -274,13 +299,42 @@ export async function assertBatchAuthorized(
     );
   }
 
-  // 2 - this request belongs to the approved batch. The authorisation is keyed
-  // by batchId, so a mismatch means the caller passed a batch it does not
-  // belong to - which is how one batch's approval would pay for another's work.
+  // 2 - this request belongs to the approved batch.
+  //
+  // This check reads as a tautology and very nearly is one: `auth` was just
+  // fetched BY `input.batchId`, so the two can never differ. It is kept because
+  // it is free and because the day someone changes the lookup - to "the newest
+  // approved authorisation", say - it becomes the thing that catches it. What
+  // it does NOT do is protect against a stale approval on the SAME batch, which
+  // is a different problem and is what 2b is for.
   if (auth.batchId !== input.batchId) {
     throw new BatchAuthorizationError(
       `Request thuộc lô ${input.batchId} nhưng quyền chi được cấp cho lô ${auth.batchId}.`,
       "wrong_batch",
+    );
+  }
+
+  // 2b - an approval covers the PLAN it was shown, not every future way of
+  // choosing a model.
+  //
+  // The concrete case this exists for: batch 11af6ba6 was approved on
+  // 2026-09-15 with a $0.90 ceiling against a plan of one named video, spent
+  // $0.44, and stayed APPROVED with $0.46 of headroom and a project still
+  // pointing at it. Switching on LOW_AUTO afterwards would have let the router
+  // pick a clip nobody had seen when they approved, and pay for it out of that
+  // leftover. The operator agreed to a bill, not to a mechanism.
+  //
+  // So the permission is explicit and per-authorisation. An approval predating
+  // the feature has `lowAutoApproved = false` from the column default and can
+  // never fund a router-chosen clip, no matter how much money is left in it.
+  if (input.lowAutoRouted && !auth.lowAutoApproved) {
+    throw new BatchAuthorizationError(
+      `Clip này do router TỰ CHỌN theo LOW_AUTO, nhưng quyền chi của lô ` +
+        `${input.batchId} được duyệt lúc ` +
+        `${auth.approvedAt ? auth.approvedAt.toISOString().slice(0, 10) : "?"} ` +
+        `chỉ bao gồm các clip đã nêu tên trong dự toán. Hãy lập dự toán mới và ` +
+        `duyệt lại nếu bạn đồng ý cho router tự chọn model.`,
+      "low_auto_not_approved",
     );
   }
 

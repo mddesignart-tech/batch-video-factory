@@ -983,3 +983,272 @@ gặp điều kiện tiếp theo là trải nghiệm tệ hơn hẳn việc đư
 lần BAD_OUTPUT, `gen4.5` PIN_ONLY, Sora DEPRECATED — mỗi cái có một lý do đã
 được viết xuống. Âm thầm chọn một trong số đó để cứu một cảnh là huỷ cả ba quyết
 định cùng lúc, lặng lẽ, đúng lúc không ai nhìn.
+
+---
+
+## QĐ-049 — `LOW_AUTO` là một vòng đời riêng, không phải `ACTIVE`
+
+**2026-09-16.**
+
+Cách dễ nhất để "bật LOW_AUTO" là đổi `lifecycle` sang `ACTIVE`, và nó sai.
+
+Không có gì trong registry giới hạn một model `ACTIVE` theo độ khó. Trần duy
+nhất là `MAX_COMPLEXITY` trong `domain/video-suitability`, và bảng đó lúc ấy chỉ
+có một dòng cho `gen4_turbo`. Nên cùng một thao tác cho phép `h3_max` nhận cảnh
+LOW một nhân vật camera khoá **cũng** cho nó nhận cảnh HIGH ba nhân vật mà nó
+chưa từng được đo.
+
+Dry-run trên registry giả lập `ACTIVE` cho thấy chính xác điều đó: **6 cảnh
+MEDIUM/HIGH, tất cả 3 nhân vật, tất cả không có keyframe**, rơi vào `h3_max`.
+
+Vậy quyền phải tự mang theo giới hạn của nó, nếu không nó không còn là cái quyền
+mà người duyệt đã đọc:
+
+```
+ACTIVE              router tự chọn, mọi độ khó
+PIN_ONLY            chỉ chọn tay
+LOW_AUTO_CANDIDATE  đã có bằng chứng, CHƯA được cấp
+LOW_AUTO            router tự chọn CHỈ cho cảnh LOW
+DEPRECATED/DISABLED không bao giờ
+```
+
+`isAutoRoutable()` vì thế nhận thêm tham số cảnh. Nó trả lời được cho `ACTIVE` và
+`PIN_ONLY` chỉ bằng lifecycle, vì đó là thuộc tính của model. Nó **không** trả
+lời được cho `LOW_AUTO`, vì đó là thuộc tính của **cặp** model–cảnh.
+
+Không biết độ khó thì trả `false`. Một quyền có điều kiện mà điều kiện chưa ai
+kiểm thì chưa được thoả mãn. `null`/`undefined`/`""` vẫn đọc là `ACTIVE` (cột có
+default `ACTIVE`, giá trị trống chỉ đến từ fixture) và **không bao giờ** đọc
+thành `LOW_AUTO` — suy ra quyền hẹp nhất hệ thống từ một trường bị bỏ trống là
+cách trao nó cho mọi object quên set.
+
+---
+
+## QĐ-050 — Cổng `lowAutoEligibility` từng tồn tại mà không ai gọi
+
+**2026-09-16.**
+
+`lowAutoEligibility()` có 11 điều kiện, 17 test, và **không được production gọi
+lần nào**. `grep` toàn bộ `src/`: chỉ xuất hiện trong chính nó, trong script
+dry-run, và trong file test của nó. `routeScene()` — nơi thật sự tiêu tiền — có
+đúng một cần gạt là `isAutoRoutable`, và cần gạt đó chỉ biết nói `ACTIVE`.
+
+Nghĩa là mọi điều kiện trong cổng, xét ở production, **chỉ là trang trí**.
+
+Điều này đáng ghi lại vì nó không giống một bug. Code đúng, test xanh, tài liệu
+mô tả hành vi đúng. Thứ thiếu là một lời gọi. 824 test xanh trong khi dry-run
+hỏng 7/10 chính là hình dạng của lỗi này: test chứng minh hàm chặn đúng *khi
+được gọi*; không có gì chứng minh nó *được* gọi.
+
+Đã sửa: `lowAutoRouteBlock()` đứng cạnh `autoRouteBlock()` và
+`requiresExplicitPin()` trong bộ lọc của router — ba phản đối, cùng một hình
+dạng `string | null`, cùng một danh sách.
+
+**Fail closed.** Router gọi `routeScene` cho video mà không kèm dữ liệu cảnh thì
+ứng viên `LOW_AUTO` bị từ chối, không phải được cho qua. Dữ liệu vắng mặt không
+phải dữ liệu thuận lợi.
+
+---
+
+## QĐ-051 — Trần độ khó là ổ khoá thứ ba, độc lập
+
+**2026-09-16.**
+
+`"runway/h3_max": "LOW"` vào `MAX_COMPLEXITY`, và `"runway/h3_max": 2` vào
+`MAX_CHARACTERS`.
+
+Không phải vì lifecycle và cổng chưa đủ, mà vì cả hai **có thể sai**. Ba ổ khoá
+độc lập trên cùng một cánh cửa: một bug ở bất kỳ ổ nào vẫn để cảnh MEDIUM không
+với tới được model này.
+
+Nó ràng buộc **cả ghim tay**, theo đúng hợp đồng sẵn có của bảng này (trạng thái
+mềm hơn, không ràng buộc ghim tay, là `NEEDS_EXPLICIT_PIN`). "Chưa từng đo" không
+phải một sở thích mà người dùng gõ tên model để bác bỏ được.
+
+Hệ quả cụ thể và đã lường trước: cảnh 6 "Spill the beans" (MEDIUM, 2 nhân vật)
+đang ghim `h3_max` và **giờ bị từ chối rõ ràng** thay vì bị tính tiền lặng lẽ.
+
+---
+
+## QĐ-052 — Khi `motionSource` lưu và `decideMotion` bất đồng: **miễn phí thắng**
+
+**2026-09-16.**
+
+Bốn cảnh lưu `AI_VIDEO` trong khi luật hiện tại nói `LOCAL_MOTION`. Pipeline đọc
+trường đã lưu nên vẫn mua clip cho cả bốn.
+
+Cả hai nguồn đều chính đáng, không cái nào là "sự thật":
+
+- **lưu** — thứ người duyệt đã nhìn và đã duyệt. Pipeline đọc nó có chủ đích, để
+  một lần sửa registry giữa lúc duyệt và lúc chạy không làm tiền dịch chuyển.
+- **tươi** — `decideMotion` nói gì về cảnh **hiện tại**, sau phân loại lại.
+
+"Mới nhất thắng" cho phép một lần phân loại lại **bắt đầu** tiêu tiền. "Lưu
+thắng" cứ trả tiền cho quyết định mà luật đã đảo ngược. Nên luật theo **hướng**
+chứ không theo thời gian:
+
+```
+MIỄN PHÍ THẮNG     một bên nói LOCAL_MOTION là xong
+TRẢ PHÍ CẦN CẢ HAI AI_VIDEO chỉ khi hai bên đồng thuận
+```
+
+Đi từ trả phí sang miễn phí không cần ai duyệt: tiền không tiêu thì không làm ai
+bất ngờ. Chiều ngược lại bị từ chối.
+
+**Ngoại lệ: ghim tay.** Người đã nêu tên *cả provider lẫn model* là đã quyết định
+mua một clip. Đó là một mệnh lệnh, không phải một mặc định để classifier bác bỏ.
+Bỏ qua nó là đúng kiểu âm thầm đè quyết định, chỉ theo chiều ngược lại.
+
+**Không sửa DB hàng loạt.** Bất đồng được log ở mức WARN
+(`scene.motion_source_diverged`) trước khi sinh bất cứ thứ gì. Cập nhật hàng loạt
+sẽ xoá đúng bằng chứng cho thấy hai nguồn từng bất đồng — thứ duy nhất cho phép
+ai đó biết vì sao.
+
+---
+
+## QĐ-053 — Keyframe: thiếu ở đâu mới là lỗi
+
+**2026-09-16.**
+
+`h3_max` là image-to-video. Nhưng "chưa có keyframe" mang hai nghĩa khác hẳn
+nhau tuỳ chỗ hỏi:
+
+- **PLANNING** (trước bước tạo ảnh) — chưa có file là **bình thường**. Từ chối ở
+  đây là kết án mọi dự án đúng lúc mọi dự án đều giống nhau.
+- **VIDEO** (trước khi gọi Video AI) — chưa có file là **lỗi thật**. Đây là chỗ
+  tiền dịch chuyển, và "lát nữa sẽ có" không phải một file.
+
+Hai mã riêng: `keyframe_pending` và `needs_keyframe`. Cả hai đều chặn; chúng khác
+nhau ở chỗ người vận hành nên làm gì. Báo "cảnh này không bao giờ chạy được" khi
+câu trả lời đúng là "hãy tạo ảnh trước" sẽ khiến ai đó đi viết lại một cảnh vốn
+không sai.
+
+`pendingOnly` chỉ đúng khi keyframe là lý do **duy nhất** — có lý do thứ hai
+nghĩa là cảnh có vấn đề thật và cái keyframe đang chờ không phải câu chuyện
+chính. Thiếu `stage` thì hiểu là `VIDEO`: mặc định nghiêm hơn.
+
+---
+
+## QĐ-054 — Số dư `LIVE`, `CACHE`, `DECLARED` — và mặc định là 0
+
+**2026-09-16.**
+
+Setting ghi Runway có **975 credit**. `GET /organization` trả **671**. Lệch
+**$3,04**, và mọi câu hỏi ngân sách trong app đều được trả lời bằng số 975 vì
+không có gì ghi lại rằng đó chỉ là một *lời khai*.
+
+Sổ nội bộ thì đúng: `CostEntry` runway $3,29 = 329 credit, và 1000 − 329 = 671.
+Chỉ riêng con số ví là cũ.
+
+Ba nguồn gốc, ghi lại chứ không suy diễn:
+
+| | nghĩa |
+|---|---|
+| `LIVE` | vừa đọc từ hãng, kèm `checkedAt`. Là nguồn có thẩm quyền. |
+| `CACHE` | bản sao của lần đọc LIVE gần nhất, **phải hiện kèm tuổi**. |
+| `DECLARED` | người gõ vào. Mọi số của OpenAI đều thế — API key không đọc được số dư. |
+
+`LIVE` **thoái hoá thành `CACHE` khi đọc ra khỏi SQLite**. Một dòng đã lưu chỉ
+có thể là *bản sao* của một lần đọc, không bao giờ là chính lần đọc đó: tới lúc
+đọc ngược ra, thời gian đã trôi và hãng có thể đã trừ tiền. Chỉ
+`refreshRunwayBalance()` đúc ra `LIVE`.
+
+**Default của ví Runway đổi từ 975 xuống 0.** Trước khi hỏi hãng, câu trả lời
+trung thực là "không biết", chứ không phải một con số chép lại từ phiên làm việc
+đã kết thúc. 0 sẽ chặn mọi việc trả phí cho tới khi đọc live thành công — đó là
+chế độ hỏng có chủ đích: từ chối chi vì chưa biết số dư thì cứu được, chi dựa
+trên số dư sai thì không.
+
+Chỉ ghi khi **đọc thành công**. Một số cũ không bao giờ được đè lên một số mới
+hơn — đó chính là cách 975 sống lâu hơn sự thật 304 credit.
+
+Luật quy đổi ghi thành hằng số có tên: `USD_PER_RUNWAY_CREDIT = 0.01`, tức **100
+credit = $1**. Nó là một **giả định**, không phải phép toán, và đã được đối chiếu
+với một hoá đơn thật (clip cảnh 5: 25 credit cho 5 giây, hiện $0,25).
+
+---
+
+## QĐ-055 — Quyền chi cũ không tự động bao gồm một cơ chế mới
+
+**2026-09-16.**
+
+Lô `11af6ba6` được duyệt 2026-09-15: trần $0,90, dự toán một video đã nêu tên,
+đã chi $0,441160, vẫn `APPROVED`, **còn $0,458840**, và dự án "Cold feet" vẫn trỏ
+vào nó. Vừa đủ cho một clip `h3_max` $0,40.
+
+Bật LOW_AUTO sau đó sẽ để router chọn một clip mà lúc duyệt không ai nhìn thấy,
+rồi trả bằng phần thừa đó. **Người duyệt đã đồng ý một số tiền, không đồng ý một
+cơ chế.**
+
+Cột `lowAutoApproved` mặc định `false`. Mọi quyền chi ký trước khi LOW_AUTO tồn
+tại giữ mặc định đó và **không bao giờ** trả được cho clip do router tự chọn, dù
+còn bao nhiêu tiền.
+
+Duyệt lại cũng **mất** quyền đó nếu không nhắc lại: `lowAutoApproved:
+opts.lowAutoApproved === true`, không phải `?? auth.lowAutoApproved`. Duyệt lại
+là một quyết định mới; mang quyền cũ đi theo sẽ biến một lần "có" thành vĩnh
+viễn.
+
+Nhân tiện: kiểm tra `wrong_batch` ở bước 2 **không thể nào kích hoạt** — `auth`
+vừa được tìm *bằng* `input.batchId`. Giữ lại vì nó miễn phí và sẽ bắt được lỗi
+nếu có ai đổi cách tra cứu. Nhưng nó **không** bảo vệ trước một quyền cũ trên
+*cùng* một lô — đó là việc của bước 2b.
+
+---
+
+## QĐ-056 — Ghim tay đè được **nhãn**, không đè được **ngày**
+
+**2026-09-16.**
+
+Ghim tay bác bỏ **phán đoán** của router — model nào đáng tiền nhất cho cảnh này
+— và không bác bỏ gì khác. Nhưng "không bác bỏ gì khác" hoá ra cần vạch ranh
+giới cho chính xác, vì lần đầu tôi vạch sai và làm hỏng hai test đã có.
+
+Lần sửa đầu chặn luôn mọi `DEPRECATED`. Nó mâu thuẫn trực tiếp với **QĐ-028**:
+
+> *Chọn tay vẫn tới được. Deprecate là chặn **router** chọn, không chặn **người**
+> chọn. Xoá hẳn đường đó sẽ biến một quyết định có ý thức thành chuyện bất khả
+> thi.*
+
+Ranh giới đúng đã có sẵn trong **QĐ-038**: *"Nhãn chỉ mới bằng lần cuối có người
+sửa nó; **ngày là sự thật**."*
+
+| | ghim tay | vì sao |
+|---|---|---|
+| `shutdownDate` đã qua | **chặn** | model đã tắt thật. Request bị mua rồi mới bị từ chối. |
+| `DISABLED` | **chặn** | người vận hành đã tắt nó ở đây. Bật lại rồi hẵng dùng. |
+| `enabled = false`, provider offline | chặn (sẵn có) | `isCapable` bắt từ trước, chưa tới nhánh này |
+| `DEPRECATED`, ngày còn ở tương lai | **cho qua, kèm cảnh báo** | hôm nay nó vẫn chạy. QĐ-028. |
+| `reliability = DEGRADED` | **cho qua** | QĐ-035: model bị hạ cấp mà không ghim tay được thì bị hạ cấp vĩnh viễn |
+
+Yêu cầu là *"không được **tự động** bypass"* và *"trả cảnh báo rõ"*. Hai điều đó
+được thoả bằng cách **nói ra**, không phải bằng cách từ chối: cảnh báo đi trong
+`decision.reason` — nơi người vận hành thật sự đọc — kèm ngày tắt và
+`replacementNote`.
+
+Bài học lặp lại của dự án này: `isCapable` chưa bao giờ nhìn `lifecycle`. Mỗi lần
+thêm một trục mới (`lifecycle`, rồi `reliability`, giờ là `LOW_AUTO`), câu hỏi
+phải hỏi là *"đường ghim tay có đi vòng qua trục này không?"* — và mặc định câu
+trả lời là **có**, cho tới khi kiểm tra.
+
+---
+
+## QĐ-057 — Hai cơ sở chi phí, không bao giờ so với nhau
+
+**2026-09-16.**
+
+Báo cáo trước so `$4,73` với `$2,646080` rồi kết luận "vượt hạn mức". **Sai cơ
+sở.** $4,73 là tổng chi phí video của cả bốn dự án, gồm cả những clip đã ghim tay
+từ trước và không liên quan gì tới LOW_AUTO. $2,646080 là tiền còn lại.
+
+Công thức đúng:
+
+```
+additionalRequired = estimatedNewSpend - alreadyCommittedForThisRun
+so additionalRequired với remainingGlobalBudget
+```
+
+Dry-run giờ in rời từng số kèm cơ sở của nó (A…I), và chỉ mang **E = phát sinh
+mới** ra so với **C = hạn mức còn lại**. So D với C là trả lời một câu hỏi không
+ai hỏi, và đọc lên thì giống một phán quyết về cái quyền trong khi nó là phán
+quyết về cái dự án.

@@ -28,8 +28,11 @@ function input(over: Partial<LowAutoInput> = {}): LowAutoInput {
     hasKeyframe: true,
     cameraMode: "LOCKED_CAMERA",
     repeatedSmallObjects: false,
-    modelLifecycle: "LOW_AUTO_CANDIDATE",
+    // LOW_AUTO, not LOW_AUTO_CANDIDATE. The gate now demands the GRANT, and the
+    // candidate state is tested below for the refusal it is supposed to produce.
+    modelLifecycle: "LOW_AUTO",
     modelReliability: "OK",
+    modelVerification: "BENCHMARK_VERIFIED",
     promptGuarded: true,
     contradictions: [],
     estimatedCost: 0.4,
@@ -49,6 +52,7 @@ describe("LOW_AUTO_CANDIDATE là đề cử, KHÔNG phải đã bật", () => {
     // The whole point of the state. A candidate that started routing the moment
     // it was recorded would make the review it exists for impossible.
     expect(isAutoRoutable("LOW_AUTO_CANDIDATE")).toBe(false);
+    expect(isAutoRoutable("LOW_AUTO_CANDIDATE", { complexity: "LOW" })).toBe(false);
     const block = autoRouteBlock({
       lifecycle: "LOW_AUTO_CANDIDATE",
       reliability: "OK",
@@ -56,6 +60,50 @@ describe("LOW_AUTO_CANDIDATE là đề cử, KHÔNG phải đã bật", () => {
     });
     expect(block).not.toBeNull();
     expect(block).toContain("CHƯA được bật");
+  });
+
+  it("cổng cũng từ chối ứng viên, không chỉ riêng isAutoRoutable", () => {
+    // Belt and braces, and the braces are the point: an earlier gate accepted
+    // LOW_AUTO_CANDIDATE because it only excluded DEPRECATED and DISABLED, so
+    // the one state meaning "not granted yet" read as granted.
+    const v = lowAutoEligibility(input({ modelLifecycle: "LOW_AUTO_CANDIDATE" }));
+    expect(v.eligible).toBe(false);
+    expect(v.blockers.map((b) => b.code)).toContain("model_lifecycle");
+  });
+});
+
+describe("LOW_AUTO chỉ áp cho cảnh LOW", () => {
+  it("LOW thì được, MEDIUM và HIGH thì không", () => {
+    expect(isAutoRoutable("LOW_AUTO", { complexity: "LOW" })).toBe(true);
+    expect(isAutoRoutable("LOW_AUTO", { complexity: "MEDIUM" })).toBe(false);
+    expect(isAutoRoutable("LOW_AUTO", { complexity: "HIGH" })).toBe(false);
+  });
+
+  it("không biết độ khó thì KHÔNG cho, vì điều kiện chưa được kiểm", () => {
+    // A conditional grant with the condition unevaluated has not been met.
+    expect(isAutoRoutable("LOW_AUTO")).toBe(false);
+    expect(isAutoRoutable("LOW_AUTO", { complexity: null })).toBe(false);
+    expect(isAutoRoutable("LOW_AUTO", { complexity: "" })).toBe(false);
+  });
+
+  it("lifecycle trống nghĩa là ACTIVE, KHÔNG phải LOW_AUTO", () => {
+    // An absent field must never be read as the narrowest grant in the system.
+    // ACTIVE is the column default, so absence means a fixture forgot to set it.
+    for (const absent of [null, undefined, ""]) {
+      expect(isAutoRoutable(absent, { complexity: "HIGH" })).toBe(true);
+    }
+  });
+
+  it("chuỗi lạ thì chặn, ở mọi độ khó", () => {
+    for (const weird of ["low_auto", "LOW-AUTO", "ENABLED", "yes"]) {
+      expect(isAutoRoutable(weird, { complexity: "LOW" })).toBe(false);
+      expect(isAutoRoutable(weird)).toBe(false);
+    }
+  });
+
+  it("LOW_AUTO nằm trong enum và có nhãn tiếng Việt", () => {
+    expect(MODEL_LIFECYCLES).toContain("LOW_AUTO");
+    expect(VI_MODEL_LIFECYCLE.LOW_AUTO).toBeTruthy();
   });
 });
 
@@ -134,6 +182,71 @@ describe("điều kiện đủ", () => {
     // every externally-metered provider forever.
     const v = lowAutoEligibility(input({ providerBudgetRemaining: null }));
     expect(v.eligible).toBe(true);
+  });
+
+  it("vượt trần mỗi video -> chặn", () => {
+    // A third ceiling, independent of the other two: the global cap protects
+    // the project, the wallet protects the vendor account, and this one stops
+    // a single scene eating an approval meant to cover several.
+    const v = lowAutoEligibility(input({ perVideoCapRemaining: 0.1 }));
+    expect(v.blockers.map((b) => b.code)).toContain("over_per_video_cap");
+    expect(lowAutoEligibility(input({ perVideoCapRemaining: null })).eligible).toBe(true);
+  });
+
+  it("model chưa BENCHMARK_VERIFIED -> chặn", () => {
+    const v = lowAutoEligibility(input({ modelVerification: "UNVERIFIED" }));
+    expect(v.blockers.map((b) => b.code)).toContain("not_benchmark_verified");
+  });
+
+  it("cảnh LOCAL_MOTION -> chặn, không có gì để mua", () => {
+    const v = lowAutoEligibility(input({ motionSource: "LOCAL_MOTION" }));
+    expect(v.blockers.map((b) => b.code)).toContain("local_motion");
+  });
+
+  it("đã ghim tay model khác -> low-auto không chen vào", () => {
+    const v = lowAutoEligibility(input({ manualPinElsewhere: true }));
+    expect(v.blockers.map((b) => b.code)).toContain("manual_pin_elsewhere");
+  });
+});
+
+describe("keyframe: đúng giai đoạn mới là lỗi", () => {
+  it("trước bước tạo ảnh, thiếu keyframe là CHỜ chứ không phải hỏng", () => {
+    // Refusing here would condemn every project at the one moment when every
+    // project looks the same - before any image has been generated.
+    const v = lowAutoEligibility(input({ hasKeyframe: false, stage: "PLANNING" }));
+    expect(v.eligible).toBe(false);
+    expect(v.pendingOnly).toBe(true);
+    expect(v.blockers.map((b) => b.code)).toContain("keyframe_pending");
+    expect(v.blockers.map((b) => b.code)).not.toContain("needs_keyframe");
+  });
+
+  it("tới bước gọi Video AI, thiếu keyframe là hỏng thật", () => {
+    // This is where money moves, and "it will be there later" is not a file.
+    const v = lowAutoEligibility(input({ hasKeyframe: false, stage: "VIDEO" }));
+    expect(v.eligible).toBe(false);
+    expect(v.pendingOnly).toBe(false);
+    expect(v.blockers.map((b) => b.code)).toContain("needs_keyframe");
+  });
+
+  it("thiếu stage thì hiểu là VIDEO — mặc định nghiêm hơn", () => {
+    const v = lowAutoEligibility(input({ hasKeyframe: false }));
+    expect(v.blockers.map((b) => b.code)).toContain("needs_keyframe");
+  });
+
+  it("pendingOnly chỉ đúng khi keyframe là lý do DUY NHẤT", () => {
+    // A second blocker means the scene has a real problem and the pending
+    // still is not the story.
+    const v = lowAutoEligibility(
+      input({ hasKeyframe: false, stage: "PLANNING", characterCount: 5 }),
+    );
+    expect(v.pendingOnly).toBe(false);
+  });
+
+  it("cả hai mã keyframe đều dẫn về NEEDS_KEYFRAME", () => {
+    for (const stage of ["PLANNING", "VIDEO"] as const) {
+      const v = lowAutoEligibility(input({ hasKeyframe: false, stage }));
+      expect(lowAutoFallback(v, { localMotionAllowed: false })).toBe("NEEDS_KEYFRAME");
+    }
   });
 
   it("liệt kê MỌI lý do chặn, không dừng ở cái đầu tiên", () => {

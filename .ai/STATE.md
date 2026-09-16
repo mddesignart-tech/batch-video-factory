@@ -30,9 +30,14 @@ Ví **tách riêng từng nhà cung cấp, không bao giờ cộng chung**:
 
 | Ví | Đã chi | Số gọi | Số dư |
 |---|---|---|---|
-| openai | $2,035066 | 43 | $6,00 — **khai báo**, không phải live |
-| runway | $1,690000 | 3 | 831 credit — live, đọc từ `GET /organization` |
+| openai | $2,035066 | 43 | $6,00 — **khai báo**, API key không đọc được số dư |
+| runway | $3,290000 | 7 | **671 credit = $6,71** — LIVE, đọc 2026-09-16 |
 | groq | $0,028854 | 24 | external, nhà cung cấp tự quản |
+
+Sổ runway khớp tuyệt đối với hãng: $3,29 = 329 credit, 1000 − 329 = **671**.
+Setting trước đó ghi 975 credit — lệch $3,04 và đã được sửa bằng số đọc live.
+Mặc định của ví runway giờ là **0**, không phải một con số chép lại: trước khi
+hỏi hãng, câu trả lời trung thực là "không biết". Xem QĐ-054.
 
 Có **hai** cơ chế cấp phép, và mỗi request trả phí phải có đúng một trong hai:
 
@@ -1048,3 +1053,76 @@ lại. Để quay về miễn phí: đặt lại `true`.
 > Trước khi thêm model mới, bấm **"Hỏi nhà cung cấp"** trong trang Nhà cung cấp
 > AI để lấy tên model đang thực sự khả dụng — Groq đã gỡ một model mà chúng ta
 > seed sẵn, và đó là nguyên nhân lỗi 404 ở lần chạy thật đầu tiên.
+
+---
+
+## LOW_AUTO cho h3_max — kiến trúc đã xong, quyền CHƯA cấp — 2026-09-16
+
+`runway/h3_max:768x1280` vẫn ở **`LOW_AUTO_CANDIDATE`**. Không có dòng registry
+nào bị đổi. Thứ đã thay đổi là **bộ máy** quanh nó.
+
+### Vì sao không thể chỉ đổi một cờ
+
+Trước đây "bật LOW_AUTO" chỉ có đúng một cách: đổi `lifecycle` thành `ACTIVE`.
+Dry-run trên registry giả lập `ACTIVE` cho kết quả **6 cảnh MEDIUM/HIGH — tất cả
+3 nhân vật, tất cả không keyframe — rơi vào h3_max**. Không có gì chặn, vì
+`MAX_COMPLEXITY` chưa có dòng nào cho model này và cổng 11 điều kiện thì
+**production chưa từng gọi**.
+
+### Bốn ổ khoá độc lập, hiện đã có đủ
+
+| Lớp | Ở đâu | Chặn gì |
+|---|---|---|
+| Vòng đời | `domain/enums` → `isAutoRoutable(lifecycle, {complexity})` | `LOW_AUTO` chỉ đúng khi `complexity === "LOW"`; không biết độ khó thì `false` |
+| Cổng cảnh | `domain/low-auto` → `lowAutoRouteBlock()` | keyframe thật, ≤2 nhân vật, camera khoá, không vật nhỏ dày đặc, prompt sạch, 3 loại ngân sách |
+| Trần cứng | `domain/video-suitability` → `MAX_COMPLEXITY` / `MAX_CHARACTERS` | MEDIUM/HIGH và >2 nhân vật, **kể cả ghim tay** |
+| Quyền chi | `services/batch-authorization` → `lowAutoApproved` | quyền chi cũ không trả được cho clip router tự chọn |
+
+Cổng giờ **thật sự được gọi**: `lowAutoRouteBlock()` nằm trong bộ lọc ứng viên
+của `routeScene()`, cạnh `autoRouteBlock()` và `requiresExplicitPin()`.
+
+### Dry-run sau khi sửa: 12/12 ĐẠT
+
+```
+MEDIUM -> h3_max                0 cảnh
+HIGH -> h3_max                  0 cảnh
+>2 nhân vật -> h3_max           0 cảnh
+thiếu keyframe -> h3_max        0 cảnh
+LOCAL_MOTION -> trả phí         0 cảnh
+DIRECTED_CAMERA -> h3_max       0 cảnh
+mâu thuẫn benchmark             0
+phát sinh mới (E)               $0,000000
+```
+
+**Kết luận: SAFE TO ENABLE — nhưng quyền hiện chưa có tác dụng gì.** Cả 2 cảnh
+chạy `h3_max` đều do **ghim tay**, router tự chọn **0 cảnh**. 4 cảnh LOW còn lại
+là LOCAL_MOTION, 1 cảnh thiếu keyframe. Cấp quyền hôm nay không đổi lấy một
+quyết định nào.
+
+### Bốn cảnh `motionSource` bất đồng
+
+`5c698155`, `0cc1d8cf` → thành **LOCAL_MOTION** (miễn phí thắng).
+`4dd22035`, `8453fa52` → giữ **AI_VIDEO** vì đã **ghim tay** h3_max.
+
+Không sửa DB. Bất đồng được log `scene.motion_source_diverged` mức WARN. Xem
+QĐ-052.
+
+### Còn treo, cố ý
+
+- **`8453fa52`** (Spill the beans #6, MEDIUM, ghim h3_max) **giờ bị từ chối** vì
+  trần độ khó. Đây là hệ quả đã lường trước của QĐ-051 — cần gỡ ghim hoặc hạ
+  phân loại cảnh, không phải nới trần.
+- **`63acb558`** (Cold feet #4) ghim `gen4_turbo` đang `DEGRADED` và **không có
+  keyframe**. Ghim tay vẫn cho phép DEGRADED (QĐ-035/QĐ-056), nhưng cảnh này sẽ
+  hỏng ở bước keyframe. Chưa đụng tới.
+- **Lô `11af6ba6`** vẫn `APPROVED`, còn **$0,458840**, `lowAutoApproved = false`.
+  Không cấp phép được cho LOW_AUTO nữa, nhưng vẫn cấp phép được cho các clip đã
+  nêu tên trong dự toán cũ. Nên đóng lại nếu không còn dùng.
+
+### Công cụ
+
+```bash
+npm run lowauto:dryrun     # mô phỏng, chỉ 1 GET miễn phí
+npm run runway:balance     # đọc lại số dư live
+npm run lowauto:grant      # thử khô; cần --apply mới ghi
+```

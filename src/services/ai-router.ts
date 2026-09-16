@@ -7,6 +7,7 @@ import type {
   SpendPriority,
 } from "@/domain/enums";
 import { isAutoRoutable } from "@/domain/enums";
+import { lowAutoRouteBlock, type LowAutoInput } from "@/domain/low-auto";
 import { autoRouteBlock } from "./provider-catalog";
 import { costForModel, qualityIndex, valueIndex, type UsageUnits } from "./pricing";
 import { planDuration, splitModelSize } from "@/domain/video-duration";
@@ -63,7 +64,48 @@ export interface RouteContext {
   /** Manual pin. Honoured in CUSTOM/MANUAL, and respected everywhere else too. */
   manualProvider?: string | null;
   manualModel?: string | null;
+
+  /**
+   * The scene facts a LOW_AUTO model is judged against.
+   *
+   * Optional because most routes never meet one: image, voice and text models
+   * have no LOW_AUTO grant, and a video route where no candidate holds the
+   * grant never reads this. But when a LOW_AUTO candidate IS in the pool and
+   * this is absent, the candidate is refused rather than waved through - see
+   * `lowAutoRouteBlock`. Absent facts are not favourable facts.
+   */
+  lowAuto?: LowAutoSceneFacts;
 }
+
+/**
+ * Everything `lowAutoEligibility` needs that the router does not already hold.
+ *
+ * Deliberately a plain data bag assembled by the CALLER. The router does not
+ * read the database, classify a camera or compose a prompt - it decides - and a
+ * router that started doing those things to fill its own gate would be
+ * impossible to test without a database.
+ */
+export type LowAutoSceneFacts = Pick<
+  LowAutoInput,
+  | "hasKeyframe"
+  | "cameraMode"
+  | "repeatedSmallObjects"
+  | "promptGuarded"
+  | "contradictions"
+  | "stage"
+  | "motionSource"
+  | "perVideoCapRemaining"
+> & {
+  /**
+   * Each vendor's own wallet, in dollars, keyed by provider name.
+   *
+   * A map rather than one number because the gate runs per CANDIDATE and two
+   * vendors' balances are not fungible - the same mistake services/provider-budget
+   * exists to prevent. A provider absent from the map reads as null, which means
+   * "we hold no wallet for this vendor", NOT "this vendor has no money".
+   */
+  providerBudgets: Record<string, number | null>;
+};
 
 export interface RouteCandidate {
   provider: string;
@@ -86,6 +128,18 @@ export interface RouteDecision {
   fallbacks: RouteCandidate[];
   /** True when the budget forced something weaker than the mode wanted. */
   downgraded: boolean;
+  /**
+   * True when the ROUTER chose this model by itself under a LOW_AUTO grant.
+   *
+   * Carried out of routing rather than re-derived downstream, because "was this
+   * the router's idea or the operator's?" stops being answerable once the
+   * decision is just a provider and a model id - and the batch gate needs the
+   * answer to decide whether the approval on file covers it.
+   *
+   * A manual pin is never low-auto, even when it names the same model: the
+   * person chose it, and that is the distinction the whole flag exists to keep.
+   */
+  lowAutoRouted: boolean;
 }
 
 export class RoutingError extends Error {
@@ -332,13 +386,66 @@ export function routeScene(
         "manual_not_found",
       );
     }
+    // A PIN IS NOT A KEY TO EVERY DOOR.
+    //
+    // Naming a model overrules the router's JUDGEMENT - which model is best
+    // value for this scene - and nothing else. It cannot overrule a fact about
+    // the world: a model the vendor has switched off will not run because an
+    // operator typed its name, and the request would be bought and refused.
+    //
+    // THE LINE IS "DATE" VERSUS "LABEL", and it is already drawn elsewhere in
+    // this project. QĐ-038: a shutdown date that has passed outranks any label,
+    // because the label is only as recent as the last person to edit it while
+    // the date is a fact about the vendor. QĐ-028: deprecating Sora blocks the
+    // ROUTER from choosing it, NOT a person - deleting that path would turn a
+    // deliberate one-off into an impossibility and make old work unreproducible.
+    //
+    // So a pin cannot overrule a model that is genuinely gone, and is not asked
+    // to justify itself for a model that merely has a retirement announced.
+    // `enabled: false` and an unavailable provider are already caught by
+    // `isCapable`, which is why such a model never reaches this branch.
+    // Reliability is deliberately absent: DEGRADED means "this went wrong for us
+    // before", a judgement, and QĐ-035 keeps degraded models pinnable precisely
+    // so they can be benchmarked again.
+    if (pinned.shutdownDate && pinned.shutdownDate.getTime() <= Date.now()) {
+      throw new RoutingError(
+        `Mô hình được chọn thủ công (${pinned.provider}/${pinned.modelId}) đã bị nhà ` +
+          `cung cấp tắt từ ${pinned.shutdownDate.toISOString().slice(0, 10)}. ` +
+          `Ghim tay không mở lại được model đã tắt — request sẽ hỏng và vẫn có ` +
+          `thể bị tính tiền. ${pinned.replacementNote}`.trimEnd(),
+        "manual_not_found",
+      );
+    }
+    if (pinned.lifecycle === "DISABLED") {
+      throw new RoutingError(
+        `Mô hình được chọn thủ công (${pinned.provider}/${pinned.modelId}) đang bị ` +
+          `TẮT trong bảng Mô hình AI. Hãy bật lại nếu bạn thực sự muốn dùng.`,
+        "manual_not_found",
+      );
+    }
+
     const candidate = toCandidate(pinned, ctx);
     assertAffordable(candidate, ctx);
+    // A pin on a retiring model goes through, but never SILENTLY. "Must not
+    // bypass automatically" is satisfied by saying so, not by refusing: the
+    // operator gets the clip they asked for and the sentence that tells them
+    // the path is closing.
+    const retiring =
+      pinned.lifecycle === "DEPRECATED"
+        ? ` ⚠ Model đang NGỪNG DÙNG` +
+          (pinned.shutdownDate
+            ? ` — nhà cung cấp tắt ngày ${pinned.shutdownDate.toISOString().slice(0, 10)}`
+            : "") +
+          `. ${pinned.replacementNote}`.trimEnd()
+        : "";
     return {
       ...candidate,
-      reason: "Người dùng chọn thủ công",
+      reason: `Người dùng chọn thủ công.${retiring}`,
       fallbacks: [],
       downgraded: false,
+      // A pin is an instruction, never the router's initiative - even when the
+      // model it names happens to hold a LOW_AUTO grant.
+      lowAutoRouted: false,
     };
   }
 
@@ -352,15 +459,38 @@ export function routeScene(
   //                          shutdown date that makes the model a dead end
   //   NEEDS_EXPLICIT_PIN     what the BENCHMARK EVIDENCE says
   //   reliability            what OUR OWN PAID PRODUCTION RUNS did
+  //   LOW_AUTO gate          whether THIS SCENE is the shape the grant covers
   //
   // They are kept apart because they answer different questions and can
   // disagree: Sora-2 has good evidence and is being retired anyway, and a model
   // can benchmark well and still be the one that has returned BAD_OUTPUT on
   // three different scenes since.
+  //
+  // The fourth is the newest and the only scene-dependent one. `isAutoRoutable`
+  // now needs the complexity to answer for a LOW_AUTO model at all, and
+  // `lowAutoRouteBlock` then checks the rest of what the grant was conditioned
+  // on. Before this, the low-auto gate existed and nothing called it.
+  const lowAutoWhy = (m: ModelRegistry): string | null =>
+    lowAutoRouteBlock(
+      { lifecycle: m.lifecycle, reliability: m.reliability, verification: m.verification },
+      ctx.lowAuto
+        ? {
+            ...ctx.lowAuto,
+            complexity: ctx.complexity,
+            characterCount: ctx.characterCount,
+            estimatedCost: costForModel(m, usageForCandidate(m, ctx)),
+            budgetRemaining: ctx.budgetRemaining,
+            providerBudgetRemaining: ctx.lowAuto.providerBudgets[m.provider] ?? null,
+            manualPinElsewhere: Boolean(ctx.manualProvider && ctx.manualModel),
+          }
+        : null,
+    );
+
   const blocked = (m: ModelRegistry): boolean =>
     autoRouteBlock(m) !== null ||
-    !isAutoRoutable(m.lifecycle) ||
-    requiresExplicitPin(m.provider, m.modelId) !== null;
+    !isAutoRoutable(m.lifecycle, { complexity: ctx.complexity }) ||
+    requiresExplicitPin(m.provider, m.modelId) !== null ||
+    lowAutoWhy(m) !== null;
   const pinOnly = capable.filter(blocked);
   const automatic = capable.filter((m) => !blocked(m));
   if (automatic.length === 0) {
@@ -375,15 +505,24 @@ export function routeScene(
       ? autoRouteBlock(first)
         ? `${first.provider}/${first.modelId}: ${autoRouteBlock(first)}. ` +
           `${first.reliabilityNote || first.replacementNote}`.trimEnd()
-        : !isAutoRoutable(first.lifecycle)
+        : !isAutoRoutable(first.lifecycle, { complexity: ctx.complexity })
         ? first.lifecycle === "DEPRECATED"
           ? `${first.provider}/${first.modelId} đã bị đánh dấu NGỪNG DÙNG` +
             (first.shutdownDate
               ? ` (nhà cung cấp tắt ngày ${first.shutdownDate.toISOString().slice(0, 10)})`
               : "") +
             `. ${first.replacementNote}`.trimEnd()
+          : first.lifecycle === "LOW_AUTO"
+          ? `${first.provider}/${first.modelId} chỉ tự định tuyến cho cảnh LOW, ` +
+            `cảnh này là ${ctx.complexity}.`
           : `${first.provider}/${first.modelId} chỉ được chọn tay.`
-        : (requiresExplicitPin(first.provider, first.modelId) ?? "")
+        : // The low-auto gate is the last objection checked and the most
+          // specific, so it gets to speak for itself: "không đủ điều kiện" would
+          // hide which of eleven conditions failed, and the operator's next
+          // action depends entirely on which one it was.
+          (lowAutoWhy(first) ??
+            requiresExplicitPin(first.provider, first.modelId) ??
+            "")
       : "";
     throw new RoutingError(
       pinOnly.length > 0
@@ -450,11 +589,15 @@ export function routeScene(
     )
     .slice(0, 3);
 
+  const chosenModel = automatic.find(
+    (m) => m.provider === chosen.provider && m.modelId === chosen.modelId,
+  );
   return {
     ...chosen,
     reason: explain(ctx, strategy, floor, chosen, { downgraded, relaxedFloor }),
     fallbacks,
     downgraded,
+    lowAutoRouted: chosenModel?.lifecycle === "LOW_AUTO",
   };
 }
 

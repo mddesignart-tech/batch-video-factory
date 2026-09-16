@@ -261,3 +261,86 @@ describe("a model that is capable but not yet cleared", () => {
     expect(requiresExplicitPin("openai", "sora-2:720x1280")).toBeNull();
   });
 });
+
+// ------------------------------------------------ h3_max hard invariant ---
+
+/**
+ * The ceiling that must survive a bug somewhere else.
+ *
+ * h3_max was granted LOW_AUTO on the strength of four paid samples. Every one
+ * of them was scored LOW, and the biggest cast among them was two. This table
+ * is the third and lowest lock on that door: even if the lifecycle were edited
+ * to ACTIVE by hand, and even if the low-auto gate were bypassed entirely, a
+ * MEDIUM or HIGH scene still cannot reach this model.
+ */
+const H3 = "h3_max:768x1280";
+
+describe("h3_max: trần độ khó là bất biến cứng", () => {
+  it("LOW thì được xét", () => {
+    expect(
+      checkSuitability({ provider: "runway", model: H3, complexity: "LOW", characterCount: 1 })
+        .allowed,
+    ).toBe(true);
+  });
+
+  it("MEDIUM bị chặn", () => {
+    const v = checkSuitability({
+      provider: "runway",
+      model: H3,
+      complexity: "MEDIUM",
+      characterCount: 1,
+    });
+    expect(v.allowed).toBe(false);
+    expect(v.reason).toContain("LOW");
+  });
+
+  it("HIGH bị chặn", () => {
+    const v = checkSuitability({
+      provider: "runway",
+      model: H3,
+      complexity: "HIGH",
+      characterCount: 1,
+    });
+    expect(v.allowed).toBe(false);
+  });
+
+  it("quá 2 nhân vật bị chặn kể cả khi cảnh là LOW", () => {
+    // The six scenes a bare lifecycle flip would have sent here all had three.
+    expect(
+      checkSuitability({ provider: "runway", model: H3, complexity: "LOW", characterCount: 2 })
+        .allowed,
+    ).toBe(true);
+    const three = checkSuitability({
+      provider: "runway",
+      model: H3,
+      complexity: "LOW",
+      characterCount: 3,
+    });
+    expect(three.allowed).toBe(false);
+    expect(three.reason).toContain("3 nhân vật");
+  });
+
+  it("áp cho cả biến thể 480x854, vì luật khoá theo apiModel", () => {
+    expect(
+      checkSuitability({
+        provider: "runway",
+        model: "h3_max:480x854",
+        complexity: "HIGH",
+        characterCount: 1,
+      }).allowed,
+    ).toBe(false);
+  });
+
+  it("KHÔNG lan sang model khác cùng hãng", () => {
+    // The lesson from gen4_turbo's limits being applied to gen4.5: a measured
+    // limit is a fact about the model measured, not about the company.
+    expect(
+      checkSuitability({
+        provider: "runway",
+        model: "wan3:720x1280",
+        complexity: "HIGH",
+        characterCount: 3,
+      }).allowed,
+    ).toBe(true);
+  });
+});

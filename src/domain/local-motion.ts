@@ -143,3 +143,92 @@ export function decideMotion(input: MotionInput): MotionDecision {
 export function keyframeRequired(source: MotionSource, wantsKeyframe: boolean): boolean {
   return source === "LOCAL_MOTION" ? true : wantsKeyframe;
 }
+
+/** Why the effective motion source is what it is, for the log and the audit. */
+export interface MotionResolution {
+  source: MotionSource;
+  /** True when stored and freshly-decided disagreed and this call settled it. */
+  diverged: boolean;
+  reason: string;
+}
+
+/**
+ * WHICH ANSWER WINS when the stored field and a fresh decision disagree.
+ *
+ * Both inputs are legitimate and neither is simply "the truth":
+ *
+ *   stored   what the operator saw and approved when the plan was costed. The
+ *            pipeline reads this, on purpose, so that editing the registry
+ *            between approval and execution cannot move money.
+ *   fresh    what `decideMotion` says about the scene as it stands NOW, after
+ *            a re-classification, a rewrite, or a change of spend priority.
+ *
+ * A dry-run found four scenes where stored said AI_VIDEO and fresh said
+ * LOCAL_MOTION. Honouring stored would buy four clips the current rules say are
+ * unnecessary; honouring fresh unconditionally would let a re-classification
+ * quietly START buying clips, which is the failure the stored field was added
+ * to prevent. Neither "newest wins" nor "stored wins" is safe on its own.
+ *
+ * So the rule is directional rather than chronological:
+ *
+ *   FREE WINS.       If either answer is LOCAL_MOTION, the scene is
+ *                    LOCAL_MOTION. Going from paid to free needs no approval,
+ *                    and the money not spent cannot surprise anybody.
+ *   PAID NEEDS BOTH. AI_VIDEO only when stored and fresh agree, so a fresh
+ *                    verdict can never begin spending on its own.
+ *
+ * The exception, and it is a real one: an EXPLICIT MANUAL PIN. A person who
+ * named a provider and a model for this scene has decided to buy a clip, and
+ * that is an instruction, not a default the classifier may overrule. Dropping
+ * it would be the same silent override in the opposite direction.
+ *
+ * Nothing here writes to the database. The divergence is reported so it can be
+ * logged and shown; mass-updating the rows would erase the evidence that the
+ * two sources ever disagreed, which is the only way anyone finds out why.
+ */
+export function effectiveMotionSource(
+  stored: string | null | undefined,
+  fresh: MotionDecision,
+  opts: { manuallyPinned?: boolean } = {},
+): MotionResolution {
+  // A row written before the column existed has no opinion to honour.
+  if (stored !== "LOCAL_MOTION" && stored !== "AI_VIDEO") {
+    return {
+      source: fresh.source,
+      diverged: false,
+      reason: `chưa có motionSource lưu, dùng quyết định mới: ${fresh.reason}`,
+    };
+  }
+
+  if (stored === fresh.source) {
+    return { source: fresh.source, diverged: false, reason: fresh.reason };
+  }
+
+  if (stored === "AI_VIDEO" && fresh.source === "LOCAL_MOTION") {
+    if (opts.manuallyPinned) {
+      return {
+        source: "AI_VIDEO",
+        diverged: true,
+        reason:
+          `luật hiện tại nói LOCAL_MOTION (${fresh.reason}) nhưng cảnh đã được ` +
+          `GHIM TAY một model cụ thể — giữ AI_VIDEO theo chỉ định của người dùng`,
+      };
+    }
+    return {
+      source: "LOCAL_MOTION",
+      diverged: true,
+      reason:
+        `motionSource lưu = AI_VIDEO nhưng luật hiện tại nói LOCAL_MOTION ` +
+        `(${fresh.reason}) — chọn phương án $0, không cần ai duyệt thêm`,
+    };
+  }
+
+  // stored LOCAL_MOTION, fresh AI_VIDEO. The expensive direction: refused.
+  return {
+    source: "LOCAL_MOTION",
+    diverged: true,
+    reason:
+      `luật hiện tại nói AI_VIDEO (${fresh.reason}) nhưng kế hoạch đã duyệt là ` +
+      `LOCAL_MOTION — không tự chuyển sang trả phí, cần người duyệt lại`,
+  };
+}

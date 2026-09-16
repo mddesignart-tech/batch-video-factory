@@ -330,3 +330,241 @@ describe("historical success rate", () => {
     expect(decision.modelId).toBe("mid");
   });
 });
+
+// ------------------------------------------- LOW_AUTO wired into routing ---
+
+/**
+ * The gate is only worth anything if the ROUTER calls it.
+ *
+ * `lowAutoEligibility` was written, covered by seventeen tests, and reached by
+ * nothing in production: `routeScene` knew one lever, `isAutoRoutable`, and that
+ * lever could only say ACTIVE. Every test below fails if that regression comes
+ * back, because each one drives the real `routeScene` rather than the gate.
+ */
+
+const LOW_AUTO_MODEL = model({
+  modelId: "granted",
+  provider: "mock",
+  price: 0.08,
+  qualityRating: 6,
+  lifecycle: "LOW_AUTO",
+  reliability: "OK",
+  verification: "BENCHMARK_VERIFIED",
+} as Partial<ModelRegistry> & { modelId: string });
+
+/** Scene facts that pass every condition, so each test can spoil exactly one. */
+function facts(over: Record<string, unknown> = {}) {
+  return {
+    stage: "VIDEO" as const,
+    motionSource: "AI_VIDEO" as const,
+    hasKeyframe: true,
+    cameraMode: "LOCKED_CAMERA" as const,
+    repeatedSmallObjects: false,
+    promptGuarded: true,
+    contradictions: [] as string[],
+    providerBudgets: { mock: 10 } as Record<string, number | null>,
+    perVideoCapRemaining: 5,
+    ...over,
+  };
+}
+
+function lowAutoCtx(over: Partial<RouteContext> = {}): RouteContext {
+  return ctx({ complexity: "LOW", lowAuto: facts(), ...over });
+}
+
+describe("LOW_AUTO: router phải tự gọi cổng", () => {
+  it("cảnh LOW đủ điều kiện -> chọn được, và đánh dấu lowAutoRouted", () => {
+    const d = routeScene([LOW_AUTO_MODEL], lowAutoCtx());
+    expect(d.modelId).toBe("granted");
+    expect(d.lowAutoRouted).toBe(true);
+  });
+
+  it("cảnh MEDIUM/HIGH -> KHÔNG chọn, dù model là ứng viên duy nhất", () => {
+    for (const complexity of ["MEDIUM", "HIGH"] as const) {
+      expect(() => routeScene([LOW_AUTO_MODEL], lowAutoCtx({ complexity }))).toThrow(RoutingError);
+    }
+  });
+
+  it("thiếu keyframe ở bước VIDEO -> KHÔNG chọn", () => {
+    expect(() =>
+      routeScene([LOW_AUTO_MODEL], lowAutoCtx({ lowAuto: facts({ hasKeyframe: false }) })),
+    ).toThrow(/keyframe/i);
+  });
+
+  it("quá 2 nhân vật -> KHÔNG chọn", () => {
+    expect(() =>
+      routeScene([LOW_AUTO_MODEL], lowAutoCtx({ characterCount: 3 })),
+    ).toThrow(RoutingError);
+  });
+
+  it("camera chuyển động -> KHÔNG chọn", () => {
+    expect(() =>
+      routeScene(
+        [LOW_AUTO_MODEL],
+        lowAutoCtx({ lowAuto: facts({ cameraMode: "DIRECTED_CAMERA" }) }),
+      ),
+    ).toThrow(RoutingError);
+  });
+
+  it("cảnh LOCAL_MOTION -> KHÔNG chọn, không có gì để mua", () => {
+    expect(() =>
+      routeScene(
+        [LOW_AUTO_MODEL],
+        lowAutoCtx({ lowAuto: facts({ motionSource: "LOCAL_MOTION" }) }),
+      ),
+    ).toThrow(RoutingError);
+  });
+
+  it("ví nhà cung cấp không đủ -> KHÔNG chọn, dù hạn mức chung còn nhiều", () => {
+    expect(() =>
+      routeScene(
+        [LOW_AUTO_MODEL],
+        lowAutoCtx({ budgetRemaining: 100, lowAuto: facts({ providerBudgets: { mock: 0.01 } }) }),
+      ),
+    ).toThrow(RoutingError);
+  });
+
+  it("vượt trần mỗi video -> KHÔNG chọn", () => {
+    expect(() =>
+      routeScene(
+        [LOW_AUTO_MODEL],
+        lowAutoCtx({ lowAuto: facts({ perVideoCapRemaining: 0.01 }) }),
+      ),
+    ).toThrow(RoutingError);
+  });
+
+  it("model DEGRADED -> KHÔNG chọn dù đã được cấp LOW_AUTO", () => {
+    const degraded = { ...LOW_AUTO_MODEL, reliability: "DEGRADED" } as ModelRegistry;
+    expect(() => routeScene([degraded], lowAutoCtx())).toThrow(RoutingError);
+  });
+
+  it("model chưa BENCHMARK_VERIFIED -> KHÔNG chọn", () => {
+    const unverified = { ...LOW_AUTO_MODEL, verification: "UNVERIFIED" } as ModelRegistry;
+    expect(() => routeScene([unverified], lowAutoCtx())).toThrow(RoutingError);
+  });
+
+  it("KHÔNG có dữ liệu cảnh -> từ chối, không mặc định cho qua", () => {
+    // Fail closed. A conditional grant whose conditions nobody evaluated has
+    // not been satisfied, and an absent fact is not a favourable fact.
+    expect(() => routeScene([LOW_AUTO_MODEL], ctx({ complexity: "LOW" }))).toThrow(RoutingError);
+  });
+
+  it("LOW_AUTO_CANDIDATE vẫn bị chặn ở đúng cảnh LOW", () => {
+    const candidate = { ...LOW_AUTO_MODEL, lifecycle: "LOW_AUTO_CANDIDATE" } as ModelRegistry;
+    expect(() => routeScene([candidate], lowAutoCtx())).toThrow(RoutingError);
+  });
+
+  it("KHÔNG âm thầm rơi sang model trả phí khác khi cổng từ chối", () => {
+    // The refusal must be a refusal, not a redirection. gen4_turbo is DEGRADED,
+    // gen4.5 is PIN_ONLY and Sora is DEPRECATED for reasons someone wrote down;
+    // rescuing a scene with one of them would undo all three at once.
+    const blocked = { ...MID, lifecycle: "PIN_ONLY" } as ModelRegistry;
+    expect(() =>
+      routeScene([LOW_AUTO_MODEL, blocked], lowAutoCtx({ characterCount: 3 })),
+    ).toThrow(RoutingError);
+  });
+});
+
+describe("LOW_AUTO không được đè lên lệnh ghim tay", () => {
+  it("ghim model khác thì dùng model đó, và KHÔNG đánh dấu lowAutoRouted", () => {
+    const d = routeScene(
+      [LOW_AUTO_MODEL, MID],
+      lowAutoCtx({ manualProvider: "mock", manualModel: "mid" }),
+    );
+    expect(d.modelId).toBe("mid");
+    expect(d.lowAutoRouted).toBe(false);
+  });
+
+  it("ghim đúng model LOW_AUTO vẫn là lệnh của người, không phải của router", () => {
+    const d = routeScene(
+      [LOW_AUTO_MODEL],
+      lowAutoCtx({ manualProvider: "mock", manualModel: "granted" }),
+    );
+    expect(d.modelId).toBe("granted");
+    expect(d.lowAutoRouted).toBe(false);
+  });
+
+  it("ghim model KHÔNG dùng được thì báo lỗi rõ, không tự đổi sang cái khác", () => {
+    const deprecated = {
+      ...MID,
+      modelId: "retired",
+      lifecycle: "DEPRECATED",
+      enabled: false,
+    } as ModelRegistry;
+    expect(() =>
+      routeScene(
+        [LOW_AUTO_MODEL, deprecated],
+        lowAutoCtx({ manualProvider: "mock", manualModel: "retired" }),
+      ),
+    ).toThrow(RoutingError);
+  });
+
+  it("ghim tay tới được model DEPRECATED, nhưng KHÔNG im lặng", () => {
+    // QĐ-028: deprecating blocks the ROUTER, not a person - removing that path
+    // would make a deliberate one-off impossible and old work unreproducible.
+    // "Must not bypass AUTOMATICALLY" is satisfied by saying so out loud, and
+    // the warning rides in `reason` where the operator actually reads it.
+    const retiring = {
+      ...MID,
+      modelId: "sunset",
+      lifecycle: "DEPRECATED",
+      enabled: true,
+      shutdownDate: new Date("2099-01-01"),
+      replacementNote: "Dùng model khác thay thế.",
+    } as ModelRegistry;
+    const d = routeScene(
+      [retiring],
+      lowAutoCtx({ manualProvider: "mock", manualModel: "sunset" }),
+    );
+    expect(d.modelId).toBe("sunset");
+    expect(d.reason).toContain("NGỪNG DÙNG");
+    expect(d.reason).toContain("2099-01-01");
+    expect(d.reason).toContain("Dùng model khác thay thế.");
+  });
+
+  it("ghim tay KHÔNG vượt qua được model đang bị TẮT", () => {
+    const off = {
+      ...MID,
+      modelId: "off",
+      lifecycle: "DISABLED",
+      enabled: true,
+    } as ModelRegistry;
+    expect(() =>
+      routeScene([off], lowAutoCtx({ manualProvider: "mock", manualModel: "off" })),
+    ).toThrow(/TẮT/);
+  });
+
+  it("ghim tay KHÔNG vượt qua được ngày nhà cung cấp ĐÃ tắt model", () => {
+    // QĐ-038: the label is only as recent as the last person to edit it; the
+    // DATE is the fact. A model that is already off will not run because an
+    // operator typed its name, and the request is bought before it is refused.
+    const shutdown = {
+      ...MID,
+      modelId: "gone",
+      lifecycle: "ACTIVE",
+      enabled: true,
+      shutdownDate: new Date("2020-01-01"),
+    } as ModelRegistry;
+    expect(() =>
+      routeScene([shutdown], lowAutoCtx({ manualProvider: "mock", manualModel: "gone" })),
+    ).toThrow(/tắt/i);
+  });
+
+  it("ghim tay VẪN được phép chọn model DEGRADED — đó là ý kiến, không phải sự thật", () => {
+    // The distinction that keeps the rule honest. "The vendor turned it off" is
+    // a fact a person cannot overrule; "it went wrong for us twice" is a
+    // judgement, and a person may decide to try again with their eyes open.
+    const degraded = {
+      ...MID,
+      modelId: "shaky",
+      lifecycle: "ACTIVE",
+      reliability: "DEGRADED",
+    } as ModelRegistry;
+    const d = routeScene(
+      [degraded],
+      lowAutoCtx({ manualProvider: "mock", manualModel: "shaky" }),
+    );
+    expect(d.modelId).toBe("shaky");
+    expect(d.lowAutoRouted).toBe(false);
+  });
+});

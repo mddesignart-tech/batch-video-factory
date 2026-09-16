@@ -594,6 +594,16 @@ model BatchAuthorization {
   videoCount  Int    @default(0)
   qualityMode String @default("BALANCED")
 
+  /// Does this approval cover clips the ROUTER chose by itself under LOW_AUTO?
+  ///
+  /// Default FALSE, and that default is the whole mechanism. Every approval
+  /// signed before low-auto existed was signed against a plan in which every
+  /// paid clip had been named; granting the router a new way to pick models
+  /// afterwards does not retroactively put those clips in the plan. An old
+  /// APPROVED row with $0.46 of headroom would otherwise have been a standing
+  /// permit for the first scene the new gate happened to like.
+  lowAutoApproved Boolean @default(false)
+
   approvedAt   DateTime?
   /// Why the approval ended, when it did. Free text for the audit trail.
   closedReason String    @default("")

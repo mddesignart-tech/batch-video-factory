@@ -102,12 +102,36 @@ const MAX_COMPLEXITY: Record<string, Complexity> = {
   // Keyed by "provider/apiModel". gen4_turbo failed scene 4 twice and passed
   // scene 5; that is a fact about gen4_turbo and about nothing else.
   "runway/gen4_turbo": "LOW",
+
+  // h3_max has four paid samples. Every one of them was scored LOW, and the
+  // largest cast among them was two. Nothing has been measured above that, so
+  // nothing above that is permitted - and this table is where the limit belongs
+  // rather than in the lifecycle, because it must survive being wrong about the
+  // lifecycle. The LOW_AUTO grant, the low-auto gate and this ceiling are three
+  // independent locks on the same door; a bug in any one of them still leaves a
+  // MEDIUM scene unable to reach this model.
+  //
+  // It binds a MANUAL PIN too, which is the existing contract for this table
+  // (see `requiresExplicitPin` for the softer state that does not). That is
+  // deliberate here: "we have never measured this" is not a preference an
+  // operator can overrule by typing the model's name, and scene 6 of Spill the
+  // beans is currently pinned to h3_max while scoring MEDIUM - it will now be
+  // refused loudly rather than billed quietly.
+  "runway/h3_max": "LOW",
 };
 
 /** How many characters a provider has actually been shown to handle. */
 const MAX_CHARACTERS: Record<string, number> = {
   // Two characters standing together is the case gen4_turbo failed twice.
   "runway/gen4_turbo": 2,
+
+  // The h3_max samples were one, one, two and one character. Two is therefore
+  // the largest cast with evidence behind it, and the three-character scenes
+  // this project is full of have none. Stated here as well as in the low-auto
+  // gate on purpose: the gate governs AUTOMATIC routing, and a limit that only
+  // existed there would still let a hand-typed pin send a cast of three to a
+  // model that has never drawn three of anything.
+  "runway/h3_max": 2,
 };
 
 /**

@@ -24,12 +24,19 @@ import {
   type GeneratedAsset,
   type JobStatus,
 } from "@/providers/types";
-import { routeScene, RoutingError, type RouteDecision } from "./ai-router";
+import {
+  routeScene,
+  RoutingError,
+  type LowAutoSceneFacts,
+  type RouteDecision,
+} from "./ai-router";
 import {
   shouldEvaluateQuality,
   shouldGenerateKeyframe,
 } from "./cost-estimator";
 import { recordCost, spentOnProject } from "./cost-tracker";
+import { providerSpendBreakdown } from "./provider-budget";
+import { extractSignals } from "./complexity";
 import { assertCanSpend } from "./spend-guard";
 import { consumeCreateToken } from "./create-token";
 import {
@@ -37,7 +44,12 @@ import {
   batchApprovalFor,
 } from "./batch-authorization";
 import { commit as commitReservation, release as releaseReservation } from "./cost-reservation";
-import { decideMotion, keyframeRequired } from "@/domain/local-motion";
+import {
+  decideMotion,
+  effectiveMotionSource,
+  keyframeRequired,
+  type MotionResolution,
+} from "@/domain/local-motion";
 import { parseDialogueLines } from "@/domain/dialogue-lines";
 import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
 import { classifyCameraIntent } from "@/domain/camera-intent";
@@ -134,11 +146,39 @@ async function loadContext(sceneId: string): Promise<SceneContext> {
   };
 }
 
+/**
+ * Each vendor's own wallet in dollars, keyed by provider.
+ *
+ * Read fresh at the moment of routing rather than carried in `SceneContext`,
+ * because a batch of scenes routes one after another and the wallet moves
+ * between them. A figure captured when the batch started would be stale by the
+ * third clip, in the direction that permits spending.
+ */
+async function providerWalletsUsd(): Promise<Record<string, number | null>> {
+  const rows = await providerSpendBreakdown();
+  return Object.fromEntries(rows.map((r) => [r.provider, r.remainingUsd]));
+}
+
+/**
+ * Headroom under the approval's per-video ceiling, or null when there is no
+ * approval to impose one.
+ *
+ * Null means "no batch authorisation governs this call", which is the benchmark
+ * and manual-test path where CREATE_ATTEMPT_TOKEN applies instead. It does not
+ * mean "unlimited": the global cap and the provider wallet are still checked.
+ */
+async function perVideoCapFor(batchId: string | null): Promise<number | null> {
+  if (!batchId) return null;
+  const auth = await batchApprovalFor(batchId);
+  return auth ? auth.maxCostPerVideo : null;
+}
+
 function routeFor(
   ctx: SceneContext,
   type: ModelType,
   usage: { seconds?: number; images?: number; characters?: number; jobs?: number },
   manual: { provider?: string | null; model?: string | null },
+  lowAuto?: LowAutoSceneFacts,
 ): RouteDecision {
   const { scene, project } = ctx;
   const characterCount = sceneCharacters(scene).present.length || 1;
@@ -176,6 +216,7 @@ function routeFor(
     availableProviders: ctx.availableProviders,
     manualProvider: manual.provider ?? null,
     manualModel: manual.model ?? null,
+    lowAuto,
   });
 }
 
@@ -423,6 +464,9 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
         // The SAME key as the ProviderJob above. That is what lets a resume find
         // its own reservation rather than opening a second one.
         idempotencyKey: key,
+        // Whether the router picked this itself. An approval signed against a
+        // plan of named clips does not cover clips the router chose afterwards.
+        lowAutoRouted: decision.lowAutoRouted,
       });
       reservedKey = key;
       await logger.debug({
@@ -790,7 +834,7 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
   // scenes routed to LOCAL_MOTION, which has nothing to animate without one.
   // Both rules are right on their own and together they delete the scene.
   const wantsKeyframe = keyframeRequired(
-    motionSourceFor(ctx),
+    motionResolutionFor(ctx).source,
     shouldGenerateKeyframe(
       project.qualityMode as QualityMode,
       scene.complexity as "LOW" | "MEDIUM" | "HIGH",
@@ -1129,25 +1173,34 @@ async function resolveStylePrompt(stylePresetId: string | null): Promise<string>
 // ------------------------------------------------------------------ video ---
 
 /**
- * How this scene gets its movement, as the plan recorded it.
+ * How this scene gets its movement.
  *
- * Read from the scene rather than recomputed, because the stored value is what
- * the operator approved and paid against. Recomputing at generation time would
- * let a registry edit between approval and execution silently turn a free scene
- * into a paid one - the money would move without anyone deciding it should.
+ * The stored field is still the default and still protects against a registry
+ * edit turning a free scene into a paid one between approval and execution.
+ * What changed is what happens when the stored field and today's rules
+ * DISAGREE: it used to return `stored` unconditionally, which meant a scene
+ * recorded as AI_VIDEO stayed billable even after the classifier decided a
+ * still would do. Four scenes in this project were in exactly that state.
  *
- * Falls back to deciding live only for scenes written before this field
- * existed, where there is no recorded answer to honour.
+ * `effectiveMotionSource` holds the rule - free wins, paid needs both to agree,
+ * an explicit manual pin is an instruction - and the divergence is logged here
+ * rather than written back, so the disagreement stays visible in the audit
+ * trail instead of being tidied away by the process that noticed it.
  */
-function motionSourceFor(ctx: SceneContext): "AI_VIDEO" | "LOCAL_MOTION" {
-  const stored = ctx.scene.motionSource;
-  if (stored === "LOCAL_MOTION" || stored === "AI_VIDEO") return stored;
-  return decideMotion({
-    qualityMode: ctx.project.qualityMode as QualityMode,
-    complexity: ctx.scene.complexity as "LOW" | "MEDIUM" | "HIGH",
-    spendPriority: ctx.scene.spendPriority as "LOW" | "NORMAL" | "HIGH",
-    characterCount: sceneCharacters(ctx.scene).present.length || 1,
-  }).source;
+function motionResolutionFor(ctx: SceneContext): MotionResolution {
+  return effectiveMotionSource(
+    ctx.scene.motionSource,
+    decideMotion({
+      qualityMode: ctx.project.qualityMode as QualityMode,
+      complexity: ctx.scene.complexity as "LOW" | "MEDIUM" | "HIGH",
+      spendPriority: ctx.scene.spendPriority as "LOW" | "NORMAL" | "HIGH",
+      characterCount: sceneCharacters(ctx.scene).present.length || 1,
+    }),
+    // Both halves, not either: a provider with no model is not a choice of
+    // model, and the pin has to name the thing being bought to count as an
+    // instruction to buy it.
+    { manuallyPinned: Boolean(ctx.scene.videoProvider && ctx.scene.videoModel) },
+  );
 }
 
 /**
@@ -1163,7 +1216,23 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
 
-  if (motionSourceFor(ctx) === "LOCAL_MOTION") {
+  const motion = motionResolutionFor(ctx);
+  if (motion.diverged) {
+    // Logged at WARN and BEFORE anything is generated, because this is the
+    // moment the two records of what this scene should cost were found to
+    // disagree - and whichever way it was settled, somebody should be able to
+    // find out that it happened without re-deriving it from the money.
+    await logger.warn({
+      event: "scene.motion_source_diverged",
+      projectId: project.id,
+      sceneId: scene.id,
+      message:
+        `Cảnh ${scene.sceneNumber}: motionSource lưu = ${scene.motionSource}, ` +
+        `quyết định áp dụng = ${motion.source}. ${motion.reason}`,
+    });
+  }
+
+  if (motion.source === "LOCAL_MOTION") {
     // The keyframe is now load-bearing rather than optional: with no clip and
     // no image the renderer would drop this scene entirely, and a scene missing
     // from a finished video is the kind of failure nobody notices until upload.
@@ -1197,27 +1266,20 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
     return null;
   }
 
-  const decision = routeFor(
-    ctx,
-    "video",
-    { seconds: scene.duration, jobs: 1 },
-    { provider: scene.videoProvider, model: scene.videoModel },
-  );
-  const target = targetForAspect(project.aspectRatio);
-  const outputPath = path.join(
-    projectSubdir(project.id, "videos"),
-    uuidFilename(".mp4"),
-  );
-  const keyframe = scene.imagePath
-    ? path.join(projectSubdir(project.id, "images"), path.basename(scene.imagePath))
-    : undefined;
-
-  // The LAST step before the prompt leaves this machine.
+  // The LAST step before the prompt leaves this machine - and now also the step
+  // before ROUTING, which is why it moved above the `routeFor` call.
   //
-  // Applied here, once, and reused for the idempotency key, the request body
-  // and the stored asset - so all three describe the same request. Computing it
-  // inside `create()` instead would key the job on a prompt different from the
-  // one actually sent, and a resume would then look like a new purchase.
+  // The low-auto gate asks whether the prompt went through the guardrail and
+  // whether it contradicts itself. Both are properties of the composed prompt,
+  // so composing it after choosing the model would have meant answering those
+  // two questions about a prompt that did not exist yet. The old order was fine
+  // when nothing downstream of routing fed back into it; it stopped being fine
+  // the moment the router started asking about the prompt.
+  //
+  // Applied once, and reused for the idempotency key, the request body and the
+  // stored asset - so all three describe the same request. Computing it inside
+  // `create()` instead would key the job on a prompt different from the one
+  // actually sent, and a resume would then look like a new purchase.
   //
   // This is not cosmetic. The same scene, same keyframe and same model scored
   // camera 1/10 without a lock guardrail and 10/10 with one; 17 of this
@@ -1239,18 +1301,49 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
   }
   const contradictions = findPromptContradictions(videoPrompt);
   if (contradictions.length > 0) {
-    // Refuse rather than warn. A prompt that both forbids and requests the same
-    // move makes the model choose, and it chooses differently every run - which
-    // is precisely the instability the guardrails exist to remove. Sending it
-    // would be paying for a coin toss.
+    // Refuse rather than warn, and refuse BEFORE routing. A prompt that both
+    // forbids and requests the same move makes the model choose, and it chooses
+    // differently every run - which is precisely the instability the guardrails
+    // exist to remove. Sending it would be paying for a coin toss, and picking
+    // a model for it first would be doing arithmetic about a purchase that must
+    // not happen.
     throw new GenerationError(
       `Prompt cảnh ${scene.sceneNumber} tự mâu thuẫn: ${contradictions.join("; ")}. ` +
         `Hãy sửa ý đồ camera trong kịch bản rồi chạy lại.`,
       "video",
-      decision.provider,
+      scene.videoProvider ?? "router",
       false,
     );
   }
+
+  const decision = routeFor(
+    ctx,
+    "video",
+    { seconds: scene.duration, jobs: 1 },
+    { provider: scene.videoProvider, model: scene.videoModel },
+    // The scene facts a LOW_AUTO candidate is judged against. VIDEO stage: this
+    // is the call that spends, so a keyframe that is merely expected later is a
+    // keyframe that does not exist.
+    {
+      stage: "VIDEO",
+      motionSource: motion.source,
+      hasKeyframe: Boolean(scene.imagePath),
+      cameraMode: cameraIntent.mode,
+      repeatedSmallObjects: extractSignals(scene).repeatedSmallObjects,
+      promptGuarded: guarded.added.length > 0 || guarded.skipped.length > 0,
+      contradictions,
+      providerBudgets: await providerWalletsUsd(),
+      perVideoCapRemaining: await perVideoCapFor(ctx.batchId),
+    },
+  );
+  const target = targetForAspect(project.aspectRatio);
+  const outputPath = path.join(
+    projectSubdir(project.id, "videos"),
+    uuidFilename(".mp4"),
+  );
+  const keyframe = scene.imagePath
+    ? path.join(projectSubdir(project.id, "images"), path.basename(scene.imagePath))
+    : undefined;
 
   const { result, used } = await withFallback(ctx, decision, async (d) => {
     const provider = await getVideoProvider(d.provider, d.modelId);

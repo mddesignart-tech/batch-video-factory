@@ -380,7 +380,13 @@ export function autoRouteBlock(
   if (model.lifecycle === "LOW_AUTO_CANDIDATE") {
     return "ứng viên LOW_AUTO — đã đủ bằng chứng nhưng CHƯA được bật";
   }
-  if (model.lifecycle && model.lifecycle !== "ACTIVE") {
+  // LOW_AUTO is a GRANT, so it does not belong in this catch-all refusal. It is
+  // conditional rather than unconditional, and the condition is the scene -
+  // which this function does not have and must not guess at. `isAutoRoutable`
+  // checks the complexity and `lowAutoRouteBlock` checks the rest; refusing here
+  // as well would make the grant unusable and turn a reviewed decision into a
+  // dead enum value.
+  if (model.lifecycle && model.lifecycle !== "ACTIVE" && model.lifecycle !== "LOW_AUTO") {
     return `vòng đời = ${model.lifecycle}`;
   }
   if (model.reliability && model.reliability !== "OK") {

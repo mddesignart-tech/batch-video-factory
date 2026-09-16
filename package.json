@@ -41,7 +41,10 @@
     "scene:audio": "tsx scripts/scene-audio-test.ts",
     "project:render": "tsx scripts/project-render-test.ts",
     "project:voice": "tsx scripts/project-voice.ts",
-    "routing:preview": "tsx scripts/routing-preview.ts"
+    "routing:preview": "tsx scripts/routing-preview.ts",
+    "lowauto:dryrun": "tsx scripts/dry-run-low-auto.ts",
+    "lowauto:grant": "tsx scripts/grant-low-auto.ts",
+    "runway:balance": "tsx scripts/refresh-runway-balance.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.1",

@@ -14,6 +14,17 @@ function money(n: number): string {
   return `$${n.toFixed(n < 0.01 ? 6 : 4)}`;
 }
 
+/** How old a cached reading is, in words a person can act on. */
+function ageLabel(checkedAt: string | null): string {
+  if (!checkedAt) return "không rõ đọc lúc nào";
+  const ms = Date.now() - new Date(checkedAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "không rõ đọc lúc nào";
+  const hours = ms / 3_600_000;
+  if (hours < 1) return `đọc cách đây ${Math.max(1, Math.round(ms / 60_000))} phút`;
+  if (hours < 48) return `đọc cách đây ${Math.round(hours)} giờ`;
+  return `đọc cách đây ${Math.round(hours / 24)} ngày`;
+}
+
 const UNIT_LABEL: Record<string, string> = {
   usd: "USD trả trước",
   credits: "credit của hãng",
@@ -72,9 +83,11 @@ export function ProviderBudgets({ rows }: { rows: ProviderSpendRow[] }) {
                           live is how someone plans a render against money that
                           was spent last week. */}
                       <dt className="text-ink-400">
-                        {budget.liveBalanceAvailable
-                          ? "Số dư đọc từ hãng"
-                          : "Số dư khai báo"}
+                        {budget.source === "LIVE"
+                          ? "Số dư LIVE"
+                          : budget.source === "CACHE"
+                            ? "Số dư CACHE"
+                            : "Số dư khai báo"}
                       </dt>
                       <dd className="font-mono text-ink-100">
                         {budget.unit === "credits"
@@ -83,10 +96,21 @@ export function ProviderBudgets({ rows }: { rows: ProviderSpendRow[] }) {
                       </dd>
                     </div>
                   )}
-                  {budget && !external && !budget.liveBalanceAvailable && (
+                  {/* A cached figure is a live reading that has aged, and the
+                      age is the part that decides whether to trust it. Printing
+                      the number without it is how 975 credits stayed on screen
+                      for days while the account held 671. */}
+                  {budget && !external && budget.source === "CACHE" && (
                     <p className="pt-0.5 text-[10px] text-warn-400">
-                      Hãng này không cho đọc số dư qua API — đây là con số bạn
-                      tự khai, không phải số dư thật lúc này.
+                      Số đã lưu, {ageLabel(budget.checkedAt)} — chưa đọc lại được
+                      từ hãng lúc này. Đừng dùng làm số dư hiện tại.
+                    </p>
+                  )}
+                  {budget && !external && budget.source === "DECLARED" && (
+                    <p className="pt-0.5 text-[10px] text-warn-400">
+                      {budget.liveBalanceAvailable
+                        ? "Chưa đọc số dư thật lần nào. Hãy chạy đọc lại trước khi chi."
+                        : "Hãng này không cho đọc số dư qua API — đây là con số bạn tự khai, không phải số dư thật lúc này."}
                     </p>
                   )}
                   {external && (

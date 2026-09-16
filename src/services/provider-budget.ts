@@ -31,6 +31,23 @@ export type BudgetUnit =
   | "credits" // vendor credits, e.g. Runway
   | "external"; // billed elsewhere, e.g. a Groq plan with its own quota
 
+/** Provenance of a balance figure. See `ProviderBudget.source`. */
+export const BUDGET_SOURCES = ["LIVE", "CACHE", "DECLARED"] as const;
+export type BudgetSource = (typeof BUDGET_SOURCES)[number];
+
+/**
+ * THE CONVERSION RULE OF THIS APP: 100 Runway credits = $1.00.
+ *
+ * Stated as a named constant rather than an inline 0.01 because it is an
+ * assumption, not a fact of arithmetic. It was checked against a real invoice -
+ * the scene-5 clip was billed 25 credits for 5 seconds and appeared as $0.25 -
+ * and it is the only conversion in this file that has been checked that way. If
+ * Runway ever reprices credits, every dollar figure derived from a credit
+ * balance is wrong until this number changes, and the place to notice that is
+ * here rather than in eleven multiplications.
+ */
+export const USD_PER_RUNWAY_CREDIT = 0.01;
+
 export interface ProviderBudget {
   provider: string;
   unit: BudgetUnit;
@@ -57,6 +74,23 @@ export interface ProviderBudget {
    * that was spent last week.
    */
   liveBalanceAvailable: boolean;
+  /**
+   * WHERE the number in `available` came from. Never inferred, always recorded.
+   *
+   *   LIVE      read back from the vendor, at `checkedAt`. The authority.
+   *   CACHE     the last LIVE reading, kept because a later read failed. Must be
+   *             shown with its age: a live figure and a two-day-old copy of one
+   *             are different claims and only one of them is about now.
+   *   DECLARED  a human typed it. True of every OpenAI figure, because an API
+   *             key cannot read that balance at all.
+   *
+   * The distinction is not cosmetic. A settings row said Runway held 975 credits
+   * while the vendor held 671 - a $3.04 gap - and every budget check in the app
+   * was answered from the 975 because nothing recorded that it was a claim.
+   */
+  source: BudgetSource;
+  /** ISO timestamp of the last successful LIVE read, when there has been one. */
+  checkedAt: string | null;
 }
 
 /**
@@ -80,19 +114,32 @@ export function defaultBudgets(): ProviderBudget[] {
       // OpenAI gives an API key no way to read the account balance, so this is
       // a declared figure and the UI must say so.
       liveBalanceAvailable: false,
+      source: "DECLARED",
+      checkedAt: null,
     },
     {
       provider: "runway",
       unit: "credits",
-      available: 975,
-      // 5 credits/second at $0.01/credit, confirmed against a real charge:
-      // the scene-5 clip cost exactly 25 credits for 5 seconds.
-      usdPerUnit: 0.01,
-      note: "Credit riêng của Runway. KHÔNG liên quan tới số dư OpenAI.",
+      // DELIBERATELY ZERO, and deliberately not the last number anyone saw.
+      //
+      // This default is what the app believes before it has asked the vendor
+      // anything, and the honest answer at that moment is "I do not know" - not
+      // a figure copied from a session that ended days ago. The previous default
+      // said 975, which outlived the truth by 304 credits and was handed to
+      // every budget check in the meantime.
+      //
+      // Zero blocks paid work until `refreshRunwayBalance()` succeeds. That is
+      // the intended failure mode: refusing to spend because the balance is
+      // unknown is recoverable, spending against a balance that is wrong is not.
+      available: 0,
+      usdPerUnit: USD_PER_RUNWAY_CREDIT,
+      note: "Credit riêng của Runway. KHÔNG liên quan tới số dư OpenAI. Chưa đọc live lần nào.",
       updatedAt: now,
       // GET /organization returns creditBalance, so this one can be refreshed
       // from the vendor and checked against our ledger.
       liveBalanceAvailable: true,
+      source: "DECLARED",
+      checkedAt: null,
     },
     {
       provider: "groq",
@@ -102,6 +149,8 @@ export function defaultBudgets(): ProviderBudget[] {
       note: "Groq tự tính theo gói/hạn mức riêng của họ. Tool không giữ số dư.",
       updatedAt: now,
       liveBalanceAvailable: false,
+      source: "DECLARED",
+      checkedAt: null,
     },
   ];
 }
@@ -129,6 +178,15 @@ function parse(valueJson: string | undefined): ProviderBudget[] | null {
         // Default FALSE. A balance is declared until something proves it can be
         // read back; assuming otherwise would label a typed number as live.
         liveBalanceAvailable: b.liveBalanceAvailable === true,
+        // A stored row can only ever be a COPY of a live reading, never a live
+        // reading itself - by the time it is read back out of SQLite, time has
+        // passed and the vendor may have charged something. So LIVE degrades to
+        // CACHE on the way out, and only `refreshRunwayBalance` mints a LIVE.
+        source:
+          b.source === "LIVE" || b.source === "CACHE"
+            ? "CACHE"
+            : "DECLARED",
+        checkedAt: typeof b.checkedAt === "string" ? b.checkedAt : null,
       });
     }
     return rows.length > 0 ? rows : null;
@@ -147,7 +205,10 @@ export async function getProviderBudgets(): Promise<ProviderBudget[]> {
 export async function setProviderBudget(
   update: Pick<ProviderBudget, "provider" | "available"> &
     Partial<
-      Pick<ProviderBudget, "unit" | "usdPerUnit" | "note" | "liveBalanceAvailable">
+      Pick<
+        ProviderBudget,
+        "unit" | "usdPerUnit" | "note" | "liveBalanceAvailable" | "source" | "checkedAt"
+      >
     >,
 ): Promise<ProviderBudget[]> {
   const current = await getProviderBudgets();
@@ -165,6 +226,12 @@ export async function setProviderBudget(
               note: update.note ?? b.note,
               liveBalanceAvailable:
                 update.liveBalanceAvailable ?? b.liveBalanceAvailable,
+              // An operator typing a number is DECLARING it. Only a caller that
+              // actually read the vendor may say otherwise, and it has to say so
+              // explicitly - inheriting the previous row's LIVE would relabel a
+              // hand-typed correction as a vendor reading.
+              source: update.source ?? "DECLARED",
+              checkedAt: update.checkedAt ?? b.checkedAt,
               updatedAt: now,
             }
           : b,
@@ -182,6 +249,8 @@ export async function setProviderBudget(
           // otherwise. Only a provider we can actually read a balance from
           // should ever be marked live.
           liveBalanceAvailable: update.liveBalanceAvailable ?? false,
+          source: update.source ?? "DECLARED",
+          checkedAt: update.checkedAt ?? null,
         },
       ];
 
@@ -330,4 +399,130 @@ export async function assertProviderBudget(opts: {
       cost,
     );
   }
+}
+
+// ------------------------------------------------- live balance refresh ---
+
+/** What a refresh attempt found, including when it found nothing. */
+export interface BalanceRefresh {
+  provider: string;
+  ok: boolean;
+  /** Credits as the vendor reported them. Null when the read failed. */
+  credits: number | null;
+  usd: number | null;
+  /** The figure now in force after the attempt, live or fallen back to cache. */
+  effectiveUsd: number | null;
+  source: BudgetSource;
+  /** Age of the figure in hours when it came from cache. Null when live. */
+  cacheAgeHours: number | null;
+  note: string;
+}
+
+/**
+ * Ask Runway what it actually holds, and make that the stored figure.
+ *
+ * FREE and read-only at the vendor: one `GET /organization`. There is no POST
+ * in this function and it can create nothing.
+ *
+ * The precedence it implements, in order:
+ *
+ *   1. A successful GET wins outright. The figure is written to the settings
+ *      row with `source: "LIVE"` and a timestamp, so later readers know both
+ *      the number and when it was true.
+ *   2. A failed GET falls back to the stored copy, LABELLED `CACHE` and carrying
+ *      its age. It does not invent a number and it does not silently present an
+ *      old one as current.
+ *   3. Nothing ever writes a HIGHER balance than the vendor reported. The 975
+ *      that outlived the truth by 304 credits got there by being typed once and
+ *      never contradicted; a stale figure must never be able to overwrite a
+ *      fresher one, so the write only happens on a successful read.
+ */
+export async function refreshRunwayBalance(opts: {
+  apiKey?: string;
+  baseUrl?: string;
+  apiVersion?: string;
+  /** Injected in tests. Defaults to the global fetch. */
+  fetchImpl?: typeof fetch;
+} = {}): Promise<BalanceRefresh> {
+  const provider = "runway";
+  const key = opts.apiKey ?? process.env.RUNWAY_API_KEY;
+  const base = (opts.baseUrl ?? process.env.RUNWAY_BASE_URL ?? "https://api.dev.runwayml.com/v1")
+    .replace(/\/+$/, "");
+  const doFetch = opts.fetchImpl ?? fetch;
+
+  const cached = (await getProviderBudgets()).find((b) => b.provider === provider) ?? null;
+  const fallback = (note: string): BalanceRefresh => {
+    const ageHours =
+      cached?.checkedAt != null
+        ? round((Date.now() - new Date(cached.checkedAt).getTime()) / 3_600_000, 2)
+        : null;
+    return {
+      provider,
+      ok: false,
+      credits: null,
+      usd: null,
+      effectiveUsd: cached ? round(cached.available * cached.usdPerUnit, 6) : null,
+      // A cached figure with no recorded reading behind it was never live at
+      // all; calling it CACHE would credit it with a provenance it lacks.
+      source: cached?.checkedAt ? "CACHE" : "DECLARED",
+      cacheAgeHours: ageHours,
+      note,
+    };
+  };
+
+  if (!key) return fallback("thiếu RUNWAY_API_KEY — không gọi được, dùng số đã lưu");
+
+  let res: Response;
+  try {
+    res = await doFetch(`${base}/organization`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "X-Runway-Version": opts.apiVersion ?? process.env.RUNWAY_API_VERSION ?? "2024-11-06",
+      },
+    });
+  } catch (err) {
+    return fallback(`lỗi mạng: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!res.ok) return fallback(`HTTP ${res.status} từ GET /organization`);
+
+  let credits: number | null = null;
+  try {
+    const json = (await res.json()) as { creditBalance?: unknown };
+    // `typeof === "number"`, not a truthy test: a genuine zero balance is the
+    // single most important number this function can return, and a truthy check
+    // would discard it and fall back to a comfortable stale figure.
+    if (typeof json.creditBalance === "number" && Number.isFinite(json.creditBalance)) {
+      credits = json.creditBalance;
+    }
+  } catch {
+    return fallback("phản hồi không phải JSON hợp lệ");
+  }
+  if (credits === null) return fallback("API không trả creditBalance");
+
+  const usd = round(credits * USD_PER_RUNWAY_CREDIT, 6);
+  const checkedAt = new Date().toISOString();
+  await setProviderBudget({
+    provider,
+    available: credits,
+    unit: "credits",
+    usdPerUnit: USD_PER_RUNWAY_CREDIT,
+    liveBalanceAvailable: true,
+    source: "LIVE",
+    checkedAt,
+    note:
+      `Đọc trực tiếp GET /organization lúc ${checkedAt}: ${credits} credit ` +
+      `(quy đổi ${1 / USD_PER_RUNWAY_CREDIT} credit = $1).`,
+  });
+
+  return {
+    provider,
+    ok: true,
+    credits,
+    usd,
+    effectiveUsd: usd,
+    source: "LIVE",
+    cacheAgeHours: null,
+    note: `${credits} credit, đọc trực tiếp từ GET /organization`,
+  };
 }

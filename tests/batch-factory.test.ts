@@ -1123,3 +1123,103 @@ describe("three-video mock batch, end to end", () => {
     expect(auth.actualSpend).toBe(0);
   });
 });
+
+// ------------------------------- stale approval vs a NEW routing mechanism ---
+
+/**
+ * An approval covers the PLAN it was shown, not every future way of picking a
+ * model.
+ *
+ * The case this was written for is real and was sitting in the database. Batch
+ * 11af6ba6 was approved on 2026-09-15 with a $0.90 ceiling against a plan of
+ * one named video, spent $0.44, and stayed APPROVED with $0.46 of headroom
+ * while a project still pointed at it. Switching on LOW_AUTO afterwards would
+ * have let the router choose a clip nobody had seen when they approved, and pay
+ * for it out of that leftover. The operator agreed to a bill, not a mechanism.
+ */
+describe("quyền chi cũ KHÔNG cấp phép cho LOW_AUTO", () => {
+  it("duyệt bình thường -> clip do router tự chọn bị chặn", async () => {
+    const { batch } = await makePlannedBatch({
+      name: "Stale approval",
+      maxCostPerVideo: 2.5,
+    });
+    // An ordinary approval. The operator said yes to an amount, and was never
+    // asked about automatic model choice - because at the time there was none.
+    await approveAuthorization({ batchId: batch.id, authorizedMaxSpend: 0.9 });
+
+    // A clip the operator DID name still passes.
+    await expect(
+      assertBatchAuthorized(gateInput({ batchId: batch.id, idempotencyKey: "named-1" })),
+    ).resolves.toBeTruthy();
+
+    // The same money, the same batch, the same provider - refused, because the
+    // router chose it.
+    await expect(
+      assertBatchAuthorized(
+        gateInput({ batchId: batch.id, idempotencyKey: "auto-1", lowAutoRouted: true }),
+      ),
+    ).rejects.toMatchObject({ code: "low_auto_not_approved" });
+  });
+
+  it("không giữ chỗ tiền cho request bị chặn", async () => {
+    const { batch } = await makePlannedBatch({ name: "No reserve", maxCostPerVideo: 2.5 });
+    await approveAuthorization({ batchId: batch.id, authorizedMaxSpend: 0.9 });
+    await expect(
+      assertBatchAuthorized(
+        gateInput({ batchId: batch.id, idempotencyKey: "auto-2", lowAutoRouted: true }),
+      ),
+    ).rejects.toThrow(BatchAuthorizationError);
+    expect(
+      await prisma.costReservation.count({ where: { idempotencyKey: "auto-2" } }),
+    ).toBe(0);
+  });
+
+  it("duyệt CÓ kèm quyền LOW_AUTO thì mới cho qua", async () => {
+    const { batch } = await makePlannedBatch({ name: "Explicit yes", maxCostPerVideo: 2.5 });
+    await approveAuthorization({
+      batchId: batch.id,
+      authorizedMaxSpend: 0.9,
+      lowAutoApproved: true,
+    });
+    await expect(
+      assertBatchAuthorized(
+        gateInput({ batchId: batch.id, idempotencyKey: "auto-3", lowAutoRouted: true }),
+      ),
+    ).resolves.toBeTruthy();
+  });
+
+  it("duyệt lại mà không nhắc lại thì quyền LOW_AUTO MẤT", async () => {
+    // Re-approving is a fresh decision. A permission that survived a re-approval
+    // nobody re-read would turn one deliberate yes into a permanent one.
+    const { batch } = await makePlannedBatch({ name: "Re-approve", maxCostPerVideo: 2.5 });
+    await approveAuthorization({
+      batchId: batch.id,
+      authorizedMaxSpend: 0.9,
+      lowAutoApproved: true,
+    });
+    await approveAuthorization({ batchId: batch.id, authorizedMaxSpend: 0.9 });
+    await expect(
+      assertBatchAuthorized(
+        gateInput({ batchId: batch.id, idempotencyKey: "auto-4", lowAutoRouted: true }),
+      ),
+    ).rejects.toMatchObject({ code: "low_auto_not_approved" });
+  });
+
+  it("quyền của lô này KHÔNG dùng được cho lô khác", async () => {
+    const approved = await makePlannedBatch({ name: "Has auth", maxCostPerVideo: 2.5 });
+    await approveAuthorization({
+      batchId: approved.batch.id,
+      authorizedMaxSpend: 0.9,
+      lowAutoApproved: true,
+    });
+    const fresh = await prisma.batch.create({
+      data: { name: "New batch", amount: 1, status: "PLANNED" },
+    });
+    // Keyed by batchId, so the new batch finds nothing - not the old yes.
+    await expect(
+      assertBatchAuthorized(
+        gateInput({ batchId: fresh.id, idempotencyKey: "auto-5", lowAutoRouted: true }),
+      ),
+    ).rejects.toMatchObject({ code: "no_authorization" });
+  });
+});
