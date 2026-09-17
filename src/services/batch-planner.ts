@@ -24,6 +24,7 @@ import {
 import { spendStatus, type SpendStatus } from "./spend-guard";
 import { providerSpendBreakdown, type ProviderSpendRow } from "./provider-budget";
 import { speechTextFor } from "./generation";
+import { deriveSceneVideoFacts } from "./low-auto-facts";
 
 /**
  * Costing a batch BEFORE anything is approved, and without spending a cent.
@@ -261,6 +262,15 @@ async function scenesFor(
         manualVideoModel: scene.videoModel,
         manualVoiceProvider: scene.voiceProvider,
         manualVoiceModel: scene.voiceModel,
+        // The same derivation `generateSceneVideo` runs. Without it the gate
+        // refuses a LOW_AUTO model for want of scene facts, and the plan the
+        // operator approves quotes $0 for clips the run would really buy - the
+        // number on the approval button being lower than the bill is the one
+        // way this file can do real harm.
+        lowAutoFacts: deriveSceneVideoFacts(scene, {
+          qualityMode: project.qualityMode,
+          stage: "VIDEO",
+        }).facts,
       })),
     };
   }
@@ -392,6 +402,9 @@ async function costAgainst(
   batchId: string | null,
 ): Promise<BatchCosting> {
   const videos: PlannedVideo[] = [];
+  const wallets = Object.fromEntries(
+    (await providerSpendBreakdown()).map((w) => [w.provider, w.remainingUsd]),
+  );
 
   for (const idiom of idioms) {
     const { scenes, basis, projectId } = await scenesFor(idiom.id, batchId);
@@ -405,6 +418,10 @@ async function costAgainst(
       availableProviders: providers,
       // 1080p is a QUALITY-mode demand, matching services/generation.
       needs1080p: input.qualityMode === "QUALITY",
+      // The environment half of the LOW_AUTO gate: real vendor wallets, and the
+      // per-video ceiling this plan is being drawn against.
+      providerBudgets: wallets,
+      perVideoCapRemaining: input.maxCostPerVideo,
     });
     videos.push(
       toPlannedVideo(idiom, estimate, basis, projectId, input.maxCostPerVideo),

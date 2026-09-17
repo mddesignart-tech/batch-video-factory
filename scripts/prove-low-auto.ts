@@ -25,18 +25,10 @@
  *
  *   npx tsx scripts/prove-low-auto.ts
  */
-import fs from "node:fs";
 import type { ModelRegistry } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
-import { classifyCameraIntent } from "../src/domain/camera-intent";
-import {
-  applyCameraGuardrails,
-  findPromptContradictions,
-  RUNWAY_MAX_PROMPT_CHARS,
-} from "../src/domain/video-prompt";
-import { decideMotion, effectiveMotionSource } from "../src/domain/local-motion";
-import { extractSignals } from "../src/services/complexity";
-import { sceneCharacters } from "../src/domain/scene-characters";
+import { decideMotion } from "../src/domain/local-motion";
+import { deriveSceneVideoFacts } from "../src/services/low-auto-facts";
 import { routeScene, RoutingError, type LowAutoSceneFacts } from "../src/services/ai-router";
 import { shouldGenerateKeyframe } from "../src/services/cost-estimator";
 import { productionProviderNames } from "../src/services/provider-health";
@@ -44,10 +36,8 @@ import { spendStatus } from "../src/services/spend-guard";
 import { providerSpendBreakdown, refreshRunwayBalance } from "../src/services/provider-budget";
 import { peekCreateToken } from "../src/services/create-token";
 import { isMockMode } from "../src/lib/env";
-import { toAbsolute } from "../src/lib/paths";
 import type { Complexity, QualityMode, RouterStrategy, SpendPriority } from "../src/domain/enums";
 
-const CANDIDATE_SCENE = "71cd51f2"; // Cold feet #1 - LOW, HIGH priority, 1 cast, keyframe
 const MODEL_ID = "h3_max:768x1280";
 const PROVIDER = "runway";
 
@@ -160,14 +150,48 @@ async function main() {
   console.log(`Reservation (trước)   : ${resvBefore}`);
   console.log(`h3_max lifecycle      : ${regBefore.lifecycle}\n`);
 
+  // Chosen by its PROPERTIES, not by a hard-coded id.
+  //
+  // It used to name one scene, and that scene stopped existing the moment a
+  // script was re-persisted - `persistScript` deletes and recreates the rows,
+  // so the id changes even though the same scene is still there. A proof that
+  // breaks whenever the thing it proves is rewritten proves nothing for long.
+  //
+  // What it needs is a LOW scene whose spendPriority is HIGH: at LOW priority
+  // `decideMotion` answers LOCAL_MOTION once the pin is lifted, and the honest
+  // result would be "free" rather than "auto-routed" - which is a fine outcome
+  // and a useless proof.
   const scene = await prisma.scene.findFirstOrThrow({
-    where: { id: { startsWith: CANDIDATE_SCENE } },
+    where: { complexity: "LOW", spendPriority: "HIGH", skipped: false },
+    orderBy: [{ project: { createdAt: "desc" } }, { sceneNumber: "asc" }],
     include: { project: { include: { idiom: true } } },
   });
-  const chars = sceneCharacters(scene).present.length || 1;
-  const intent = classifyCameraIntent(scene);
-  const guarded = applyCameraGuardrails(scene.videoPrompt, intent, RUNWAY_MAX_PROMPT_CHARS);
-  const hasKeyframe = Boolean(scene.imagePath) && fs.existsSync(toAbsolute(scene.imagePath ?? ""));
+  // Same derivation production runs - services/low-auto-facts - so the facts
+  // this proof varies one at a time are the facts the pipeline would have used.
+  // `ignoreManualPin` is what makes the clone a clone: it lifts the pin for the
+  // motion decision only, in memory, and the row itself is never written to.
+  const derived = deriveSceneVideoFacts(scene, {
+    qualityMode: scene.project.qualityMode,
+    stage: "VIDEO",
+    ignoreManualPin: true,
+  });
+  const chars = derived.characterCount;
+  const intent = derived.cameraIntent;
+  /**
+   * The clone answers YES to the keyframe, and says so out loud.
+   *
+   * On disk there is no still for a scene whose images have not been generated,
+   * and at the VIDEO stage that is a hard refusal - correctly, because
+   * `generateSceneVideo` must never buy an image-to-video clip with no image.
+   * But then every case below would fail for the same missing file and the
+   * proof would show nothing about the eight variables it exists to vary.
+   *
+   * So the base case asserts the state the pipeline reaches AFTER the image
+   * step, which is the state in which the video call actually happens. Case C
+   * puts it back to false and checks the refusal still lands.
+   */
+  const hasKeyframeOnDisk = derived.hasKeyframe;
+  const hasKeyframe = true;
   const fresh = decideMotion({
     qualityMode: scene.project.qualityMode as QualityMode,
     complexity: scene.complexity as Complexity,
@@ -187,7 +211,10 @@ async function main() {
   console.log(`Scene       : ${scene.id.slice(0, 8)} — ${scene.project.idiom.phrase} #${scene.sceneNumber}`);
   console.log(`complexity  : ${scene.complexity}      spendPriority: ${scene.spendPriority}`);
   console.log(`motionSource: lưu=${scene.motionSource}  tươi=${fresh.source}`);
-  console.log(`nhân vật    : ${chars}          keyframe: ${hasKeyframe ? "CÓ" : "KHÔNG"}`);
+  console.log(
+    `nhân vật    : ${chars}          keyframe trên đĩa: ${hasKeyframeOnDisk ? "CÓ" : "CHƯA"}` +
+      `${hasKeyframeOnDisk ? "" : " (bản sao giả định ĐÃ tạo ảnh — xem case C)"}`,
+  );
   console.log(`camera      : ${intent.mode}`);
   console.log(`ghim tay    : ${scene.videoProvider ?? "-"}/${scene.videoModel ?? "-"}`);
   console.log(`thời lượng  : ${scene.duration}s`);
@@ -200,10 +227,10 @@ async function main() {
     duration: scene.duration,
     characterCount: chars,
     hasKeyframe,
-    cameraMode: intent.mode,
-    repeatedSmallObjects: extractSignals(scene).repeatedSmallObjects,
-    promptGuarded: guarded.added.length > 0 || guarded.skipped.length > 0,
-    contradictions: findPromptContradictions(guarded.text),
+    cameraMode: derived.facts.cameraMode,
+    repeatedSmallObjects: derived.facts.repeatedSmallObjects,
+    promptGuarded: derived.facts.promptGuarded,
+    contradictions: derived.contradictions,
     manualProvider: null, // <- the only change vs production
     manualModel: null,
     lifecycle: "LOW_AUTO", // <- simulated grant, in memory only
@@ -213,7 +240,7 @@ async function main() {
     globalBudget: status.remaining,
     perVideoCap: null,
     stage: "VIDEO",
-    motionSource: effectiveMotionSource(scene.motionSource, fresh, { manuallyPinned: false }).source,
+    motionSource: derived.motion.source,
   };
 
   // ---- route as production stands: pinned, candidate lifecycle ----------
@@ -306,8 +333,10 @@ async function main() {
   const regAfter = await prisma.modelRegistry.findFirstOrThrow({
     where: { provider: PROVIDER, modelId: MODEL_ID },
   });
+  // Re-read by id, so "nothing moved" is checked against the SAME row the
+  // cases were built from rather than whatever the selector would pick now.
   const sceneAfter = await prisma.scene.findFirstOrThrow({
-    where: { id: { startsWith: CANDIDATE_SCENE } },
+    where: { id: scene.id },
     select: { videoProvider: true, videoModel: true, motionSource: true },
   });
   const tokenAfter = await peekCreateToken();

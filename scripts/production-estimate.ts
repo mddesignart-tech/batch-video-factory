@@ -15,6 +15,8 @@ import { REFERENCE_SCENE_PROFILE } from "@/services/batch-planner";
 import { productionProviderNames } from "@/services/provider-health";
 import { spendStatus } from "@/services/spend-guard";
 import { speechTextFor } from "@/services/generation";
+import { deriveSceneVideoFacts } from "@/services/low-auto-facts";
+import { providerSpendBreakdown } from "@/services/provider-budget";
 import { peekCreateToken } from "@/services/create-token";
 
 /**
@@ -95,6 +97,13 @@ async function main(): Promise<void> {
         spendPriority: scene.spendPriority as SpendPriority,
         characterCount: sceneCharacters(scene).present.length || 1,
         speechText: speechTextFor(scene),
+        // The same derivation the pipeline runs. Without it a LOW_AUTO model is
+        // refused for want of facts, and this audit quoted $0.00 of video for
+        // two scenes that would really be bought.
+        lowAutoFacts: deriveSceneVideoFacts(scene, {
+          qualityMode: project!.qualityMode,
+          stage: "VIDEO",
+        }).facts,
       }))
     : REFERENCE_SCENE_PROFILE.map((s) => ({ ...s }));
 
@@ -119,6 +128,7 @@ async function main(): Promise<void> {
   console.log(`  So canh              : ${scenes.length}`);
 
   const models = await prisma.modelRegistry.findMany({ where: { enabled: true } });
+  const wallets = await providerSpendBreakdown();
 
   // A ceiling high enough not to distort routing. This audit asks what the work
   // costs, not what fits a budget - clamping here would silently downgrade
@@ -131,6 +141,8 @@ async function main(): Promise<void> {
     maxBudget: 1000,
     availableProviders: providers,
     needs1080p: mode === "QUALITY",
+    // Real vendor wallets, so a model this account cannot afford is not quoted.
+    providerBudgets: Object.fromEntries(wallets.map((w) => [w.provider, w.remainingUsd])),
   });
 
   console.log(`  Co so gia            : ${VI_COST_BASIS[estimate.costBasis]}`);

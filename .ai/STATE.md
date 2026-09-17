@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-15
+**Cập nhật:** 2026-09-17
 **Cột mốc hiện tại:** **Batch Video Factory V1 đã xây xong ở chế độ mock.**
 Milestone 2 xong trước đó (Text + Image + Video + Voice đã chạy thật).
 
@@ -1115,63 +1115,103 @@ QĐ-052.
 
 ### Còn treo, cố ý
 
-- **`8453fa52`** (Spill the beans #6, MEDIUM, ghim h3_max) **giờ bị từ chối** vì
-  trần độ khó. Đây là hệ quả đã lường trước của QĐ-051 — cần gỡ ghim hoặc hạ
-  phân loại cảnh, không phải nới trần.
-- **`63acb558`** (Cold feet #4) ghim `gen4_turbo` đang `DEGRADED` và **không có
-  keyframe**. Ghim tay vẫn cho phép DEGRADED (QĐ-035/QĐ-056), nhưng cảnh này sẽ
-  hỏng ở bước keyframe. Chưa đụng tới.
-- **Lô `11af6ba6`** vẫn `APPROVED`, còn **$0,458840**, `lowAutoApproved = false`.
-  **KHÔNG đóng** — đã kiểm tra và nó đang có dependency thật: batch ở trạng thái
-  `RUNNING`, dự án "Cold feet" ở `media_generating`, **5/6 cảnh còn `pending`**
-  và **6 job đang xếp hàng** (5 × `generate_scene_media` + 1 × `render_final`,
-  tạo lúc 2026-09-15T07:56, `JOB_WORKER_ENABLED=true`). Đóng quyền chi sẽ giết
-  một lô đang dở.
+- **`8453fa52`** (Spill the beans #6, MEDIUM, ghim h3_max) **bị từ chối** vì trần
+  độ khó. Hệ quả đã lường trước của QĐ-051 — cần gỡ ghim hoặc hạ phân loại cảnh,
+  không phải nới trần.
+- **`d9c9b991`** (Spill the beans #3) ghim `gen4.5` đang `PIN_ONLY`, $0,72. Ghim
+  tay vẫn tới được, đúng thiết kế. Chưa đụng.
+- Ba dự án **Break a leg / Piece of cake / Spill the beans** đều là cảnh HIGH với
+  3 nhân vật. Không cảnh nào route được, và đó là **trạng thái đúng**: kể từ
+  QĐ-028 không còn provider nào được duyệt cho MEDIUM/HIGH (Sora DEPRECATED,
+  gen4.5 PIN_ONLY, gen4_turbo DEGRADED), và LOW_AUTO cố ý không mở rộng sang đó.
 
-  Rủi ro mà việc đóng lẽ ra để phòng **đã được xử lý bằng cấu trúc**: đã kiểm
-  chứng trực tiếp trên chính dòng production đó — request `lowAutoRouted: true`
-  bị ném `low_auto_not_approved` và **không giữ chỗ đồng nào** (reservation
-  3 → 3). Đường clip-đã-nêu-tên vẫn mở, đúng thứ lô đang dở cần.
+---
+
+## Lô cũ `11af6ba6` — ĐÃ ĐÓNG 2026-09-17
+
+Trạng thái trước đó ghi "KHÔNG đóng, đang có dependency thật". Điều đó đúng ở
+thời điểm viết và **đã hết đúng**: lô dừng hẳn từ 2026-09-15, job dẫn đầu đã
+`failed`, và cái gọi là dependency hoá ra là **6 job `queued` đang lên nòng** chứ
+không phải một lô đang chạy.
+
+```
+quyền chi  APPROVED  -> CANCELLED
+lô         RUNNING   -> CANCELLED
+job        6 queued  -> 6 cancelled
+```
+
+**Vì sao phải đóng, chứ không chỉ để đó.** `claimNext` lấy job theo `priority`
+tăng dần và **không lọc theo lô**. Sáu job đó (priority 102–106 và 500) sẽ đi
+**trước** bất cứ lô mới nào, trên một lô không ai theo dõi, gồm một cảnh ghim
+`gen4_turbo` đang `DEGRADED` và không có keyframe. Ước tính nếu chúng chạy:
+~5 ảnh × $0,041 + 1 clip $0,25 ≈ **$0,456**, vừa đủ vét sạch $0,458840 còn lại.
+
+**Cái gì KHÔNG bị đụng** — kiểm bằng cách đọc lại DB sau khi ghi, không phải bằng
+lời script tự khai:
+
+```
+job queued/processing còn : 0            ĐẠT
+quyền chi                 : CANCELLED    ĐẠT
+đang giữ chỗ              : $0,000000    ĐẠT
+actualSpend giữ nguyên    : $0,441160    ĐẠT
+sổ chi thật giữ nguyên    : 120 dòng $5,353920   ĐẠT
+reservation đã chốt còn   : 3 (bằng chứng, không xoá)
+```
+
+Không hoàn tiền giả. Tiền đã rời đi, và bản ghi vẫn nói đúng như vậy. Xem QĐ-061.
+
+---
+
+## Lô nghiệm thu `a690a290` — CHỜ DUYỆT, chưa chi một đồng
+
+Dự án `f2b68443` "Cold feet" được soạn lại bằng
+`scripts/prepare-first-real-video.ts --make-batch`. `persistScript` xoá và tạo
+lại toàn bộ cảnh, nên **mọi ghim tay và mọi đường dẫn media cũ biến mất** — kể cả
+ghim `gen4_turbo` ở cảnh 4 từng là một quả mìn.
+
+```
+6 cảnh · 26 giây · TOÀN BỘ LOW · 1 nhân vật · camera khoá · không ghim tay nào
+```
+
+| | |
+|---|---|
+| LOCAL_MOTION ($0) | 4 cảnh — #2 #3 #5 #6 |
+| AI_VIDEO qua LOW_AUTO | 2 cảnh — #1 #4, `runway/h3_max:768x1280`, $0,40/cảnh |
+| quyền chi | **DRAFT** — chưa cấp phép chi gì |
+
+Dự toán thật **$1,121800**, đề xuất trần **$1,24**.
+
+**Số này từng sai, và sai theo hướng nguy hiểm nhất.** Trước QĐ-060 bộ dự toán
+không truyền dữ kiện cảnh cho cổng LOW_AUTO, cổng fail-closed, và bảng ghi
+`VIDEO $0,000000` với hai cảnh `NEEDS_PROVIDER` — tổng **$0,297800**. Đường chạy
+thật vẫn sẽ mua hai clip $0,80. Trần duyệt thấp hơn hoá đơn là cách duy nhất chỗ
+này gây hại thật.
+
+### Route thật của 23 cảnh hiện có
+
+| | |
+|---|---|
+| **auto h3_max** (router tự chọn) | **2** — `26de7d41` #1, `bf8bf64d` #4, sau khi có keyframe |
+| manual h3_max (ghim tay) | 1 — `4dd22035` Spill the beans #5 |
+| LOCAL_MOTION ($0) | 6 |
+| model trả phí khác (ghim tay) | 1 — `d9c9b991` gen4.5 |
+| bị chặn, không route được | 13 |
+
+Hai cảnh auto **hiện vẫn hiện `CHẶN(needs_keyframe)`** trong `lowauto:dryrun`, và
+đó là câu trả lời đúng: dry-run hỏi ở giai đoạn `VIDEO` — "nếu gọi video **ngay
+bây giờ**" — mà bây giờ chưa cảnh nào có ảnh. Bộ dự toán hỏi ở giai đoạn kế
+hoạch, biết rằng kế hoạch **bao gồm** bước tạo ảnh, nên nó định giá $0,80. Hai
+câu hỏi khác nhau, hai câu trả lời đúng.
+
+`scripts/prove-low-auto.ts` chứng minh phần còn lại: cùng cảnh đó, với keyframe
+đã có, router tự chọn `runway/h3_max` $0,40 `lowAutoRouted=true`, và 9/9 negative
+control vẫn chặn đúng lớp đúng lý do.
 
 ### Công cụ
 
 ```bash
 npm run lowauto:dryrun     # mô phỏng, chỉ 1 GET miễn phí
+npm run lowauto:prove      # chứng minh + 9 negative control, $0
 npm run runway:balance     # đọc lại số dư live
-npm run lowauto:grant      # thử khô; cần --apply mới ghi
+npm run batch:close-stale  # thử khô; cần --apply mới ghi
 ```
-
-### Route thật của 23 cảnh sau khi bật
-
-| | |
-|---|---|
-| **auto h3_max** (router tự chọn) | **0** |
-| manual h3_max (ghim tay) | 2 — `4dd22035` #5, `71cd51f2` #1 |
-| LOCAL_MOTION ($0) | 6 |
-| bị chặn, không route được | 13 |
-| model trả phí khác (ghim tay) | 2 — `d9c9b991` gen4.5, `63acb558` gen4_turbo |
-| cảnh MEDIUM/HIGH | 16 |
-
-13 cảnh bị chặn là **trạng thái đúng**, không phải lỗi: MEDIUM/HIGH không còn
-provider nào được duyệt kể từ QĐ-028 (Sora DEPRECATED, gen4.5 PIN_ONLY,
-gen4_turbo DEGRADED), và LOW_AUTO cố ý không mở rộng sang đó.
-
-### Quyền chi cũ `11af6ba6` — vẫn mở, đã kiểm chứng ba đường
-
-```
-status APPROVED · trần $0,90 · đã chi $0,441160 · CÒN $0,458840
-lowAutoApproved = false · duyệt 2026-09-15 · chưa đóng
-providerScope ["groq","openai","runway"] · maxCostPerVideo $1,50
-```
-
-**Dependency đang giữ nó:** batch `RUNNING`, project `f2b68443` "Cold feet" ở
-`media_generating`, **5 cảnh còn `pending`**, **6 job đang xếp hàng**. Đóng sẽ
-giết một lô đang dở.
-
-**Lô mới có kế thừa được không?** Không. Đã thử thật: tạo một batch mới, gọi
-`assertBatchAuthorized` với `lowAutoRouted: true` → `no_authorization`. Quyền chi
-khoá theo `batchId`, nên một lô mới không tìm thấy gì cả — không phải tìm thấy
-cái "có" cũ. Batch probe đã xoá sạch sau khi thử.
-
-**Lô cũ có trả cho clip LOW_AUTO được không?** Không. `low_auto_not_approved`,
-reservation 3 → 3, không giữ chỗ đồng nào.

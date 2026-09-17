@@ -36,7 +36,6 @@ import {
 } from "./cost-estimator";
 import { recordCost, spentOnProject } from "./cost-tracker";
 import { providerSpendBreakdown } from "./provider-budget";
-import { extractSignals } from "./complexity";
 import { assertCanSpend } from "./spend-guard";
 import { consumeCreateToken } from "./create-token";
 import {
@@ -52,12 +51,7 @@ import {
 } from "@/domain/local-motion";
 import { parseDialogueLines } from "@/domain/dialogue-lines";
 import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
-import { classifyCameraIntent } from "@/domain/camera-intent";
-import {
-  applyCameraGuardrails,
-  findPromptContradictions,
-  RUNWAY_MAX_PROMPT_CHARS,
-} from "@/domain/video-prompt";
+import { deriveSceneVideoFacts } from "./low-auto-facts";
 import { knownBadInput, recordFailureEvidence } from "./model-reliability";
 import { probeDuration } from "@/media/ffmpeg";
 import { normalizeVoiceClip } from "@/media/audio-normalize";
@@ -208,7 +202,13 @@ function routeFor(
     // Whether a keyframe EXISTS, not whether we would like one. Veo bills 8
     // seconds instead of 4 when an image is attached, so the estimate has to
     // follow the file on disk rather than the preference.
-    keyframeAvailable: Boolean(scene.imagePath),
+    //
+    // The video path supplies `lowAuto.hasKeyframe`, which has actually looked
+    // on disk; the column alone only proves a filename was once written down.
+    // Prefer the stronger answer when it is available, and note that the two
+    // differ exactly when a stored image has since been deleted - the case
+    // where billing for an attached image would be billing for nothing.
+    keyframeAvailable: lowAuto?.hasKeyframe ?? Boolean(scene.imagePath),
     // Providers this scene has already defeated. Excluded from routing.
     sceneFlags: parseJson<string[]>(scene.providerFlagsJson, []),
     budgetRemaining: ctx.budgetRemaining,
@@ -1216,7 +1216,17 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
 
-  const motion = motionResolutionFor(ctx);
+  // Everything the routing gate will be asked about this scene, derived ONCE
+  // and shared with the dry-run and the proof script - see
+  // services/low-auto-facts. Composed here, before the LOCAL_MOTION branch,
+  // because the motion verdict is part of the same derivation: computing it
+  // twice from the same inputs is how the report and the pipeline came to
+  // disagree in the first place.
+  const derived = deriveSceneVideoFacts(scene, {
+    qualityMode: project.qualityMode,
+    stage: "VIDEO",
+  });
+  const motion = derived.motion;
   if (motion.diverged) {
     // Logged at WARN and BEFORE anything is generated, because this is the
     // moment the two records of what this scene should cost were found to
@@ -1284,13 +1294,7 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
   // This is not cosmetic. The same scene, same keyframe and same model scored
   // camera 1/10 without a lock guardrail and 10/10 with one; 17 of this
   // project's 23 scenes were carrying prompts with no camera lock at all.
-  const cameraIntent = classifyCameraIntent(scene);
-  const guarded = applyCameraGuardrails(
-    scene.videoPrompt,
-    cameraIntent,
-    RUNWAY_MAX_PROMPT_CHARS,
-  );
-  const videoPrompt = guarded.text;
+  const { cameraIntent, guarded, videoPrompt, contradictions } = derived;
   if (guarded.added.length > 0 || guarded.truncated) {
     await logger.info({
       event: "scene.camera_guardrail",
@@ -1299,7 +1303,6 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
       message: `${cameraIntent.reason} -> ${guarded.note}`,
     });
   }
-  const contradictions = findPromptContradictions(videoPrompt);
   if (contradictions.length > 0) {
     // Refuse rather than warn, and refuse BEFORE routing. A prompt that both
     // forbids and requests the same move makes the model choose, and it chooses
@@ -1325,13 +1328,10 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
     // is the call that spends, so a keyframe that is merely expected later is a
     // keyframe that does not exist.
     {
-      stage: "VIDEO",
-      motionSource: motion.source,
-      hasKeyframe: Boolean(scene.imagePath),
-      cameraMode: cameraIntent.mode,
-      repeatedSmallObjects: extractSignals(scene).repeatedSmallObjects,
-      promptGuarded: guarded.added.length > 0 || guarded.skipped.length > 0,
-      contradictions,
+      ...derived.facts,
+      // The environment half, which is not a property of the scene: each
+      // vendor's wallet as it stands right now, and what the batch approval
+      // still allows one video to cost.
       providerBudgets: await providerWalletsUsd(),
       perVideoCapRemaining: await perVideoCapFor(ctx.batchId),
     },

@@ -59,6 +59,51 @@ phải giữ đúng ngoại hình.
 
 Nếu không còn mô hình nào → ném `RoutingError`, kèm lý do bằng tiếng Việt.
 
+### 1b. Ai được PHÉP chọn, tách khỏi ai LÀM ĐƯỢC
+
+Làm được việc không có nghĩa là router được tự chọn. Bốn phản đối độc lập, chỉ
+cần một cái là đủ:
+
+| | trả lời câu hỏi gì |
+|---|---|
+| `lifecycle` | **người vận hành** nói gì — `PIN_ONLY`, `DEPRECATED`, `DISABLED` |
+| `NEEDS_EXPLICIT_PIN` | **bằng chứng benchmark** nói gì |
+| `reliability` | **chính các lần chạy trả phí của ta** đã làm gì |
+| cổng `LOW_AUTO` | **cảnh này** có đúng hình dạng mà quyền bao phủ không |
+
+Mô hình bị chặn **vẫn ở lại** danh sách năng lực, nên ghim tay vẫn tới được. Chỉ
+việc tự động chọn là bước qua chúng.
+
+#### `LOW_AUTO` — một quyền hẹp, có điều kiện
+
+`ACTIVE` nghĩa là "router chọn được, ở mọi cảnh". `LOW_AUTO` nghĩa là "router chọn
+được, **chỉ** ở cảnh LOW đủ điều kiện". Hai trạng thái riêng vì gộp chúng lại chỉ
+có một cách diễn đạt — `ACTIVE` — và nó cấp cho mọi cảnh.
+
+`isAutoRoutable` giữ nửa đầu (phải là LOW). `lowAutoRouteBlock` giữ phần còn lại,
+và router phải qua **cả hai**:
+
+```
+motionSource = AI_VIDEO        cảnh làm free được thì không có gì để mua
+không ghim tay sang model khác  quyền của router không chen vào lệnh của người
+keyframe CÓ THẬT TRÊN ĐĨA      không phải chỉ có tên file trong cột
+characterCount <= 2            đúng mức đã được đo
+camera = LOCKED_CAMERA         mọi mẫu chấm điểm đều khoá máy
+không vật thể nhỏ lặp lại      đúng loại cảnh đã làm hỏng hai clip trả phí
+lifecycle = LOW_AUTO           ứng viên KHÔNG tính; đề cử không phải là quyền
+reliability = OK · verification = BENCHMARK_VERIFIED
+prompt đã qua guardrail, không tự mâu thuẫn
+ước tính <= ví hãng · <= hạn mức chung · <= trần mỗi video
+```
+
+**Thiếu dữ kiện thì từ chối, không cho qua.** Một caller định tuyến video mà
+không nộp dữ kiện cảnh nhận được lời từ chối: quyền là có điều kiện, và một điều
+kiện chưa ai kiểm thì chưa được thoả mãn.
+
+Dữ kiện đó được dẫn xuất **một lần**, ở `services/low-auto-facts.ts`, và bốn nơi
+cùng gọi: đường chạy thật, bộ dự toán, `lowauto:dryrun`, `lowauto:prove`. Trước
+đó mỗi nơi tự dựng lấy, và chúng **đã bất đồng về tiền** — xem QĐ-060.
+
 ### 2. Ngưỡng chất lượng (chỉ khi strategy = AUTO)
 
 ```

@@ -10,7 +10,12 @@ import type {
 import { decideMotion, keyframeRequired } from "@/domain/local-motion";
 import { planDuration, splitModelSize, type DurationPlan } from "@/domain/video-duration";
 import { basisForProviders, type CostBasis } from "@/domain/cost-basis";
-import { routeScene, RoutingError, type RouteDecision } from "./ai-router";
+import {
+  routeScene,
+  RoutingError,
+  type LowAutoSceneFacts,
+  type RouteDecision,
+} from "./ai-router";
 import { costForModel, expectedRetryMultiplier } from "./pricing";
 import { round } from "@/lib/utils";
 
@@ -38,6 +43,24 @@ export interface PlannedSceneInput {
   manualVideoModel?: string | null;
   manualVoiceProvider?: string | null;
   manualVoiceModel?: string | null;
+
+  /**
+   * The scene half of the LOW_AUTO gate, from `deriveSceneVideoFacts`.
+   *
+   * Optional, and its ABSENCE is not neutral: a LOW_AUTO model asked to price a
+   * scene with no facts is refused, so an estimate built without this reports
+   * "no provider may serve this scene" for a scene the pipeline would happily
+   * buy. That is the failure this field exists to close - the estimator was
+   * quoting $0.00 of video for a video that would really cost $0.80, because
+   * the only model allowed to take it was refused for want of facts the caller
+   * had in its hand the whole time.
+   *
+   * Callers that hold real Scene rows (the batch planner, the production audit)
+   * derive it once and pass it. Callers working from a synthetic profile leave
+   * it out and get the conservative answer, which is the right answer for a
+   * scene whose text does not exist yet.
+   */
+  lowAutoFacts?: Omit<LowAutoSceneFacts, "providerBudgets" | "perVideoCapRemaining">;
 }
 
 export interface ScenePlan {
@@ -142,6 +165,17 @@ export interface EstimateInput {
   availableProviders: string[];
   needs1080p?: boolean;
   aspectWidth?: number;
+  /**
+   * Each vendor's own wallet, in dollars. The environment half of the gate.
+   *
+   * Left out, every wallet reads as null - "we hold no wallet for this vendor",
+   * which is what the gate means by a provider that meters itself. It is not
+   * read as zero, because a forecast that assumed every vendor was broke would
+   * report nothing routable and be useless.
+   */
+  providerBudgets?: Record<string, number | null>;
+  /** The batch approval's per-video ceiling, when one governs this estimate. */
+  perVideoCapRemaining?: number | null;
 }
 
 /**
@@ -221,6 +255,8 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
       availableProviders,
       budgetRemaining: remaining,
       needs1080p: input.needs1080p ?? false,
+      providerBudgets: input.providerBudgets,
+      perVideoCapRemaining: input.perVideoCapRemaining,
     });
     plans.push(plan);
     if (plan.error) errors.push(`Cảnh ${scene.sceneNumber}: ${plan.error}`);
@@ -293,6 +329,8 @@ export function planScene(opts: {
   availableProviders: string[];
   budgetRemaining: number;
   needs1080p: boolean;
+  providerBudgets?: Record<string, number | null>;
+  perVideoCapRemaining?: number | null;
 }): ScenePlan {
   const {
     scene,
@@ -318,6 +356,33 @@ export function planScene(opts: {
     shouldGenerateKeyframe(qualityMode, scene.complexity, scene.characterCount),
   );
   const wantsQuality = shouldEvaluateQuality(qualityMode, scene.spendPriority);
+
+  /**
+   * The gate's inputs as they will stand AT THE VIDEO CALL, not as they stand
+   * now.
+   *
+   * The one substituted value is `hasKeyframe`, and it is the whole reason this
+   * is not simply `scene.lowAutoFacts`. An estimate runs before the image step,
+   * so on disk there is no still for any scene - answering `false` would refuse
+   * every scene for a missing file and forecast $0.00 of video for a video that
+   * will certainly buy some. The plan being priced INCLUDES generating that
+   * keyframe (`wantsKeyframe`), so by the time the video call happens the file
+   * exists, and pricing the call that will really be made is the honest answer.
+   *
+   * It is a forecast, never a permit. `stage` stays VIDEO so no condition is
+   * relaxed, and `generateSceneVideo` re-derives all of this from the disk at
+   * the moment it spends. A plan that says $0.40 and a pipeline that then finds
+   * no image refuses there, having promised nothing.
+   */
+  const lowAutoForEstimate = scene.lowAutoFacts
+    ? {
+        ...scene.lowAutoFacts,
+        motionSource: motion.source,
+        hasKeyframe: scene.lowAutoFacts.hasKeyframe || wantsKeyframe,
+        providerBudgets: opts.providerBudgets ?? {},
+        perVideoCapRemaining: opts.perVideoCapRemaining ?? null,
+      }
+    : undefined;
 
   let remaining = opts.budgetRemaining;
   let error: string | undefined;
@@ -363,6 +428,7 @@ export function planScene(opts: {
         availableProviders,
         manualProvider,
         manualModel,
+        lowAuto: type === "video" ? lowAutoForEstimate : undefined,
       });
       remaining = Math.max(0, remaining - decision.estimatedCost);
       return decision;

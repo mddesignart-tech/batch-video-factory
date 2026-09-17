@@ -1359,3 +1359,123 @@ làm là đúng kiểu tự ý đổi quyết định của người khác.
 phải giả lập trong bộ nhớ. Mỗi ca vẫn bị chặn đúng lớp và đúng lý do. Kiểm trước
 khi bật chứng minh mô phỏng đúng; kiểm sau khi bật chứng minh **production** đúng,
 và chỉ cái thứ hai mới là thứ đang chạy.
+
+---
+
+## QĐ-060 — Một dẫn xuất, ba nơi gọi: dry-run không được trả lời khác production
+
+Cổng LOW_AUTO nhận một túi dữ kiện về cảnh. Túi đó đang được **dựng tay ở ba
+nơi**: đường chạy thật trong `services/generation.ts`, mô phỏng trong
+`scripts/dry-run-low-auto.ts`, và bản chứng minh trong `scripts/prove-low-auto.ts`.
+
+Ba bản chép tay của cùng một dẫn xuất không phải chuyện gọn gàng. Nó là cách để
+**bản mô phỏng và thứ nó mô phỏng bất đồng về tiền**, âm thầm, trong khi cả hai
+vẫn xanh test của riêng mình.
+
+### Chúng đã bất đồng thật
+
+| | `hasKeyframe` trả lời bằng gì |
+|---|---|
+| dry-run | `fs.existsSync(toAbsolute(imagePath))` — **nhìn vào đĩa** |
+| production | `Boolean(scene.imagePath)` — **chỉ đọc cột** |
+
+Một cảnh mà cột còn ghi tên ảnh nhưng file đã bị xoá: báo cáo nói **không đủ điều
+kiện**, đường chạy thật nói **đủ**. Và đường chạy thật là đường tiêu tiền. Nó sẽ
+POST một request image-to-video **không có ảnh** — đúng loại lỗi mà hãng tính
+tiền trước rồi mới trả về hỏng.
+
+Câu trả lời đúng là của dry-run. `h3_max` là image-to-video; **một cái tên file
+không phải một tấm ảnh**.
+
+### Cách sửa: `services/low-auto-facts.ts`
+
+`deriveSceneVideoFacts(scene, opts)` — một hàm, ba nơi gọi. Nó trả về cả prompt
+đã qua guardrail, để thứ mà cổng xét và thứ nằm trong request body là **cùng một
+chuỗi**; dựng prompt hai lần là cách `promptGuarded = true` mô tả một prompt khác
+với prompt thực sự rời khỏi máy.
+
+Cái mà mỗi nơi gọi **vẫn tự cung cấp** là nửa thuộc về *môi trường* — ví từng
+hãng và trần mỗi video. Chúng đọc từ chỗ khác, vào lúc khác, và nhét chúng vào
+một hàm thuần sẽ là nhét một lần đọc database vào chỗ không nên có.
+
+### Nơi gọi thứ tư, và nó đang nói dối về giá
+
+Bộ dự toán (`cost-estimator` → `batch-planner`, `production-estimate`) **không hề
+truyền dữ kiện cảnh**. Cổng fail-closed nên nó từ chối `h3_max` với lý do "không
+nhận được dữ liệu cảnh", rồi bảng dự toán ghi:
+
+```
+VIDEO : $0.000000      canh 1, canh 4: NEEDS_PROVIDER
+TOTAL : $0.297800
+```
+
+Trong khi đường chạy thật sẽ mua **hai clip h3_max, $0,80**. Tổng thật:
+**$1,121800** — gấp 3,8 lần.
+
+Đây là hỏng hóc tệ nhất trong nhóm này, vì con số đó chính là con số hiện trên
+nút DUYỆT. **Trần duyệt thấp hơn hoá đơn** là cách duy nhất tệp này gây hại thật.
+
+Nên bộ dự toán giờ nhận `lowAutoFacts` và thay **đúng một** giá trị:
+
+```ts
+hasKeyframe: scene.lowAutoFacts.hasKeyframe || wantsKeyframe
+```
+
+Dự toán chạy **trước** bước tạo ảnh, nên trên đĩa chưa cảnh nào có ảnh. Nhưng kế
+hoạch đang được định giá **bao gồm** việc tạo keyframe đó, nên tới lúc gọi video
+thì file có thật. Định giá đúng cuộc gọi sẽ thực sự xảy ra là câu trả lời trung
+thực; trả lời `false` là dự báo $0 cho một video chắc chắn sẽ mua.
+
+Nó là **dự báo, không bao giờ là giấy phép**. `stage` vẫn là `VIDEO`, không điều
+kiện nào được nới, và `generateSceneVideo` vẫn dẫn xuất lại tất cả từ đĩa vào
+đúng lúc tiêu tiền. Kế hoạch nói $0,40 mà pipeline không thấy ảnh thì pipeline từ
+chối ở đó — nó chưa hứa gì cả.
+
+### Bài kiểm tra mới
+
+`tests/low-auto-facts.test.ts` giữ đúng điều này: cùng một input, ba nơi gọi
+`routeScene` phải ra cùng provider, cùng model, cùng giá, cùng cờ `lowAutoRouted`;
+và keyframe bị xoá phải bị từ chối ở **cả hai** phía, chứ không phải một.
+
+---
+
+## QĐ-061 — Đóng một lô dừng giữa chừng, mà không viết lại nó đã tiêu gì
+
+Lô `11af6ba6` được duyệt 2026-09-15 với trần $0,90, tiêu $0,441160 rồi dừng. Thứ
+nó để lại **không nằm im**:
+
+```
+6 job status=queued  (5 × generate_scene_media + 1 × render_final)
+quyền chi APPROVED, còn $0,458840, scope ["groq","openai","runway"]
+```
+
+`claimNext` lấy job theo `priority` tăng dần, **không lọc theo lô**. Lần tới có
+worker chạy — vì bất kỳ lý do gì, kể cả một lô khác hoàn toàn — sáu job đó đi
+trước, trên một lô không ai theo dõi, trong đó có một cảnh ghim `gen4_turbo`
+đang `DEGRADED` và **không có keyframe**.
+
+Ước tính nếu chúng chạy: ~5 ảnh × $0,041 + 1 clip $0,25 ≈ **$0,456** — vừa đủ
+vét sạch phần dư.
+
+### Ranh giới
+
+Huỷ việc **chưa xảy ra** là dọn sổ. Sửa bản ghi việc **đã xảy ra** là làm giả, và
+hai thứ đó chỉ cách nhau một câu `deleteMany` cẩu thả.
+
+| | |
+|---|---|
+| `CostEntry` | không đụng. $5,353920 vẫn là $5,353920 |
+| `CostReservation` | không đụng. 2 COMMITTED + 1 RELEASED là **bằng chứng** — trong đó có dòng ghi Runway xác nhận không thu tiền clip hỏng |
+| `LogEntry` | không đụng, và lần chạy này **ghi thêm** |
+| `BatchAuthorization` | chỉ đổi `status`, qua `closeAuthorization`. `actualSpend` giữ nguyên, **không bịa hoàn tiền** |
+| `Job` | `queued` → `cancelled`. Huỷ, **không xoá** |
+
+### Điều kiện duy nhất có thể chặn việc này
+
+Giữ chỗ **chưa chốt**. Một `RESERVED` nghĩa là có request còn đang bay, và đóng
+quyền chi lúc đó sẽ bỏ rơi nó. Kiểm trước khi làm: **0**. Cả ba giữ chỗ đều đã
+COMMITTED hoặc RELEASED, tức là đã thành lịch sử chứ không phải phụ thuộc.
+
+`scripts/close-stale-batch.ts` mặc định là **thử khô**, và đọc lại DB sau khi ghi
+để tự kiểm 5 điều thay vì tự báo cáo thứ mình vừa làm.
+

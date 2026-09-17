@@ -30,19 +30,11 @@
  *   npx tsx scripts/dry-run-low-auto.ts
  *   npx tsx scripts/dry-run-low-auto.ts --offline   # skip the free GET
  */
-import fs from "node:fs";
 import type { ModelRegistry } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
-import { classifyCameraIntent } from "../src/domain/camera-intent";
-import {
-  applyCameraGuardrails,
-  findPromptContradictions,
-  RUNWAY_MAX_PROMPT_CHARS,
-} from "../src/domain/video-prompt";
 import { lowAutoEligibility } from "../src/domain/low-auto";
-import { decideMotion, effectiveMotionSource } from "../src/domain/local-motion";
-import { extractSignals } from "../src/services/complexity";
-import { sceneCharacters } from "../src/domain/scene-characters";
+import { deriveSceneVideoFacts } from "../src/services/low-auto-facts";
+import { decideMotion } from "../src/domain/local-motion";
 import { routeScene, RoutingError, type LowAutoSceneFacts } from "../src/services/ai-router";
 import { shouldGenerateKeyframe } from "../src/services/cost-estimator";
 import { productionProviderNames } from "../src/services/provider-health";
@@ -54,7 +46,6 @@ import {
 } from "../src/services/provider-budget";
 import { batchApprovalFor } from "../src/services/batch-authorization";
 import { findContradictions } from "../src/services/benchmark-evidence";
-import { toAbsolute } from "../src/lib/paths";
 import type { Complexity, QualityMode, RouterStrategy, SpendPriority } from "../src/domain/enums";
 
 const CANDIDATE = "h3_max:768x1280";
@@ -199,33 +190,34 @@ async function main() {
   const rows: Row[] = [];
 
   for (const scene of scenes) {
-    const chars = sceneCharacters(scene).present.length || 1;
-    const signals = extractSignals(scene);
-    const intent = classifyCameraIntent(scene);
-    const guarded = applyCameraGuardrails(scene.videoPrompt, intent, RUNWAY_MAX_PROMPT_CHARS);
-    const contradictions = findPromptContradictions(guarded.text);
-    const hasKeyframe =
-      Boolean(scene.imagePath) && fs.existsSync(toAbsolute(scene.imagePath ?? ""));
+    // The SAME derivation production runs, from services/low-auto-facts. This
+    // used to be a hand-written copy living here, and it had already drifted:
+    // it checked the keyframe on disk while production checked only the column.
+    // A simulation that answers a question differently from the pipeline it is
+    // simulating is worse than no simulation, because it is believed.
+    const derived = deriveSceneVideoFacts(scene, {
+      qualityMode: scene.project.qualityMode,
+      stage: "VIDEO",
+    });
+    const chars = derived.characterCount;
+    const intent = derived.cameraIntent;
+    const hasKeyframe = derived.hasKeyframe;
+    const motion = derived.motion;
     const pinned = Boolean(scene.videoProvider && scene.videoModel);
 
+    // Reported beside the effective verdict so the table can show where the
+    // stored column and today's rules disagree.
     const fresh = decideMotion({
       qualityMode: scene.project.qualityMode as QualityMode,
       complexity: scene.complexity as Complexity,
       spendPriority: scene.spendPriority as SpendPriority,
       characterCount: chars,
     });
-    const motion = effectiveMotionSource(scene.motionSource, fresh, { manuallyPinned: pinned });
 
     const perVideoCap =
       (await batchApprovalFor(scene.project.batchId))?.maxCostPerVideo ?? null;
     const facts: LowAutoSceneFacts = {
-      stage: "VIDEO",
-      motionSource: motion.source,
-      hasKeyframe,
-      cameraMode: intent.mode,
-      repeatedSmallObjects: signals.repeatedSmallObjects,
-      promptGuarded: guarded.added.length > 0 || guarded.skipped.length > 0,
-      contradictions,
+      ...derived.facts,
       providerBudgets,
       perVideoCapRemaining: perVideoCap,
     };

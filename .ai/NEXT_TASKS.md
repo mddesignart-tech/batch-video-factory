@@ -1,10 +1,62 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-15
+**Cập nhật:** 2026-09-17
 
 ---
 
-## ⏳ CHỜ BẠN QUYẾT: h3_max `PIN_ONLY -> LOW_AUTO`?
+## ⏳ CHỜ BẠN QUYẾT: duyệt chi lô nghiệm thu `a690a290`?
+
+Mọi thứ trước bước này đã xanh. Cái còn thiếu là **chữ ký của bạn**, và tôi
+không tự ký.
+
+```
+Lô          a690a290-bb28-4dbd-9903-0d8018bb0db1
+Dự án       f2b68443 "Cold feet" — 6 cảnh, 26 giây, toàn bộ LOW, 1 nhân vật
+Quyền chi   DRAFT — chưa cấp phép chi gì
+Dự toán     $1,121800      Đề xuất trần $1,24
+```
+
+| Hạng mục | Tiền | Đi đâu |
+|---|---|---|
+| TEXT | $0,001000 | kịch bản soạn tay, gần như không tốn |
+| IMAGE | $0,288000 | 6 × `openai/gpt-image-2:medium` |
+| VIDEO | $0,800000 | 2 × `runway/h3_max:768x1280` @ 5s, **router tự chọn** |
+| VOICE | $0,000100 | `openai/gpt-4o-mini-tts`, 225 ký tự |
+| RENDER | $0,000000 | FFmpeg tại máy |
+| dự phòng tạo lại | $0,032700 | |
+
+Bốn cảnh còn lại là **LOCAL_MOTION, $0** — ảnh tĩnh cộng chuyển động FFmpeg.
+
+**Ví có đủ không:** runway còn **671 credit = $6,71** (đọc LIVE 2026-09-17), cần
+$0,80. openai khai báo $6,00, cần $0,288. Hạn mức chung còn $2,646080, cần
+$1,1218. Cả ba đều đủ.
+
+**Nếu bạn duyệt**, `lowAutoApproved` phải được bật **có chủ đích** trên lô này:
+hai clip kia do **router tự chọn**, và quyền chi mặc định không bao gồm cơ chế đó
+(QĐ-055). Một lô duyệt mà quên bật cờ sẽ bị chặn ở `low_auto_not_approved` và
+dừng đúng chỗ — khó chịu, nhưng đúng.
+
+---
+
+## Đã xong 2026-09-17
+
+- **LOW_AUTO cho `h3_max:768x1280`** — đã bật, đã chứng minh trên dòng
+  production. Router tự chọn được **2 cảnh** (lô nghiệm thu #1 và #4); 9/9
+  negative control vẫn chặn đúng lớp. Xem QĐ-059.
+- **Một dẫn xuất, bốn nơi gọi** (QĐ-060). `deriveSceneVideoFacts` thay ba bản
+  chép tay. Bắt được hai lỗi thật:
+  - dry-run kiểm keyframe trên **đĩa**, production chỉ đọc **cột** → một ảnh bị
+    xoá sẽ khiến production mua clip image-to-video không có ảnh;
+  - bộ dự toán không truyền dữ kiện cảnh → báo `VIDEO $0,00` cho một video sẽ
+    thật sự tốn **$0,80**. Trần duyệt thấp hơn hoá đơn.
+- **Lô cũ `11af6ba6` đã đóng** (QĐ-061). 6 job `queued` đã lên nòng ≈ $0,456 bị
+  huỷ, quyền chi thu hồi. Sổ chi thật, reservation đã chốt và log **giữ nguyên**.
+- **Số dư Runway** đọc LIVE: 671 credit. Khớp tuyệt đối với sổ nội bộ
+  ($3,29 = 329 credit; 1000 − 329 = 671).
+
+---
+
+## Đã xong: h3_max `PIN_ONLY -> LOW_AUTO` (đã bật 2026-09-16, chứng minh 2026-09-17)
 
 Guardrail camera đã chuẩn hoá xong (QĐ-045). 17/23 cảnh thiếu khoá → **0/23**.
 Không sửa tay prompt nào: bộ guardrail nằm trong code và áp ở bước cuối trước
@@ -17,7 +69,10 @@ có prompt khoá camera. Cả 3 mẫu đó đều ≥8,9.
 nền phẳng**. Chưa có mẫu nào ở cảnh 3 nhân vật — mà 8/23 cảnh của dự án là HIGH
 với 3 nhân vật.
 
-Tôi **không** tự bật. Xem mục "ĐỀ XUẤT" trong báo cáo.
+**Đã bật.** Giới hạn vẫn nguyên: chỉ LOW, tối đa 2 nhân vật, camera khoá, phải
+có keyframe thật trên đĩa. Cảnh 3 nhân vật vẫn **chưa từng được đo** và vẫn nằm
+ngoài quyền — lý do thận trọng ở trên không mất đi khi quyền được cấp, nó trở
+thành đường viền của quyền đó.
 
 ---
 
