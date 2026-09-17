@@ -5,7 +5,7 @@ import { toAbsolute } from "@/lib/paths";
 import { peekCreateToken } from "@/services/create-token";
 import { spendStatus, totalRealSpend } from "@/services/spend-guard";
 import { approveAuthorization } from "@/services/batch-authorization";
-import { reservationLedger } from "@/services/cost-reservation";
+import { release as releaseReservation, reservationLedger } from "@/services/cost-reservation";
 import { storedPlan } from "@/services/batch-runner";
 import { previewProjectCost } from "@/services/project-service";
 import { claimNext, completeJob, failJob } from "@/jobs/queue";
@@ -64,15 +64,34 @@ async function runwayCredits(): Promise<number | null> {
   }
 }
 
-/** The routing the operator approved. Anything else is a stop, not a warning. */
+/**
+ * The routing the operator approved. Anything else is a stop, not a warning.
+ *
+ * Scenes 1 and 4 now name `h3_max` because that is what the plan on the
+ * authorisation says, and because `gen4_turbo` has been DEGRADED since it
+ * returned INTERNAL.BAD_OUTPUT on two different scenes. Nothing here may be
+ * "corrected" at run time: if the generator picks something else, the right
+ * response is to stop and show the difference, not to follow it.
+ */
 const APPROVED_ROUTE: Record<number, { motion: string; video: string | null }> = {
-  1: { motion: "AI_VIDEO", video: "runway/gen4_turbo:720x1280" },
+  1: { motion: "AI_VIDEO", video: "runway/h3_max:768x1280" },
   2: { motion: "LOCAL_MOTION", video: null },
   3: { motion: "LOCAL_MOTION", video: null },
-  4: { motion: "AI_VIDEO", video: "runway/gen4_turbo:720x1280" },
+  4: { motion: "AI_VIDEO", video: "runway/h3_max:768x1280" },
   5: { motion: "LOCAL_MOTION", video: null },
   6: { motion: "LOCAL_MOTION", video: null },
 };
+
+/**
+ * Models that must not appear anywhere in this run, whatever the router thinks.
+ *
+ * `gen4_turbo` joins the list for this run. It is DEGRADED, so the router will
+ * not choose it on its own - but the previous version of this project had it
+ * PINNED on scene 4, and a pin still reaches a degraded model by design. The
+ * pins are gone now; this is the check that says so out loud rather than
+ * assuming it.
+ */
+const BANNED_MODELS = ["sora", "gen4.5", "gen4_turbo"];
 
 let failures = 0;
 function must(label: string, ok: boolean, detail: string): void {
@@ -151,13 +170,26 @@ async function main(): Promise<void> {
     );
   }
 
-  // Nothing pricier than what was approved may appear anywhere.
+  // Nothing pricier or more suspect than what was approved may appear anywhere.
   const banned = preview.current.scenes.filter(
-    (s) =>
-      s.video &&
-      (s.video.modelId.includes("sora") || s.video.modelId.includes("gen4.5")),
+    (s) => s.video && BANNED_MODELS.some((b) => s.video!.modelId.includes(b)),
   );
-  must("Khong dung Sora / Gen4.5", banned.length === 0, `${banned.length} canh vi pham`);
+  must(
+    "Khong Sora / Gen4.5 / gen4_turbo",
+    banned.length === 0,
+    banned.length === 0 ? "0 canh vi pham" : banned.map((b) => `canh ${b.sceneNumber}`).join(", "),
+  );
+
+  // A pin is an instruction and is honoured - but the operator approved a plan
+  // with no pins in it, so a pin appearing here means the project is not the
+  // one that was priced. Say which, and stop.
+  const pinned = (
+    await prisma.scene.findMany({
+      where: { projectId: project.id, skipped: false, NOT: { videoModel: null } },
+      select: { sceneNumber: true, videoProvider: true, videoModel: true },
+    })
+  ).map((p) => `canh ${p.sceneNumber} -> ${p.videoProvider}/${p.videoModel}`);
+  must("Khong con ghim tay nao", pinned.length === 0, pinned.join(", ") || "0 ghim");
 
   if (failures > 0) return finish();
 
@@ -166,12 +198,29 @@ async function main(): Promise<void> {
   const creditsBefore = await runwayCredits();
   console.log(`  Runway credits TRUOC        : ${creditsBefore ?? "(khong doc duoc)"}`);
 
+  // `lowAutoApproved` is a SEPARATE yes and it is passed explicitly, for this
+  // batch only. Two of the six scenes are clips the ROUTER chose; an approval
+  // that covers the amount but not the mechanism would stop at
+  // `low_auto_not_approved`, which is the correct refusal and not what the
+  // operator signed here.
   if (batch.authorization?.status !== "APPROVED") {
-    await approveAuthorization({ batchId, authorizedMaxSpend: authorize });
-    console.log(`  Da duyet BATCH_SPEND_AUTHORIZATION = ${money(authorize, 2)}`);
+    await approveAuthorization({
+      batchId,
+      authorizedMaxSpend: authorize,
+      lowAutoApproved: true,
+      note: `Acceptance run V1. Router tu chon h3_max cho canh 1 va 4, duoc duyet rieng.`,
+    });
+    console.log(`  Da duyet BATCH_SPEND_AUTHORIZATION = ${money(authorize, 2)}  lowAutoApproved=true`);
   } else {
     console.log(`  Quyen chi da APPROVED tu truoc = ${money(batch.authorization.authorizedMaxSpend, 2)}`);
   }
+
+  // Exactly one batch may fund router-chosen clips, and it is this one.
+  const otherLowAuto = await prisma.batchAuthorization.count({
+    where: { lowAutoApproved: true, NOT: { batchId } },
+  });
+  must("Chi lo nay duoc LOW_AUTO", otherLowAuto === 0, `${otherLowAuto} lo khac`);
+  if (failures > 0) return finish();
 
   // --------------------------------------------------------------- expand
   console.log("\n--- 4. Mo rong lo (handler that) ---");
@@ -220,6 +269,33 @@ async function main(): Promise<void> {
     }
   }
   console.log(`  ${done} job hoan tat`);
+
+  // ------------------------------------------------- settle what is left
+  //
+  // A hold that outlives the run is budget nobody can spend and nobody can see.
+  // Normally there are none: `runProviderJob` commits on success and releases
+  // on failure, in a `finally`-shaped path. One can survive a hard stop, and
+  // the operator's rule is that none may be left standing.
+  //
+  // `billed: true` is the deliberate choice for a stranded hold. We do NOT know
+  // whether the vendor charged - if we knew, the request would have settled
+  // itself - and handing budget back for a clip that WAS billed is how a batch
+  // overspends while every figure on screen still adds up. The conservative
+  // reading costs headroom; the optimistic one costs money.
+  const stranded = await prisma.costReservation.findMany({
+    where: { batchId, status: "RESERVED" },
+    select: { idempotencyKey: true, kind: true, provider: true, estimatedCost: true },
+  });
+  if (stranded.length > 0) {
+    console.log(`
+--- 6. Dong ${stranded.length} giu cho con treo ---`);
+    for (const r of stranded) {
+      await releaseReservation(r.idempotencyKey, { billed: true });
+      console.log(
+        `  ${r.kind}/${r.provider} ${money(r.estimatedCost)} -> RELEASED (coi nhu DA bi tinh phi, huong an toan)`,
+      );
+    }
+  }
 
   // ---------------------------------------------------------------- report
   await report(batchId, project.id, authorize, creditsBefore, stopped);

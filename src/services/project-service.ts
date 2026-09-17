@@ -20,6 +20,8 @@ import {
 import { generateScript, recordConcept } from "./script-service";
 import { availableProviderNames } from "./provider-health";
 import { speechTextFor } from "./generation";
+import { deriveSceneVideoFacts } from "./low-auto-facts";
+import { providerSpendBreakdown } from "./provider-budget";
 
 /**
  * Project lifecycle.
@@ -234,6 +236,8 @@ export async function persistScript(
 export async function buildPlannedScenes(
   projectId: string,
 ): Promise<PlannedSceneInput[]> {
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) throw new Error("Không tìm thấy dự án.");
   const scenes = await prisma.scene.findMany({
     where: { projectId, skipped: false },
     orderBy: { sceneNumber: "asc" },
@@ -251,6 +255,14 @@ export async function buildPlannedScenes(
     manualVideoModel: scene.videoModel,
     manualVoiceProvider: scene.voiceProvider,
     manualVoiceModel: scene.voiceModel,
+    // The same derivation `generateSceneVideo` runs. The preview is what the
+    // real-run script checks its plan against before spending, so a preview
+    // that refuses a scene the generator would route stops a batch that was
+    // fine - and one that prices it at $0 waves through a batch that is not.
+    lowAutoFacts: deriveSceneVideoFacts(scene, {
+      qualityMode: project.qualityMode,
+      stage: "VIDEO",
+    }).facts,
   }));
 }
 
@@ -266,10 +278,11 @@ export async function previewProjectCost(
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) throw new Error("Không tìm thấy dự án.");
 
-  const [scenes, models, availableProviders] = await Promise.all([
+  const [scenes, models, availableProviders, wallets] = await Promise.all([
     buildPlannedScenes(projectId),
     prisma.modelRegistry.findMany({ where: { enabled: true } }),
     availableProviderNames(),
+    providerSpendBreakdown(),
   ]);
 
   const base = {
@@ -288,6 +301,9 @@ export async function previewProjectCost(
     // same reasoning is already written out in `routeFor`; this call site was
     // simply left behind when that was fixed.
     needs1080p: project.qualityMode === "QUALITY",
+    // The environment half of the LOW_AUTO gate. Real wallets, so the preview
+    // cannot promise a clip this account has no money for.
+    providerBudgets: Object.fromEntries(wallets.map((w) => [w.provider, w.remainingUsd])),
   };
 
   const current = estimateProject({
