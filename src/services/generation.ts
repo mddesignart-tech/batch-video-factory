@@ -1405,6 +1405,52 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
     );
   }
 
+  // Already bought, still on disk, still the same request: hand it back before
+  // anything is routed.
+  //
+  // `runProviderJob` has this check too, but it runs AFTER the router, and the
+  // router refuses on budget. That ordering is right for a purchase and wrong
+  // for a resume: a project whose budget is nearly spent cannot afford another
+  // clip, which is exactly why it must be allowed to reuse the one it already
+  // paid for. Seen for real on the first imported production video - the run
+  // finished, and resuming it threw `over_budget` on a scene that needed to buy
+  // nothing at all, which would have stalled a project with no work left in it.
+  //
+  // The key is computed from the scene row alone: the model it actually used,
+  // the prompt as it would be sent now, the duration, and `retryCount`. So a
+  // deliberate retry - which bumps `retryCount` - produces a different key, does
+  // not match, and goes on to buy a new clip as intended.
+  if (scene.videoPath && scene.videoProvider && scene.videoModel) {
+    const settledKey = idempotencyKey({
+      sceneId: scene.id,
+      kind: "video",
+      provider: scene.videoProvider,
+      model: scene.videoModel,
+      prompt: videoPrompt,
+      generation: scene.retryCount,
+      variant: `${scene.duration}s`,
+    });
+    const settled = await prisma.providerJob.findUnique({
+      where: { idempotencyKey: settledKey },
+    });
+    const stored = parseJson<{ filePath?: string }>(settled?.responseJson, {});
+    if (
+      settled?.status === "completed" &&
+      stored.filePath &&
+      fs.existsSync(stored.filePath)
+    ) {
+      await logger.info({
+        event: "provider.job.reused",
+        provider: scene.videoProvider,
+        model: scene.videoModel,
+        projectId: project.id,
+        sceneId: scene.id,
+        message: `Cảnh ${scene.sceneNumber} đã có clip đã trả tiền, dùng lại, không định tuyến lại.`,
+      });
+      return stored.filePath;
+    }
+  }
+
   const decision = routeFor(
     ctx,
     "video",

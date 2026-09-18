@@ -355,12 +355,27 @@ export function planScene(opts: {
   // Decide where the movement comes from FIRST. Everything below depends on it:
   // a locally animated scene calls no video model, and - the part that is easy
   // to get wrong - it makes the keyframe mandatory rather than optional.
-  const motion = decideMotion({
-    qualityMode,
-    complexity: scene.complexity,
-    spendPriority: scene.spendPriority,
-    characterCount: scene.characterCount,
-  });
+  //
+  // `lowAutoFacts.motionSource` is the answer `deriveSceneVideoFacts` already
+  // gave for this scene, and it is the one the PIPELINE will act on: it has
+  // been through `effectiveMotionSource`, so it knows about the stored decision
+  // and about an explicit instruction (a hand pin, or an imported
+  // `motion_mode: VIDEO_AI`). `decideMotion` on its own knows none of that - it
+  // reads complexity and priority and nothing else.
+  //
+  // Using the bare verdict here is how the estimate and the bill come apart, in
+  // the expensive direction. A scene pinned to a video model but classified LOW
+  // was priced at $0.00 by this function while `generateSceneVideo` went on to
+  // buy the clip - the same failure QĐ-060 closed for the LOW_AUTO facts, in
+  // the one place that still re-derived instead of being told.
+  const motion = scene.lowAutoFacts?.motionSource
+    ? { source: scene.lowAutoFacts.motionSource, reason: "theo dẫn xuất của pipeline" }
+    : decideMotion({
+        qualityMode,
+        complexity: scene.complexity,
+        spendPriority: scene.spendPriority,
+        characterCount: scene.characterCount,
+      });
 
   const wantsKeyframe =
     scene.hasSuppliedKeyframe === true

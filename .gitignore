@@ -39,3 +39,4 @@ coverage/
 
 # Throwaway world for the import end-to-end mock run (scripts/import-e2e-mock.ts)
 data/.import-e2e/
+data/.real-import/

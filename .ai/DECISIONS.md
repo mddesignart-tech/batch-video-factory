@@ -1874,3 +1874,65 @@ trong một lần chạy thật, đã trả tiền.
 `prisma/migrations/20260918000000_init` dựng toàn bộ schema từ rỗng, gồm cả
 `Scene.motionMode` và `Scene.imageSource`. Kiểm bằng cách chạy thật:
 DB trống → `migrate deploy` → seed → nhập → chạy hết pipeline → có MP4.
+
+---
+
+## QĐ-068 — Lần nhập storyboard chạy thật đầu tiên, và hai lỗi tiền nong nó lộ ra
+
+6 cảnh, 5 LOCAL_MOTION + 1 VIDEO_AI ghim `runway/h3_max:768x1280`, cả 6 keyframe
+nhập sẵn. Trần $0,50. Thực chi **$0,400122**. Credit Runway **591 → 551** (đúng
+40). MP4 25,000s · 1080x1920 · 30fps · h264+aac.
+
+### Lỗi 1 — dự toán và hoá đơn bất đồng, đúng hướng tốn tiền
+
+Preflight báo cảnh 3 là `LOCAL_MOTION $0,00`. Đường chạy thật sẽ mua clip
+**$0,40**. Nếu không bắt được, người dùng sẽ duyệt một cái trần dựng trên $0,00
+cho một video tốn $0,41.
+
+`estimateProject` tự gọi `decideMotion` — hàm chỉ đọc **độ khó và mức ưu tiên**.
+Nó không biết gì về `motionSource` đã lưu, cũng không biết gì về một **chỉ thị**
+(ghim tay, hay `motion_mode: VIDEO_AI` trong storyboard). Trong khi
+`deriveSceneVideoFacts` đã tính sẵn câu trả lời **mà pipeline sẽ hành động
+theo** — nó đã đi qua `effectiveMotionSource`.
+
+Đây đúng là lớp lỗi QĐ-060 đã đóng cho dữ kiện LOW_AUTO, còn sót lại **đúng một
+chỗ vẫn tự dẫn xuất thay vì được cho biết**. Nay bộ dự toán dùng
+`scene.lowAutoFacts.motionSource` khi có.
+
+### Lỗi 2 — chạy lại một dự án đã tiêu gần hết ngân sách thì hỏng
+
+Sau khi lô xong, chạy lại cảnh 3 ném `over_budget`: ngân sách dự án còn $0,10,
+không đủ cho một clip $0,40. Nhưng cảnh đó **không cần mua gì cả** — clip đã trả
+tiền, vẫn nằm trên đĩa.
+
+`runProviderJob` có nhánh dùng lại, nhưng nó chạy **sau** router, và router từ
+chối vì ngân sách. Thứ tự đó đúng cho một lần mua và sai cho một lần chạy lại:
+một dự án gần cạn ngân sách chính là dự án **bắt buộc** phải được dùng lại thứ
+nó đã mua. Hệ quả nếu để nguyên: resume làm dự án đứng hình ở `rendering` trong
+khi chẳng còn gì để mua.
+
+`generateSceneVideo` nay kiểm trước khi định tuyến: khoá tính **từ chính hàng
+Scene** — model đã dùng, prompt như sẽ gửi bây giờ, thời lượng, `retryCount`.
+Một lần retry có chủ đích (tăng `retryCount`) sinh khoá khác, không khớp, và đi
+mua clip mới đúng như ý định.
+
+### Một cổng của chính tôi hỏi sai câu
+
+Cổng preflight hỏi "LOW_AUTO có tự chọn model này không" bằng
+`ignoreManualPin: true` — và bị từ chối với `local_motion`. Đúng, nhưng lạc đề:
+bỏ ghim ra thì cảnh này quay về LOCAL_MOTION, và cổng trả lời "ở đây không có gì
+để mua". Luật motion của LOW_AUTO tồn tại để chặn **router** tự tìm thêm thứ để
+mua; clip này được mua vì **người vận hành ra lệnh**. Câu hỏi đúng là: gạt việc
+có một cái ghim sang bên, cảnh này có đạt **mọi điều kiện** h3_max đòi hỏi
+không — LOW, một nhân vật, camera khoá, keyframe có thật, prompt đã qua
+guardrail, không mâu thuẫn, nằm trong cả ba loại hạn mức.
+
+### Bằng chứng
+
+```
+image POST 0 · video POST 1 · voice POST 6 · retry 0 · fallback 0
+task h3_max        dd0a31dd-0dd0-44c0-a730-7836858af4aa
+giu cho            7 COMMITTED, treo $0,000000
+chay lai 6 canh    ProviderJob 7 -> 7, DELTA $0,000000
+xac nhan h3_max    bat trong try, thu hoi trong finally — danh sach ve nguyen 6 muc
+```

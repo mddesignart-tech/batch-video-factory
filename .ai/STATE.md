@@ -23,7 +23,7 @@ khi đã chạy thật và được kiểm chứng, không phải khi đã viế
 ## Tiền và quyền chi tiêu
 
 ```
-Hạn mức tổng : $8,00   đã chi $6,401015   còn $1,598985
+Hạn mức tổng : $8,00   đã chi $6,801137   còn $1,198863
 CREATE_ATTEMPT_TOKEN : 0
 ```
 
@@ -37,11 +37,11 @@ Ví **tách riêng từng nhà cung cấp, không bao giờ cộng chung**:
 
 | Ví | Đã chi | Số gọi | Số dư |
 |---|---|---|---|
-| openai | $2,282161 | 56 | $6,00 — **khai báo**, API key không đọc được số dư |
-| runway | $4,090000 | 9 | **591 credit = $5,91** — LIVE, đọc 2026-09-18 |
+| openai | $2,282283 | 62 | $6,00 — **khai báo**, API key không đọc được số dư |
+| runway | $4,490000 | 10 | **551 credit = $5,51** — LIVE, đọc 2026-09-18 |
 | groq | $0,028854 | 24 | external, nhà cung cấp tự quản |
 
-Sổ runway khớp tuyệt đối với hãng: $4,09 = 409 credit, 1000 − 409 = **591**.
+Sổ runway khớp tuyệt đối với hãng: $4,49 = 449 credit, 1000 − 449 = **551**.
 Setting trước đó ghi 975 credit — lệch $3,04 và đã được sửa bằng số đọc live.
 Mặc định của ví runway giờ là **0**, không phải một con số chép lại: trước khi
 hỏi hãng, câu trả lời trung thực là "không biết". Xem QĐ-054.
