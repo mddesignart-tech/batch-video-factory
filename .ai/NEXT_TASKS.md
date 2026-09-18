@@ -32,20 +32,44 @@ npx tsx scripts/import-storyboard.ts --source batch.zip --apply   --name "Lô nh
 
 Lô sinh ra ở `PLANNED` + quyền chi `DRAFT`. Duyệt tiền vẫn ở `/batches/<id>`.
 
-### Còn thiếu trước khi thử 1 storyboard thật
+### Đã chạy END-TO-END BẰNG MOCK 2026-09-18 — xem QĐ-067
 
-- [ ] **Chưa chạy end-to-end với engine thật.** Đã test tới bước tạo row + dự
-      toán + bỏ qua Image AI; **chưa** chạy `batch_expand → generate_scene_media
-      → render` trên một lô nhập, kể cả ở mock.
-- [ ] **Nhân vật**: storyboard không có cột character. Ảnh vẫn nhận diện nhân vật
-      qua `repairSceneCharacters` (dò tên trong text). Storyboard không nhắc tên
-      nhân vật nào sẽ không có character sheet → ảnh tự do. Cần cột
-      `characters` hoặc chấp nhận giới hạn này.
-- [ ] **Không có `videoPrompt`**: cảnh nhập chưa có prompt video; guardrail camera
-      dựng nó từ `camera` + `characterAction`. Chưa kiểm trên dữ liệu nhập thật.
-- [ ] **Sửa cảnh trên UI**: `updateImportedScene` đã có (duration/motion/pin)
-      nhưng chưa nối vào trang lô.
-- [ ] **`prisma migrate`**: hai cột mới lại thêm bằng `db push`. Nợ này đang lớn.
+```
+npx tsx scripts/import-e2e-mock.ts      # DB + data rieng, $0, 40/40 dieu kien DAT
+```
+
+Chuỗi đầy đủ: migrate deploy → seed → import → validate → project + scenes →
+dự toán → duyệt (giá mock) → media → LOCAL_MOTION → VIDEO_AI mock → voice →
+subtitle → FFmpeg → **MP4 thật** → batch report.
+
+MP4: **26,000s · 1080x1920 · 30fps · h264 + aac 48kHz mono**, 2 clip Video AI,
+4 cảnh LOCAL_MOTION, 6 keyframe nhập sẵn, **0 ProviderJob ảnh**.
+
+- [x] **videoPrompt** dựng sẵn tất định lúc nhập; VIDEO_AI không có gì chuyển
+      động thì **chặn ngay khi nhập**.
+- [x] **Nhân vật**: `character_id` / `character_name` /
+      `character_reference_image` ở cấp video, cảnh tham chiếu lại. Tạo
+      `Character` + `CharacterReference` (primary+approved khi chưa có). Nhân
+      vật đã tồn tại thì **dùng lại, không ghi đè**.
+- [x] **Sửa cảnh trên UI**: đủ 11 trường, tự dẫn xuất lại videoPrompt + người
+      nói, **huỷ bản dự toán cũ**, khoá cảnh đã có ProviderJob.
+- [x] **Migration** `20260918000000_init` — dựng schema từ DB rỗng, đã chạy thật.
+- [x] **Dự toán ảnh có sẵn = $0** (trước đó vẫn tính tiền — QĐ-067 mục 1).
+- [x] **Lời dẫn không còn bị nuốt** (QĐ-067 mục 3).
+- [x] **Retry cảnh hỏng làm sống lại bước render** (QĐ-067 mục 4).
+
+### Blocker còn lại trước STORYBOARD THẬT
+
+- [ ] **Chưa chạy với provider thật lần nào.** Mọi bằng chứng trên là mock: clip
+      do mock provider sinh, voice do mock sinh. Đường ống đã thông, nhưng
+      "thông" và "ra video xem được" là hai chuyện khác nhau.
+- [ ] **Bảng nhân vật nhập là tối thiểu.** `visualPrompt` của nhân vật tạo từ
+      import chỉ là `"<tên>, consistent character design across every scene"` —
+      đủ để không đổi người giữa các cảnh, **chưa** đủ để khoá diện mạo như
+      Max/Leo/Mia (vốn có hair/face/outfit/bodyProportions viết tay). Nhập xong
+      nên vào trang Nhân vật điền nốt.
+- [ ] **Guard mâu thuẫn prompt ảnh (QĐ-065) chưa được kiểm trên văn phong
+      storyboard nhập tay** — nó có chạy, chưa ai đọc kết quả trên dữ liệu nhập.
 
 ---
 

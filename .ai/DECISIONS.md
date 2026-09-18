@@ -1798,3 +1798,79 @@ tiêu đề, `exampleSentence` từ câu thoại đầu tiên đã bỏ nhãn ng
 
 Hai test mới giữ chỗ này: idiom nhập phải có đủ ba ô không rỗng, và không được
 xuất hiện trong danh sách bộ chọn của V1.
+
+---
+
+## QĐ-067 — Chạy end-to-end mock của Import V1, và bốn lỗ nó lộ ra
+
+Lần chạy đầu tiên của cả chuỗi nhập → render, bằng mock, trên **DB và thư mục
+data riêng** (`scripts/import-e2e-mock.ts`). Riêng biệt là điều kiện, không phải
+sự cẩn thận: một dòng chi phí mock ghi vào sổ thật sẽ nằm ngay cạnh tiền thật và
+trông y hệt. DB đó được dựng bằng `prisma migrate deploy` chứ không phải
+`db push` — cách duy nhất để biết migration trong repo có thực sự dựng đúng
+schema mà code cần hay không.
+
+Kết quả: **MP4 thật** 26,000s · 1080x1920 · 30fps · h264+aac, 2 clip Video AI,
+4 cảnh LOCAL_MOTION, 6 keyframe nhập sẵn, 0 ProviderJob ảnh.
+
+Bốn lỗ, không cái nào lộ ra ở test đơn lẻ:
+
+### 1. Dự toán vẫn tính tiền ảnh cho cảnh ĐÃ CÓ ảnh
+
+`$0,056` cho sáu tấm ảnh sẽ không bao giờ được mua. Đây là **đúng khoản tiết
+kiệm** mà nhập storyboard sinh ra để có, và nó vô hình trong con số duy nhất
+người dùng đọc trước khi ký. `PlannedSceneInput.hasSuppliedKeyframe` nay tắt
+`wantsKeyframe`, và dự toán về $0,000000.
+
+### 2. Cảnh VIDEO_AI có thể đi tới provider với prompt rỗng
+
+`videoPrompt` nay **dựng sẵn lúc nhập**, tất định, từ chính các trường người
+dùng viết: `<mô tả>. Movement: <hành động>. Camera: <camera>.` Không nhờ Text AI
+— trả tiền để viết lại thứ đã viết là vô nghĩa. Và nếu một cảnh VIDEO_AI vẫn
+không có gì để chuyển động thì **chặn ngay khi nhập**: tới lúc dựng request thì
+lô đã được duyệt và tiền đã được hứa.
+
+### 3. Lời dẫn bị nuốt im lặng
+
+`parseDialogueLines` chỉ đọc narration khi cảnh có người nói — *"narration has
+no speaker, and the first speaking character reads it only because someone has
+to"*. Import đặt `speakingCharactersJson = []` khi không có dialogue, nên cảnh 3
+(chỉ có lời dẫn) **render ra câm**. Danh sách rỗng không có nghĩa "đọc vô danh",
+nó có nghĩa lời dẫn biến mất.
+
+### 4. Sửa một cảnh hỏng xong, video vẫn treo mãi ở `rendering`
+
+`handleRenderFinal` từ chối thẳng khi một cảnh đã bỏ cuộc — chờ một cảnh không
+bao giờ có media là chờ vĩnh viễn — nên nó đốt hết lượt và kết thúc `failed`.
+Sửa cảnh sau đó để lại video **thiếu đúng một job**, không có gì trong hàng đợi
+để nhận ra: dự án nằm ở `rendering` mãi mãi, và triệu chứng duy nhất là một MP4
+không bao giờ xuất hiện. `retryScene` nay xếp lại luôn bước render đã hỏng —
+người bấm thử lại một cảnh là đang cố **hoàn thành video**.
+
+### Nhân vật: không xây lại cái đã có
+
+App đã có sẵn cả bộ máy nhất quán nhân vật: canonical sheet,
+`LOCKED_ATTRIBUTES`, ảnh master đã duyệt, câu "giữ X giống hệt ảnh tham chiếu".
+Import **không dựng lại gì cả** — nó chỉ điền `charactersPresentJson` để bộ máy
+đó khớp bánh răng, và tạo `Character` khi tên là mới. Nhân vật đã tồn tại thì
+**dùng lại, không ghi đè**: để một bản nhập viết lại mô tả canonical của "Max"
+là âm thầm vẽ lại anh ta trong mọi video cũ được tạo lại sau này.
+
+`character_id` khai ở cấp video, cảnh tham chiếu lại. Cảnh tự khai id mà video
+không khai ở trên = **khai ngầm**, không phải lỗi; điều duy nhất thực sự quan
+trọng là cùng một id thì cùng một người và cùng một ảnh tham chiếu.
+
+### Sửa cảnh trước khi duyệt
+
+Sửa được đủ những gì một dòng storyboard mang: chữ, thời lượng, motion mode,
+ghim, ưu tiên. Hai thứ **tự dẫn xuất lại** thay vì hỏi: `videoPrompt` (từ mô tả
++ hành động + camera) và ai nói (từ việc có chữ hay không). Bản dự toán cũ bị
+**huỷ** — con số người dùng ký phải là con số họ vừa nhìn, không phải con số UI
+lặng lẽ tính lại sau lưng. Cảnh đã có ProviderJob thì khoá: công việc đã làm và,
+trong một lần chạy thật, đã trả tiền.
+
+### Migration
+
+`prisma/migrations/20260918000000_init` dựng toàn bộ schema từ rỗng, gồm cả
+`Scene.motionMode` và `Scene.imageSource`. Kiểm bằng cách chạy thật:
+DB trống → `migrate deploy` → seed → nhập → chạy hết pipeline → có MP4.

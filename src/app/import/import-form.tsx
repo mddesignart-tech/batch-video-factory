@@ -24,6 +24,7 @@ import {
   type ImportValidationView,
 } from "@/app/actions/storyboard-import";
 import type { ImportPreflight } from "@/services/import-preflight";
+import { SceneEditor } from "./scene-editor";
 
 /**
  * Three buttons, in the order the money actually moves.
@@ -255,6 +256,8 @@ export function ImportForm() {
           </CardContent>
         </Card>
       ) : null}
+
+      {batchId ? <SceneEditor batchId={batchId} onEstimated={setPreflight} /> : null}
 
       {preflight ? (
         <Card>

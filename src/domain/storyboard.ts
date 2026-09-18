@@ -59,12 +59,34 @@ export interface StoryboardScene {
   videoProvider: string | null;
   videoModel: string | null;
   priority: StoryboardPriority;
+  /** Who is in this shot. Empty = fall back to the video-level cast. */
+  characterId: string | null;
+  /**
+   * The video prompt, composed here rather than written by a model.
+   *
+   * A scene that is going to a video model needs one, and an imported
+   * storyboard has everything required to build it: what is in shot, what
+   * moves, and what the camera does. Deriving it is free and repeatable;
+   * asking a text model to write it would be paying to re-say what the
+   * operator already said.
+   */
+  videoPrompt: string;
+}
+
+/** A character declared once for the whole video and referenced by scenes. */
+export interface StoryboardCharacter {
+  characterId: string;
+  name: string;
+  /** Relative path to a reference image, same safety rules as a keyframe. */
+  referenceImage: string | null;
 }
 
 export interface StoryboardVideo {
   videoId: string;
   videoTitle: string;
   scenes: StoryboardScene[];
+  /** Cast declared at video level, keyed by `character_id`. */
+  characters: StoryboardCharacter[];
   /** Where this came from, for an error message a person can act on. */
   sourceFile: string;
 }
@@ -170,6 +192,10 @@ const RawSceneSchema = z
     video_provider: z.unknown().optional(),
     video_model: z.unknown().optional(),
     priority: z.unknown().optional(),
+    character_id: z.unknown().optional(),
+    character_name: z.unknown().optional(),
+    character_reference_image: z.unknown().optional(),
+    video_prompt: z.unknown().optional(),
   })
   .passthrough();
 
@@ -207,6 +233,53 @@ export interface NormaliseContext {
   fallbackVideoId: string;
   fallbackVideoTitle: string;
   line?: number;
+}
+
+/**
+ * Compose the video prompt from what the storyboard already says.
+ *
+ * Deterministic and free. The order is the order a video model reads best:
+ * what is in the frame, then what moves, then what the camera does - the same
+ * order `buildScenePrompt` uses for images, and the same order the camera
+ * guardrail expects to append its lock block to.
+ *
+ * Nothing is invented. Every sentence here came from a field the operator
+ * filled in, so the same storyboard always produces the same prompt, byte for
+ * byte - which it must, because the prompt is hashed into the idempotency key
+ * that stops a resumed run paying for the same clip twice.
+ */
+export function deriveVideoPrompt(input: {
+  visualDescription: string;
+  characterAction: string;
+  camera: string;
+  narration?: string;
+}): string {
+  const visual = input.visualDescription.trim();
+  const action = input.characterAction.trim();
+  const camera = input.camera.trim();
+
+  const parts: string[] = [];
+  if (visual.length > 0) parts.push(visual.endsWith(".") ? visual : `${visual}.`);
+  if (action.length > 0) parts.push(`Movement: ${action.endsWith(".") ? action : `${action}.`}`);
+  if (camera.length > 0) parts.push(`Camera: ${camera.endsWith(".") ? camera : `${camera}.`}`);
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Does this prompt actually describe something a video model can animate?
+ *
+ * A camera line on its own does not: "Camera: locked static medium shot" tells
+ * a model where to stand and nothing about what happens. A scene going to a
+ * paid video model with nothing but that would buy five seconds of a still
+ * image, which is what LOCAL_MOTION does for free.
+ */
+export function promptHasMotionContent(input: {
+  visualDescription: string;
+  characterAction: string;
+}): boolean {
+  return (
+    input.visualDescription.trim().length > 0 || input.characterAction.trim().length > 0
+  );
 }
 
 export function normaliseScene(
@@ -347,6 +420,37 @@ export function normaliseScene(
     return { scene: null, issues };
   }
 
+  const camera = text(raw.camera);
+
+  // Written by the operator if they wrote one; composed from their own fields
+  // if they did not. Never asked of a text model.
+  const supplied = text(raw.video_prompt);
+  const videoPrompt =
+    supplied.length > 0
+      ? supplied
+      : deriveVideoPrompt({ visualDescription, characterAction, camera, narration });
+
+  // A scene heading for a paid video model must describe something that MOVES.
+  // Caught here, at import, and not at the provider: by the time a request is
+  // being built the batch is already approved and the money is already
+  // committed to being spent on something.
+  if (
+    motionMode === "VIDEO_AI" &&
+    supplied.length === 0 &&
+    !promptHasMotionContent({ visualDescription, characterAction })
+  ) {
+    issues.push(
+      err(
+        "video_ai_without_motion",
+        "Cảnh đặt motion_mode=VIDEO_AI nhưng không có visual_description lẫn " +
+          "character_action, nên không dựng được videoPrompt. Hãy mô tả cảnh/hành " +
+          "động, ghi video_prompt tường minh, hoặc chuyển sang LOCAL_MOTION.",
+        at,
+      ),
+    );
+    return { scene: null, issues };
+  }
+
   return {
     scene: {
       sceneNumber,
@@ -355,13 +459,15 @@ export function normaliseScene(
       dialogue,
       visualDescription,
       characterAction,
-      camera: text(raw.camera),
+      camera,
       subtitle: text(raw.subtitle),
       imageFile,
       motionMode,
       videoProvider,
       videoModel,
       priority,
+      characterId: text(raw.character_id) || null,
+      videoPrompt,
     },
     issues,
   };
@@ -423,6 +529,85 @@ export function validateVideo(video: StoryboardVideo): ImportIssue[] {
 
 // ----------------------------------------------------------------- JSON ---
 
+/** Cast declared at video level, plus any a scene named inline. */
+function collectCharacters(
+  declared: unknown,
+  rows: RawScene[],
+): { characters: StoryboardCharacter[]; issues: ImportIssue[] } {
+  const issues: ImportIssue[] = [];
+  const byId = new Map<string, StoryboardCharacter>();
+
+  const add = (id: string, name: string, image: string) => {
+    if (id.length === 0) return;
+    const existing = byId.get(id);
+    if (existing) {
+      // Same id, two different names is the one thing that must not pass: it is
+      // exactly how a video ends up with two versions of the same person.
+      if (name.length > 0 && existing.name.length > 0 && existing.name !== name) {
+        issues.push(
+          err(
+            "character_id_conflict",
+            `character_id "${id}" được gán hai tên khác nhau: ` +
+              `"${existing.name}" và "${name}".`,
+          ),
+        );
+        return;
+      }
+      if (existing.name.length === 0 && name.length > 0) existing.name = name;
+      if (existing.referenceImage === null && image.length > 0) {
+        existing.referenceImage = image;
+      }
+      return;
+    }
+    byId.set(id, {
+      characterId: id,
+      name: name.length > 0 ? name : id,
+      referenceImage: image.length > 0 ? image : null,
+    });
+  };
+
+  if (Array.isArray(declared)) {
+    for (const entry of declared) {
+      const row = entry as Record<string, unknown>;
+      add(
+        text(row.character_id) || text(row.id),
+        text(row.character_name) || text(row.name),
+        text(row.character_reference_image) || text(row.reference_image),
+      );
+    }
+  }
+  for (const row of rows) {
+    add(
+      text(row.character_id),
+      text(row.character_name),
+      text(row.character_reference_image),
+    );
+  }
+
+  for (const character of byId.values()) {
+    if (character.referenceImage === null) continue;
+    if (!isSafeRelativePath(character.referenceImage)) {
+      issues.push(
+        err(
+          "character_reference_unsafe",
+          `Ảnh tham chiếu của "${character.name}" không phải đường dẫn tương đối an toàn.`,
+        ),
+      );
+      character.referenceImage = null;
+    } else if (!hasAllowedImageExtension(character.referenceImage)) {
+      issues.push(
+        err(
+          "character_reference_invalid",
+          `Ảnh tham chiếu của "${character.name}" không đúng định dạng ảnh cho phép.`,
+        ),
+      );
+      character.referenceImage = null;
+    }
+  }
+
+  return { characters: [...byId.values()], issues };
+}
+
 export function parseStoryboardJson(
   content: string,
   ctx: Omit<NormaliseContext, "line">,
@@ -456,24 +641,36 @@ export function parseStoryboardJson(
     };
   }
 
-  const groups: { videoId: string; videoTitle: string; scenes: RawScene[] }[] = [];
-  const value = parsed.data;
+  const groups: {
+    videoId: string;
+    videoTitle: string;
+    scenes: RawScene[];
+    declared: unknown;
+  }[] = [];
+  const value = parsed.data as Record<string, unknown>;
   if (Array.isArray(value)) {
-    groups.push({ videoId: "", videoTitle: "", scenes: value });
+    groups.push({ videoId: "", videoTitle: "", scenes: value, declared: undefined });
   } else if ("videos" in value) {
-    const list = (value as { videos: { video_id?: unknown; video_title?: unknown; scenes: RawScene[] }[] }).videos;
+    const list = value.videos as {
+      video_id?: unknown;
+      video_title?: unknown;
+      characters?: unknown;
+      scenes: RawScene[];
+    }[];
     for (const v of list) {
       groups.push({
         videoId: text(v.video_id),
         videoTitle: text(v.video_title),
         scenes: v.scenes,
+        declared: v.characters,
       });
     }
   } else {
     groups.push({
       videoId: text(value.video_id),
       videoTitle: text(value.video_title),
-      scenes: value.scenes,
+      scenes: value.scenes as RawScene[],
+      declared: value.characters,
     });
   }
 
@@ -498,11 +695,15 @@ export function parseStoryboardJson(
       byVideo.set(videoId, bucket);
     });
 
+    const cast = collectCharacters(group.declared, group.scenes);
+    for (const i of cast.issues) issues.push({ ...i, sourceFile: ctx.sourceFile });
+
     for (const [videoId, bucket] of byVideo) {
       videos.push({
         videoId,
         videoTitle: bucket.title,
         scenes: [...bucket.scenes].sort((a, b) => a.sceneNumber - b.sceneNumber),
+        characters: cast.characters,
         sourceFile: ctx.sourceFile,
       });
     }
@@ -658,12 +859,29 @@ export function parseStoryboardCsv(
     byVideo.set(videoId, bucket);
   }
 
-  const videos: StoryboardVideo[] = [...byVideo.entries()].map(([videoId, bucket]) => ({
-    videoId,
-    videoTitle: bucket.title,
-    scenes: [...bucket.scenes].sort((a, b) => a.sceneNumber - b.sceneNumber),
-    sourceFile: ctx.sourceFile,
-  }));
+  const rawByVideo = new Map<string, RawScene[]>();
+  for (let r = 1; r < rows.length; r += 1) {
+    const cells = rows[r]!;
+    if (cells.length !== header.length) continue;
+    const raw: Record<string, string> = {};
+    header.forEach((key, index) => {
+      raw[key] = cells[index] ?? "";
+    });
+    const id = text(raw.video_id) || ctx.fallbackVideoId;
+    rawByVideo.set(id, [...(rawByVideo.get(id) ?? []), raw as RawScene]);
+  }
+
+  const videos: StoryboardVideo[] = [...byVideo.entries()].map(([videoId, bucket]) => {
+    const cast = collectCharacters(undefined, rawByVideo.get(videoId) ?? []);
+    for (const i of cast.issues) out.push({ ...i, videoId, sourceFile: ctx.sourceFile });
+    return {
+      videoId,
+      videoTitle: bucket.title,
+      scenes: [...bucket.scenes].sort((a, b) => a.sceneNumber - b.sceneNumber),
+      characters: cast.characters,
+      sourceFile: ctx.sourceFile,
+    };
+  });
 
   for (const video of videos) out.push(...validateVideo(video));
   return { videos, issues: out };

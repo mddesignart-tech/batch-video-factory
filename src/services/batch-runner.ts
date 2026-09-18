@@ -318,6 +318,42 @@ export async function retryScene(sceneId: string): Promise<void> {
     projectId: scene.projectId,
     priority: 100 + scene.sceneNumber,
   });
+
+  // Revive the render this scene took down with it.
+  //
+  // `handleRenderFinal` refuses outright when a scene has given up - waiting on
+  // one that will never produce media is waiting forever - so it burns its
+  // attempts and ends `failed`. Fixing the scene afterwards then leaves the
+  // video one job short of finished, with nothing in the queue to notice: the
+  // project sits at `rendering` for good, and the only symptom is an MP4 that
+  // never appears. An operator retrying a scene is trying to finish the video,
+  // so the render goes back in the queue behind it.
+  const render = await prisma.job.findFirst({
+    where: { projectId: scene.projectId, type: "render_final", status: "failed" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (render) {
+    await prisma.job.update({
+      where: { id: render.id },
+      data: {
+        status: "queued",
+        attempts: 0,
+        error: null,
+        finishedAt: null,
+        nextRunAt: new Date(),
+        // The deferral counter is per attempt at rendering, not per lifetime.
+        payloadJson: "{}",
+      },
+    });
+    await logger.info({
+      event: "render.requeued_after_retry",
+      projectId: scene.projectId,
+      sceneId,
+      message:
+        `Đã xếp lại bước render của dự án: nó từng hỏng vì cảnh ${scene.sceneNumber} ` +
+        `không có media, và cảnh đó vừa được cho chạy lại.`,
+    });
+  }
 }
 
 /** Everything the batch detail page needs, in one read. */

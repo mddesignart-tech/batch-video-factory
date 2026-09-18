@@ -43,6 +43,17 @@ export interface PlannedSceneInput {
   manualVideoModel?: string | null;
   manualVoiceProvider?: string | null;
   manualVoiceModel?: string | null;
+  /**
+   * The scene already HAS its keyframe, supplied with an imported storyboard.
+   *
+   * Priced at zero, because it will be bought zero times. Leaving it out of the
+   * estimate would be a forecast that disagrees with the pipeline in the
+   * expensive direction: the operator would approve a ceiling sized for images
+   * nobody is going to buy, and the headline saving of importing a storyboard -
+   * not paying to redraw pictures that already exist - would be invisible in
+   * the only number they read before agreeing to spend.
+   */
+  hasSuppliedKeyframe?: boolean;
 
   /**
    * The scene half of the LOW_AUTO gate, from `deriveSceneVideoFacts`.
@@ -351,10 +362,13 @@ export function planScene(opts: {
     characterCount: scene.characterCount,
   });
 
-  const wantsKeyframe = keyframeRequired(
-    motion.source,
-    shouldGenerateKeyframe(qualityMode, scene.complexity, scene.characterCount),
-  );
+  const wantsKeyframe =
+    scene.hasSuppliedKeyframe === true
+      ? false
+      : keyframeRequired(
+          motion.source,
+          shouldGenerateKeyframe(qualityMode, scene.complexity, scene.characterCount),
+        );
   const wantsQuality = shouldEvaluateQuality(qualityMode, scene.spendPriority);
 
   /**

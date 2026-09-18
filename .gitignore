@@ -36,3 +36,6 @@ Thumbs.db
 *.tsbuildinfo
 coverage/
 .vitest/
+
+# Throwaway world for the import end-to-end mock run (scripts/import-e2e-mock.ts)
+data/.import-e2e/

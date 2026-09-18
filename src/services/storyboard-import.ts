@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { projectSubdir, toRelative, uuidFilename } from "@/lib/paths";
+import { DIRS, projectSubdir, toRelative, uuidFilename } from "@/lib/paths";
 import { readZipFile, ZipError, type ZipEntry } from "@/lib/zip";
 import {
   hasAllowedImageExtension,
@@ -10,6 +10,7 @@ import {
   isSafeRelativePath,
   parseStoryboardFile,
   type ImportIssue,
+  type StoryboardCharacter,
   type StoryboardScene,
   type StoryboardVideo,
 } from "@/domain/storyboard";
@@ -310,10 +311,16 @@ export interface ResolvedScene {
   priority: "LOW" | "NORMAL" | "HIGH";
 }
 
+export interface ResolvedCharacter extends StoryboardCharacter {
+  /** The reference image, once found in the folder or archive. */
+  asset: AssetSource | null;
+}
+
 export interface ResolvedVideo {
   videoId: string;
   title: string;
   sourceFile: string;
+  characters: ResolvedCharacter[];
   scenes: ResolvedScene[];
   suppliedImages: number;
   missingImages: number;
@@ -348,6 +355,29 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
     const resolved: ResolvedScene[] = [];
     let supplied = 0;
     let missing = 0;
+
+    const cast: ResolvedCharacter[] = video.characters.map((character) => {
+      if (character.referenceImage === null) return { ...character, asset: null };
+      const key = character.referenceImage.toLowerCase();
+      const asset = assets.get(key) ?? assets.get(path.posix.basename(key)) ?? null;
+      if (asset === null) {
+        issues.push(
+          issue(
+            "error",
+            "character_reference_missing",
+            `Không tìm thấy ảnh tham chiếu "${character.referenceImage}" của nhân vật ` +
+              `"${character.name}".`,
+            { videoId: video.videoId, sourceFile: video.sourceFile },
+          ),
+        );
+      }
+      return { ...character, asset };
+    });
+    // A scene may name a character the video never declared at the top. That is
+    // an IMPLICIT declaration, not an error: `collectCharacters` has already
+    // folded those ids into the cast, so the same id in six scenes is still one
+    // character with one reference - which is the only property that matters.
+    void cast;
 
     for (const scene of video.scenes) {
       const at = {
@@ -451,6 +481,7 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
       videoId: video.videoId,
       title: video.videoTitle || video.videoId,
       sourceFile: video.sourceFile,
+      characters: cast,
       scenes: resolved,
       suppliedImages: supplied,
       missingImages: missing,
@@ -584,6 +615,64 @@ export async function materialiseImport(
       },
     });
 
+    // ---- cast, before any scene refers to one ----
+    //
+    // The app already has the whole character-consistency machine: canonical
+    // sheets, LOCKED_ATTRIBUTES, approved master references, the "keep X
+    // identical to the reference" clause. Import does not rebuild any of it -
+    // it fills in `charactersPresentJson` so that machine engages, and creates
+    // a Character row only when the name is new.
+    //
+    // An existing character is REUSED, never overwritten. A storyboard naming
+    // "Max" means the Max this project already has; letting an import rewrite
+    // his canonical description would silently redraw him in every older video
+    // that is regenerated afterwards.
+    const castByStoryboardId = new Map<string, string>();
+    for (const character of video.characters) {
+      const existing = await prisma.character.findUnique({ where: { name: character.name } });
+      const row =
+        existing ??
+        (await prisma.character.create({
+          data: {
+            name: character.name,
+            description: `Nhân vật nhập từ storyboard ${video.videoId}.`,
+            personality: "",
+            // Minimal but never empty: an empty visualPrompt would put a blank
+            // where every image prompt expects the canonical description.
+            visualPrompt: `${character.name}, consistent character design across every scene`,
+            notes: `Nhập từ ${video.sourceFile}`,
+            enabled: true,
+          },
+        }));
+      castByStoryboardId.set(character.characterId, row.name);
+
+      if (character.asset) {
+        const hasPrimary = await prisma.characterReference.findFirst({
+          where: { characterId: row.id, isPrimary: true },
+        });
+        const destination = path.join(
+          DIRS.characters,
+          `${row.id}-${uuidFilename(path.extname(character.asset.label) || ".png")}`,
+        );
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.writeFileSync(destination, character.asset.read());
+        await prisma.characterReference.create({
+          data: {
+            characterId: row.id,
+            filePath: toRelative(destination),
+            source: "upload",
+            // Only promoted to the master when the character has none. An
+            // import must not demote a reference a human already approved.
+            isPrimary: !hasPrimary,
+            approved: !hasPrimary,
+            notes: `Ảnh tham chiếu nhập từ storyboard ${video.videoId}`,
+          },
+        });
+        copiedImages += 1;
+      }
+    }
+    const castNames = [...new Set(castByStoryboardId.values())];
+
     const totalScenes = video.scenes.length;
     let startSeconds = 0;
     for (const resolved of video.scenes) {
@@ -619,6 +708,37 @@ export async function materialiseImport(
           subtitle: scene.subtitle,
           camera: scene.camera,
           characterAction: scene.characterAction,
+          // Composed from the storyboard's own fields; see `deriveVideoPrompt`.
+          videoPrompt: scene.videoPrompt,
+          // Who is in frame drives the image prompt and the reference images.
+          // A scene naming a character uses that one; a scene naming none uses
+          // the video's whole declared cast, which is what keeps a six-scene
+          // video from quietly changing who it is about.
+          charactersPresentJson: JSON.stringify(
+            scene.characterId !== null
+              ? [castByStoryboardId.get(scene.characterId)].filter(Boolean)
+              : castNames,
+          ),
+          primaryCharactersJson: JSON.stringify(
+            scene.characterId !== null
+              ? [castByStoryboardId.get(scene.characterId)].filter(Boolean)
+              : castNames.slice(0, 1),
+          ),
+          // Narration counts as speech.
+          //
+          // `parseDialogueLines` reads narration only when the scene has a
+          // speaking character to read it - "narration has no speaker, and the
+          // first speaking character reads it only because someone has to". An
+          // empty list therefore does not mean "narrate anonymously", it means
+          // the narration is silently dropped, and a scene that had words in it
+          // renders mute.
+          speakingCharactersJson: JSON.stringify(
+            scene.dialogue.trim().length > 0 || scene.narration.trim().length > 0
+              ? scene.characterId !== null
+                ? [castByStoryboardId.get(scene.characterId)].filter(Boolean)
+                : castNames.slice(0, 1)
+              : [],
+          ),
           complexity: resolved.complexity,
           spendPriority: priority,
           // AUTO leaves the decision to the planner, exactly as V1 does. The

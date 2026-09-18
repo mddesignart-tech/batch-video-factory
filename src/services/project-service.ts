@@ -255,6 +255,9 @@ export async function buildPlannedScenes(
     manualVideoModel: scene.videoModel,
     manualVoiceProvider: scene.voiceProvider,
     manualVoiceModel: scene.voiceModel,
+    // An imported keyframe is already on disk and already paid for - by the
+    // operator, before this app ever saw it.
+    hasSuppliedKeyframe: scene.imageSource === "IMPORTED" && Boolean(scene.imagePath),
     // The same derivation `generateSceneVideo` runs. The preview is what the
     // real-run script checks its plan against before spending, so a preview
     // that refuses a scene the generator would route stops a batch that was

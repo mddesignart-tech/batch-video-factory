@@ -1,0 +1,93 @@
+{
+  "video_id": "cold-open",
+  "video_title": "Bite the bullet",
+  "characters": [
+    {
+      "character_id": "mia",
+      "character_name": "Mia",
+      "character_reference_image": "images/mia-reference.png"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 5,
+      "character_id": "mia",
+      "visual_description": "Mia sits in a dentist waiting room, gripping the arms of the chair, plain pale wall behind her.",
+      "character_action": "Mia swallows once and her eyes widen slightly.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "narration": "Some things you cannot put off forever.",
+      "dialogue": "Mia: \"I have rescheduled this four times.\"",
+      "subtitle": "I have rescheduled this four times.",
+      "image_file": "images/scene-01.png",
+      "motion_mode": "VIDEO_AI",
+      "priority": "HIGH"
+    },
+    {
+      "scene_number": 2,
+      "duration": 4,
+      "character_id": "mia",
+      "visual_description": "A plain shot of Mia from the shoulders up, staring straight ahead.",
+      "character_action": "Mia holds completely still.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Mia: \"The chair is fine. I am fine.\"",
+      "subtitle": "The chair is fine. I am fine.",
+      "image_file": "images/scene-02.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 3,
+      "duration": 4,
+      "character_id": "mia",
+      "visual_description": "Mia looks down at a leaflet in her lap, plain background.",
+      "character_action": "Mia turns the leaflet over once.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "narration": "She has read the same leaflet twice.",
+      "subtitle": "She has read the same leaflet twice.",
+      "image_file": "images/scene-03.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 4,
+      "duration": 5,
+      "character_id": "mia",
+      "visual_description": "Mia stands up and squares her shoulders, plain pale wall behind her.",
+      "character_action": "Mia takes one breath and lifts her chin.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Mia: \"Right. Let us get it over with.\"",
+      "subtitle": "Right. Let us get it over with.",
+      "image_file": "images/scene-04.png",
+      "motion_mode": "VIDEO_AI",
+      "priority": "HIGH"
+    },
+    {
+      "scene_number": 5,
+      "duration": 4,
+      "character_id": "mia",
+      "visual_description": "Mia on a clean plain background, arms relaxed at her sides.",
+      "character_action": "Mia gives one small nod.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Mia: \"Bite the bullet means to do the unpleasant thing anyway.\"",
+      "subtitle": "Bite the bullet = do the unpleasant thing anyway.",
+      "image_file": "images/scene-05.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 6,
+      "duration": 4,
+      "character_id": "mia",
+      "visual_description": "Mia on the same clean background, a little calmer than before.",
+      "character_action": "Mia gives a small shrug.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "narration": "Use it when someone finally faces something hard.",
+      "dialogue": "Mia: \"He bit the bullet and booked the appointment.\"",
+      "subtitle": "He bit the bullet and booked the appointment.",
+      "image_file": "images/scene-06.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    }
+  ]
+}
