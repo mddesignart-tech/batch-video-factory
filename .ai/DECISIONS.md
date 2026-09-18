@@ -1639,3 +1639,67 @@ tạo lại ảnh, tức trả tiền; ghi lại thành việc phải làm trư�
 **Không đổi lifecycle/routing của h3_max.** Hai mẫu sản xuất là dữ liệu thật và
 là lần đầu có dữ liệu loại đó, nhưng hai mẫu không đủ để đổi một luật định
 tuyến, và đó là quyết định của người vận hành chứ không phải của một script.
+
+---
+
+## QĐ-065 — Prompt ảnh cũng phải có bộ dò mâu thuẫn, và "identity" không bao gồm biểu cảm
+
+Vá lỗi QĐ-064. Đường video đã có `findPromptContradictions` từ hồi đo camera:
+một prompt vừa cấm vừa xin cùng một cú máy thì model tự chọn, và lần chạy thành
+một phép tung đồng xu không ai lặp lại được. Đường ảnh **không có gì tương
+đương** — cảnh 4 của lô thật là hoá đơn cho chỗ trống đó.
+
+### Cái bẫy nằm ngay trong thứ tự ưu tiên
+
+Thứ tự đã chốt: `IDENTITY > CONTINUITY > ACTION > COMPOSITION > DECORATIVE`.
+
+Áp máy móc vào cảnh 4 thì **bảng nhân vật thắng**, nụ cười ở lại, và bản vá sống
+sót qua chính nó. Nó không được phép thắng, vì **biểu cảm chưa bao giờ là
+identity**. Chính prompt nói thế: nhóm khoá gồm tóc, hình mặt, tuổi, da, chiều
+cao, tỉ lệ, trang phục, phụ kiện — rồi câu ngay sau đó ghi *"Only pose,
+expression and camera angle may differ"*. Một bảng ghi "wide eager smile" là
+đang nêu **tâm trạng mặc định**, tức `DECORATIVE`; còn "his eyes stay wide" của
+cảnh là `ACTION` của đúng khung hình đó. Action thắng decoration: bỏ nụ cười,
+giữ nguyên cấu trúc khuôn mặt.
+
+### Bảy luật, tất cả đều là bỏ bớt hoặc thay thế tại chỗ khớp
+
+| Luật | Giữ | Bỏ |
+|---|---|---|
+| `action_vs_empty_frame` | hành động cần vật thể | "nothing else in frame" |
+| `action_vs_static` | hành động | "completely static" |
+| `expression_vs_sheet` | biểu cảm của cảnh | cụm tâm trạng trong bảng nhân vật |
+| `framing_conflict` | camera (nơi có thẩm quyền về khung) | cỡ cảnh do mô tả tự thêm |
+| `camera_move_in_still` | cỡ cảnh | pan/zoom/push-in — ảnh tĩnh không làm được |
+| `object_present_and_absent` | câu liền mạch | cụm nhắc lại vật đã biến mất |
+| `outfit_vs_locked_identity` | màu khoá của trang phục | màu cảnh tự đổi |
+
+### Ba thứ giữ cho bộ guard không tự trở thành lỗi
+
+1. **Đồng ý không phải mâu thuẫn.** Bảng ghi "always wide-eyed and eager" cạnh
+   cảnh ghi "eyes stay wide" là nói cùng một điều hai lần — **giữ nguyên**. Chỉ
+   cụm nào không giao nhóm nào với cảnh mới bị bỏ. Một bộ báo động kêu cả khi
+   đầu vào đúng là bộ báo động sẽ bị tắt.
+2. **Không sửa được thì nói là không sửa được.** `resolved: false` cho trường
+   hợp không nhấc được cụm ra mà không làm hỏng câu; log kêu to hơn chứ không
+   đẻ ra tiếng Anh què.
+3. **Tất định từng byte.** Regex cố định, thứ tự cố định, chỉ xoá/thay tại span
+   đã khớp. Bắt buộc, vì prompt bị băm vào `idempotencyKey`.
+
+### Xoá chữ thôi chưa đủ
+
+Ảnh tham chiếu **vẫn đang cười**. Khi một cụm biểu cảm bị bỏ, prompt được thêm
+đúng một câu cố định ngay sau khối khoá: biểu cảm lấy từ mô tả cảnh, không lấy
+từ bảng nhân vật hay ảnh tham chiếu. Đây là đòn bẩy duy nhất còn lại mà không
+tốn tiền.
+
+### Hệ quả phải nói ra: khoá ảnh của 3 cảnh đã đổi
+
+Prompt đổi thì `idempotencyKey` đổi. Cảnh **1, 4, 5** có mâu thuẫn thật nên
+prompt đổi và khoá ảnh **không còn khớp** ảnh đã mua; cảnh **2, 3, 6** sạch nên
+khoá **trùng nguyên**. Không có gì tự chạy lại (lô `COMPLETED`, job `completed`),
+nhưng nếu ai đó tạo lại media cho cảnh 1/4/5 thì đó sẽ là ảnh mua mới. Đúng chứ
+không phải lỗi — prompt cũ sai — nhưng phải biết trước khi bấm.
+
+**Chưa tạo lại ảnh cảnh 4 trong bước này.** Bản vá là code; xem nó ra ảnh thế
+nào là một lần chi tiền, và đó là quyết định của người dùng.

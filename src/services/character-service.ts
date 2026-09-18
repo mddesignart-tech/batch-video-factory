@@ -235,6 +235,15 @@ export function buildScenePrompt(input: {
   camera?: string;
   location?: string;
   mood?: string;
+  /**
+   * Set only when a character sheet's mood wording was overruled by the scene.
+   *
+   * Deleting the words is half a fix: the reference IMAGE still shows the
+   * character's default face, and that pull is what drew a smiling Max over a
+   * scene that called for wide eyes. This says which one wins, and it goes
+   * immediately after the lock clause so it is read as part of it.
+   */
+  expressionOverride?: string | null;
 }): string {
   const lines: string[] = [input.sceneDescription.trim()];
 
@@ -254,6 +263,7 @@ export function buildScenePrompt(input: {
         `${LOCKED_ATTRIBUTES.join(", ")} must not change. ` +
         "Only pose, expression and camera angle may differ.",
     );
+    if (input.expressionOverride) lines.push(input.expressionOverride);
   }
 
   lines.push("");

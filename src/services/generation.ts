@@ -52,6 +52,10 @@ import {
 import { parseDialogueLines } from "@/domain/dialogue-lines";
 import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
+import {
+  resolveImagePrompt,
+  type ImageContradiction,
+} from "@/domain/image-prompt";
 import { knownBadInput, recordFailureEvidence } from "./model-reliability";
 import { probeDuration } from "@/media/ffmpeg";
 import { normalizeVoiceClip } from "@/media/audio-normalize";
@@ -856,6 +860,22 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
   );
 
   const shot = await buildSceneImageRequest(scene, project.stylePresetId);
+  for (const clash of shot.contradictions) {
+    // WARN, and before anything is generated: this is the moment two records of
+    // what the picture should be were found to disagree. An unresolved one is
+    // louder still, because nothing downstream will fix it.
+    await logger.warn({
+      event: clash.resolved
+        ? "scene.image_contradiction_resolved"
+        : "scene.image_contradiction_unresolved",
+      projectId: project.id,
+      sceneId: scene.id,
+      message:
+        `Cảnh ${scene.sceneNumber} [${clash.kind}]${clash.character ? ` (${clash.character})` : ""}: ` +
+        `${clash.message} Giữ ${clash.keptLayer}, bỏ ${clash.droppedLayer}.`,
+      data: { kind: clash.kind, kept: clash.kept, dropped: clash.dropped },
+    });
+  }
   if (shot.droppedByLimit.length > 0) {
     await logger.warn({
       event: "scene.references_dropped",
@@ -932,6 +952,13 @@ export interface SceneImageRequest {
   droppedByLimit: string[];
   /** Listed by the script but never staged, so removed from this image. */
   trimmedCharacters: string[];
+  /**
+   * Instructions that could not both be drawn, and how each was settled.
+   *
+   * Surfaced rather than swallowed: the storyboard can show them before a
+   * single image is bought, which is the cheapest moment to fix a script.
+   */
+  contradictions: ImageContradiction[];
 }
 
 /**
@@ -1006,13 +1033,34 @@ export async function buildSceneImageRequest(
     .filter((t) => t.length > 0)
     .join(" ");
 
+  // The last thing read before the prompt is composed: instructions that cannot
+  // both be drawn are resolved here, by priority, and reported.
+  //
+  // The video path has had this since the camera work was measured; the image
+  // path had nothing, and scene 4 of the first real batch paid for that. It
+  // asked for a pace backwards ALONG THE BOARD beside "nothing else in frame",
+  // and for eyes that "stay wide" while the character sheet insisted on a "wide
+  // eager smile". Both were sent as written, the model picked, and the beat
+  // came back as a cheerful portrait on an empty background. See QĐ-064.
+  const resolved = resolveImagePrompt({
+    sceneDescription: action.length > 0 ? action : scene.imagePrompt,
+    camera: scene.camera,
+    characters: characters.map((c) => ({ name: c.name, canonical: c.canonical })),
+  });
+
   // Every character in frame gets their full profile in the prompt, whether or
   // not a reference image survives the cap.
   const prompt = buildScenePrompt({
-    sceneDescription: action.length > 0 ? action : scene.imagePrompt,
-    characters,
+    sceneDescription: resolved.sceneDescription,
+    // Same sheets, minus any mood wording the scene overruled. Nothing in the
+    // LOCKED_ATTRIBUTES list can be touched by that pass.
+    characters: characters.map((c, i) => ({
+      ...c,
+      canonical: resolved.characters[i]?.canonical ?? c.canonical,
+    })),
     stylePrompt,
-    camera: scene.camera,
+    camera: resolved.camera,
+    expressionOverride: resolved.expressionOverride,
   });
 
   // Only approved references are ever sent. An unapproved master would quietly
@@ -1035,6 +1083,7 @@ export async function buildSceneImageRequest(
     repairedCharacters: repaired,
     droppedByLimit: dropped.map((c) => c.name),
     trimmedCharacters: trimmed,
+    contradictions: resolved.contradictions,
   };
 }
 

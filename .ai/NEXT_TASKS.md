@@ -54,9 +54,23 @@ mock có thể bắt mua lại $0,44), và hỏi lại cổng LOW_AUTO **sau** k
 - [x] **Render lại cục bộ** bằng `scripts/rerender-project.ts` (bấm lại đúng job
       `render_final` cũ, chỉ FFmpeg). MP4 mới: `final_0de14438.mp4`.
 
-### Lỗi production còn mở (không tốn tiền để sửa, nhưng phải sửa trước lô sau)
+### Đã vá 2026-09-18 (đợt 3, $0) — QĐ-065
 
-- [ ] **Prompt ảnh không có bộ dò mâu thuẫn như prompt video.** Cảnh 4 minh hoạ
+- [x] **Prompt ảnh đã có bộ dò mâu thuẫn** (`src/domain/image-prompt.ts`), 7 luật,
+      24 test. Cảnh 4 dùng làm fixture hồi quy. Bỏ "nothing else in frame" (giữ
+      cầu nhảy) và bỏ "wide eager smile" khỏi bảng nhân vật (giữ "eyes stay
+      wide"), thêm một câu cố định nói biểu cảm lấy từ cảnh chứ không từ ảnh
+      tham chiếu. Thuộc tính khoá không bị đụng tới.
+- [ ] **Khoá ảnh cảnh 1, 4, 5 đã đổi** vì prompt đổi. Ảnh cũ vẫn trên đĩa và vẫn
+      đang dùng trong MP4; chỉ khi nào tạo lại media cho ba cảnh đó thì mới là
+      ảnh mua mới (~$0,0412/ảnh). Cảnh 2, 3, 6 khoá trùng nguyên.
+- [ ] Muốn thấy bản vá ra ảnh thế nào thì phải tạo lại ảnh cảnh 4 — **một lần
+      chi tiền**, chờ bạn quyết.
+
+<details>
+<summary>Lỗi gốc đã vá (giữ lại để tra cứu)</summary>
+
+- **Prompt ảnh không có bộ dò mâu thuẫn như prompt video.** Cảnh 4 minh hoạ
       hai kiểu mâu thuẫn cùng lúc:
       1. *kịch bản tự mâu thuẫn*: "moves one short pace backwards **along the
          board**" đứng cạnh "**nothing else in frame**" → ảnh ra không có cầu
@@ -68,6 +82,8 @@ mock có thể bắt mua lại $0,44), và hỏi lại cổng LOW_AUTO **sau** k
       đương cho `buildSceneImageRequest`.
       **Đây không phải lỗi của h3_max** — clip bám keyframe rất sát (10/10);
       nó chỉ trung thành với một tấm ảnh đã sai từ trước.
+
+</details>
 
 ---
 
