@@ -1,12 +1,14 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-17
-**Cột mốc hiện tại:** **Batch Video Factory V1 đã xây xong ở chế độ mock.**
-Milestone 2 xong trước đó (Text + Image + Video + Voice đã chạy thật).
+**Cập nhật:** 2026-09-18
+**Cột mốc hiện tại:** **Batch Video Factory V1 đã chạy hết một lô bằng API
+trả phí và xuất ra MP4.** Milestone 2 xong trước đó (Text + Image + Video + Voice
+đã chạy thật).
 
-Batch V1 chưa từng chạy với API trả phí: toàn bộ được kiểm chứng bằng mock,
-fixture và FFmpeg tại máy. `CREATE_ATTEMPT_TOKEN = 0`, chưa có lô nào được duyệt
-chi.
+Lô `a690a290` "Cold feet": duyệt 2026-09-17 với trần $1,24, dừng giữa chừng ở
+cảnh 1, chạy tiếp và hoàn tất 2026-09-18 với **$1,047095** thật — 6 cảnh, 26,09
+giây, 1080x1920. `CREATE_ATTEMPT_TOKEN = 0` suốt cả lần chạy: quyền chi lô là cơ
+chế cấp phép, không phải token. Xem QĐ-062.
 
 Tài liệu này ghi tình trạng **thực tế**. Tính năng chỉ được đánh dấu hoạt động
 khi đã chạy thật và được kiểm chứng, không phải khi đã viết xong mã.
@@ -16,7 +18,7 @@ khi đã chạy thật và được kiểm chứng, không phải khi đã viế
 ## Tiền và quyền chi tiêu
 
 ```
-Hạn mức tổng : $8,00   đã chi $5,353920   còn $2,646080
+Hạn mức tổng : $8,00   đã chi $6,401015   còn $1,598985
 CREATE_ATTEMPT_TOKEN : 0
 ```
 
@@ -30,11 +32,11 @@ Ví **tách riêng từng nhà cung cấp, không bao giờ cộng chung**:
 
 | Ví | Đã chi | Số gọi | Số dư |
 |---|---|---|---|
-| openai | $2,035066 | 43 | $6,00 — **khai báo**, API key không đọc được số dư |
-| runway | $3,290000 | 7 | **671 credit = $6,71** — LIVE, đọc 2026-09-16 |
+| openai | $2,282161 | 56 | $6,00 — **khai báo**, API key không đọc được số dư |
+| runway | $4,090000 | 9 | **591 credit = $5,91** — LIVE, đọc 2026-09-18 |
 | groq | $0,028854 | 24 | external, nhà cung cấp tự quản |
 
-Sổ runway khớp tuyệt đối với hãng: $3,29 = 329 credit, 1000 − 329 = **671**.
+Sổ runway khớp tuyệt đối với hãng: $4,09 = 409 credit, 1000 − 409 = **591**.
 Setting trước đó ghi 975 credit — lệch $3,04 và đã được sửa bằng số đọc live.
 Mặc định của ví runway giờ là **0**, không phải một con số chép lại: trước khi
 hỏi hãng, câu trả lời trung thực là "không biết". Xem QĐ-054.

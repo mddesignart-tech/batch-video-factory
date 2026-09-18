@@ -1479,3 +1479,78 @@ COMMITTED hoặc RELEASED, tức là đã thành lịch sử chứ không phải
 `scripts/close-stale-batch.ts` mặc định là **thử khô**, và đọc lại DB sau khi ghi
 để tự kiểm 5 điều thay vì tự báo cáo thứ mình vừa làm.
 
+
+---
+
+## QĐ-062 — Chạy tiếp một lô là câu hỏi khác với chạy một lô
+
+Lô `a690a290` được duyệt 2026-09-17 22:27, mua đúng một tấm ảnh $0,041160 rồi
+chết ở cảnh 1. Nguyên nhân **không** nằm trong lô: `runway/h3_max:768x1280`
+không có trong `spend.confirmedProviders`, vì mỗi lần benchmark ngày 15/09 đều
+xác nhận rồi thu hồi. Hai ổ khoá, và lô chỉ mở được ổ thứ nhất.
+
+```
+BATCH_SPEND_AUTHORIZATION  "được tiêu bao nhiêu"   -> đã qua, log batch.gate_passed
+spend.confirmedProviders   "cặp model này đã được  -> CHẶN, ProviderNotConfirmedError
+                            nhìn giá và đồng ý chưa"
+```
+
+### Vì sao không dùng `run-first-real-batch.ts`
+
+Nó **bắt đầu** một lô. Chĩa vào một lô đã chạy dở thì làm ba việc sai:
+
+| | |
+|---|---|
+| tạo `batch_expand` thứ hai | thay vì bám lại job đã có |
+| chỉ vét job `queued` | đúng cái job `failed` — lý do của cả lần resume — không bao giờ được lấy |
+| chặn khi cảnh có model trên row | lần đầu thì đó chỉ có thể là ghim tay; **sau** `startMediaForBatchVideo` thì đó là **plan đã duyệt viết xuống**, và chặn nó nghĩa là không lô nào resume được |
+
+`scripts/resume-batch.ts` giữ nguyên cổng: mọi request trả phí vẫn qua
+`runProviderJob`, cùng `idempotencyKey`, cùng quyền chi lô, cùng giữ chỗ trước
+khi gửi, cùng chốt theo giá thật. Script **không** tự ghi bảng sổ nào.
+
+### Hai thứ nó cố tình bỏ ra
+
+**1. `evaluateScene`.** `handleSceneMedia` kết thúc bằng chấm điểm chất lượng, và
+điểm dưới ngưỡng sẽ `retryCount++` rồi xếp lại cảnh. Tăng `retryCount` **đổi
+idempotencyKey**, nên job xếp lại **mua lại cả ảnh lẫn clip** — $0,44 trên dự án
+này — theo lời một quality model **mock**. Đây là lỗ rò tiền thật, không phải giả
+thuyết. Luật của lần chạy này là một POST trả phí một lần, nên chuỗi cảnh được
+chạy từng bước và bỏ hẳn bước chấm điểm.
+
+**2. Job sinh ra giữa chừng.** Chỉ những job row **đã tồn tại lúc bắt đầu** được
+chạy. Một job mới xuất hiện trong lúc chạy — đúng hình dạng của một quality retry
+— bị bỏ lại chứ không được vét. Lần chạy này: **0 job mới**.
+
+### Hỏi lại LOW_AUTO sau keyframe
+
+Plan đóng băng đi vào `routeFor` như một **ghim**, và ghim thì được tôn trọng
+**không qua cổng LOW_AUTO**. Đúng với ghim do người gõ, sai hoàn toàn với ghim
+vốn là câu trả lời cũ của chính cái máy. Nên cổng được hỏi lại sau bước tạo ảnh
+và trước khi POST clip, với `ignoreManualPin: true` — nếu để `manualPinElsewhere`
+đúng như thực tế thì cổng sẽ từ chối trả lời chính câu hỏi của nó.
+
+Kết quả: cảnh 1 `DAT` ngay từ dry-run (đã có keyframe từ hôm trước), cảnh 4
+`CHUA DAT (needs_keyframe)` ở dry-run và `DAT` sau khi ảnh được tạo. Đó là hai
+câu trả lời đúng cho hai thời điểm khác nhau, không phải một cái bất đồng.
+
+### Bằng chứng idempotency, tính trước khi tiêu
+
+Khoá của ảnh cảnh 1 được **tính lại từ prompt thật**, không phải đọc từ DB rồi
+tin: `4f831cf3b899`, trùng `ProviderJob` completed `openai-image-8665db7a…`, file
+còn trên đĩa. `runProviderJob` trả file đó về **trước** cổng ngân sách, giữ chỗ
+và vendor. Chạy thật xác nhận: `provider.job.reused`, ảnh cảnh 1 **không** bị mua
+lại, `retryCount` cả 6 cảnh vẫn **0**.
+
+### Số liệu đối chiếu
+
+```
+credit Runway  671 -> 591   chênh 80 = 2 clip × 40   khớp $0,80 trong sổ
+lô             $1,047095 / trần $1,24   chưa dùng $0,192905
+giữ chỗ treo   0
+POST trả phí   13 (5 ảnh + 2 clip + 6 voice); ảnh cảnh 1 KHÔNG nằm trong đó
+```
+
+Xác nhận `h3_max` được bật **tạm thời** trong `try` và thu hồi trong `finally`,
+vì hệ thống chỉ có danh sách xác nhận **toàn cục**. Sau lần chạy, danh sách trở
+lại đúng 6 mục như trước.

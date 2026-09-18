@@ -4,37 +4,48 @@
 
 ---
 
-## ⏳ CHỜ BẠN QUYẾT: duyệt chi lô nghiệm thu `a690a290`?
-
-Mọi thứ trước bước này đã xanh. Cái còn thiếu là **chữ ký của bạn**, và tôi
-không tự ký.
+## ✅ XONG 2026-09-18: lô `a690a290` đã chạy hết và có MP4
 
 ```
-Lô          a690a290-bb28-4dbd-9903-0d8018bb0db1
-Dự án       f2b68443 "Cold feet" — 6 cảnh, 26 giây, toàn bộ LOW, 1 nhân vật
-Quyền chi   DRAFT — chưa cấp phép chi gì
-Dự toán     $1,121800      Đề xuất trần $1,24
+Lô        a690a290-bb28-4dbd-9903-0d8018bb0db1   COMPLETED
+Dự án     f2b68443 "Cold feet" — 6 cảnh, 26,09 giây
+Quyền chi COMPLETED, trần $1,24, đã chi $1,047095, chưa dùng $0,192905
+MP4       data/projects/f2b68443-.../final/final_a0fb91ff.mp4
+          1080x1920, 30 fps, h264 + aac 48 kHz mono, 7,48 MB
 ```
 
-| Hạng mục | Tiền | Đi đâu |
+| Hạng mục | Thật | Ghi chú |
 |---|---|---|
-| TEXT | $0,001000 | kịch bản soạn tay, gần như không tốn |
-| IMAGE | $0,288000 | 6 × `openai/gpt-image-2:medium` |
-| VIDEO | $0,800000 | 2 × `runway/h3_max:768x1280` @ 5s, **router tự chọn** |
-| VOICE | $0,000100 | `openai/gpt-4o-mini-tts`, 225 ký tự |
-| RENDER | $0,000000 | FFmpeg tại máy |
-| dự phòng tạo lại | $0,032700 | |
+| IMAGE | $0,205800 | 5 ảnh mới. Ảnh cảnh 1 **dùng lại**, $0 |
+| VIDEO | $0,800000 | 2 × `h3_max:768x1280`, task `d4f779ed…` và `ced4ec15…` |
+| VOICE | $0,000135 | 6 cảnh |
+| RENDER | $0 | FFmpeg tại máy |
 
-Bốn cảnh còn lại là **LOCAL_MOTION, $0** — ảnh tĩnh cộng chuyển động FFmpeg.
+Credit Runway **671 → 591**, chênh 80 = 2 clip × 40, khớp tuyệt đối với $0,80
+trong sổ. Giữ chỗ treo: **0**. `retryCount` cả 6 cảnh vẫn **0**.
 
-**Ví có đủ không:** runway còn **671 credit = $6,71** (đọc LIVE 2026-09-17), cần
-$0,80. openai khai báo $6,00, cần $0,288. Hạn mức chung còn $2,646080, cần
-$1,1218. Cả ba đều đủ.
+**Vì sao nó từng dừng:** `runway/h3_max:768x1280` không nằm trong
+`spend.confirmedProviders`. Quyền chi lô trả lời "được tiêu bao nhiêu", danh sách
+xác nhận trả lời "cặp model này đã được nhìn giá và đồng ý chưa" — lô qua ổ khoá
+thứ nhất rồi chết ở ổ thứ hai. Xem QĐ-062.
 
-**Nếu bạn duyệt**, `lowAutoApproved` phải được bật **có chủ đích** trên lô này:
-hai clip kia do **router tự chọn**, và quyền chi mặc định không bao gồm cơ chế đó
-(QĐ-055). Một lô duyệt mà quên bật cờ sẽ bị chặn ở `low_auto_not_approved` và
-dừng đúng chỗ — khó chịu, nhưng đúng.
+**Cách chạy tiếp một lô dừng giữa chừng** (mặc định là thử khô, $0):
+
+```
+npx tsx scripts/resume-batch.ts --batch <id>
+AI_MOCK_MODE=false npx tsx scripts/resume-batch.ts --batch <id> --apply --confirm-real-spend
+```
+
+Nó tự bật xác nhận provider trong `try` và **thu hồi trong `finally`**, bám lại
+đúng job cũ (không tăng `retryCount`), bỏ bước `evaluateScene` (quality model
+mock có thể bắt mua lại $0,44), và hỏi lại cổng LOW_AUTO **sau** khi có keyframe.
+
+### Việc còn lại của video này
+
+- [ ] Cảnh 5: âm thanh 4,09s dài hơn cảnh 4,00s nên cảnh bị kéo dài. Lời thoại
+      **không** bị cắt, nhưng nhịp hơi lệch. Sửa bằng cách rút lời thoại hoặc
+      giảm khoảng nghỉ — không tốn tiền.
+- [ ] Chưa ai xem MP4 và chấm điểm. Hai clip h3_max chưa được ghi `VideoBenchmark`.
 
 ---
 
