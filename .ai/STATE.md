@@ -6,9 +6,14 @@ trả phí và xuất ra MP4.** Milestone 2 xong trước đó (Text + Image + V
 đã chạy thật).
 
 Lô `a690a290` "Cold feet": duyệt 2026-09-17 với trần $1,24, dừng giữa chừng ở
-cảnh 1, chạy tiếp và hoàn tất 2026-09-18 với **$1,047095** thật — 6 cảnh, 26,09
-giây, 1080x1920. `CREATE_ATTEMPT_TOKEN = 0` suốt cả lần chạy: quyền chi lô là cơ
-chế cấp phép, không phải token. Xem QĐ-062.
+cảnh 1, chạy tiếp và hoàn tất 2026-09-18 với **$1,047095** thật — 6 cảnh, 1080x1920.
+`CREATE_ATTEMPT_TOKEN = 0` suốt cả lần chạy: quyền chi lô là cơ chế cấp phép,
+không phải token. Xem QĐ-062.
+
+Sau đó siết nhịp cảnh 5 và render lại **bằng FFmpeg, $0**: video **26,000s**,
+`final_0de14438.mp4`. Hai clip h3_max đã được chấm và ghi `VideoBenchmark`
+(9,09 và 8,91 / 10) — hai mẫu **sản xuất thật** đầu tiên của model này. Xem
+QĐ-063 và QĐ-064.
 
 Tài liệu này ghi tình trạng **thực tế**. Tính năng chỉ được đánh dấu hoạt động
 khi đã chạy thật và được kiểm chứng, không phải khi đã viết xong mã.

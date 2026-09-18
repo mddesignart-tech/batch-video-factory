@@ -40,12 +40,34 @@ Nó tự bật xác nhận provider trong `try` và **thu hồi trong `finally`*
 đúng job cũ (không tăng `retryCount`), bỏ bước `evaluateScene` (quality model
 mock có thể bắt mua lại $0,44), và hỏi lại cổng LOW_AUTO **sau** khi có keyframe.
 
-### Việc còn lại của video này
+### Đã xong 2026-09-18 (đợt 2, $0)
 
-- [ ] Cảnh 5: âm thanh 4,09s dài hơn cảnh 4,00s nên cảnh bị kéo dài. Lời thoại
-      **không** bị cắt, nhưng nhịp hơi lệch. Sửa bằng cách rút lời thoại hoặc
-      giảm khoảng nghỉ — không tốn tiền.
-- [ ] Chưa ai xem MP4 và chấm điểm. Hai clip h3_max chưa được ghi `VideoBenchmark`.
+- [x] **Chấm 2 clip h3_max** và ghi `VideoBenchmark`. Cảnh 1 **9,09/10**, cảnh 4
+      **8,91/10** trên 11 tiêu chí. Đây là hai mẫu **sản xuất thật** đầu tiên —
+      khác hẳn các mẫu trước, vốn được mua có chủ đích trên cảnh đã từng làm hỏng
+      model khác. **Không** đổi lifecycle/routing của h3_max: 2 mẫu không đủ.
+      `npx tsx scripts/record-batch-benchmarks.ts`
+- [x] **Sửa nhịp cảnh 5**: thoại 4,0939s → **3,9500s**, cảnh trở lại đúng 4,00s,
+      video 26,09s → **26,000s**. Chỉ cắt khoảng lặng (đuôi 0,0704→0,03; nhịp
+      ngắt đầu 0,3009→0,1974), **không cắt chữ, không đổi tốc độ giọng**. File
+      TTS gốc giữ nguyên trên đĩa. `npx tsx scripts/tighten-scene-pacing.ts`
+- [x] **Render lại cục bộ** bằng `scripts/rerender-project.ts` (bấm lại đúng job
+      `render_final` cũ, chỉ FFmpeg). MP4 mới: `final_0de14438.mp4`.
+
+### Lỗi production còn mở (không tốn tiền để sửa, nhưng phải sửa trước lô sau)
+
+- [ ] **Prompt ảnh không có bộ dò mâu thuẫn như prompt video.** Cảnh 4 minh hoạ
+      hai kiểu mâu thuẫn cùng lúc:
+      1. *kịch bản tự mâu thuẫn*: "moves one short pace backwards **along the
+         board**" đứng cạnh "**nothing else in frame**" → ảnh ra không có cầu
+         nhảy, mất liền mạch với cảnh 1–3;
+      2. *bảng nhân vật đè cảm xúc của cảnh*: cảnh ghi "His eyes stay wide"
+         nhưng bảng nhân vật lặp "always wide-eyed and eager" + "wide eager
+         smile" → ảnh ra **Max đang cười**, sai hẳn nhịp truyện.
+      `findPromptContradictions` hiện chỉ soi **videoPrompt**. Cần một bộ tương
+      đương cho `buildSceneImageRequest`.
+      **Đây không phải lỗi của h3_max** — clip bám keyframe rất sát (10/10);
+      nó chỉ trung thành với một tấm ảnh đã sai từ trước.
 
 ---
 

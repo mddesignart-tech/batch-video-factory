@@ -1554,3 +1554,88 @@ POST trả phí   13 (5 ảnh + 2 clip + 6 voice); ảnh cảnh 1 KHÔNG nằm t
 Xác nhận `h3_max` được bật **tạm thời** trong `try` và thu hồi trong `finally`,
 vì hệ thống chỉ có danh sách xác nhận **toàn cục**. Sau lần chạy, danh sách trở
 lại đúng 6 mục như trước.
+
+---
+
+## QĐ-063 — Nhịp sai thì sửa khoảng lặng, không sửa lời
+
+Cảnh 5 có thoại 4,0939s trong một cảnh 4,00s. `buildSceneTimeline` kéo dài cảnh
+cho khớp — quyết định đúng, vì phương án còn lại là cắt mất chữ — nhưng nó đẩy
+mọi mốc phía sau đi 0,09s: phụ đề cảnh 5 kết thúc ở 22,034 trong khi cảnh 6 lẽ
+ra bắt đầu ở 22,000, và cảnh 6 vào trễ.
+
+**Chỗ có thể lấy lại thời gian mà không ai nghe ra:** khoảng lặng của chính bản
+TTS.
+
+```
+0,860 -> 1,161   0,3009s   nhịp ngắt sau "Cold feet"
+2,482 -> 2,724   0,2420s   nhịp ngắt giữa câu
+3,897 -> 3,964   0,0671s   khe trước "it."
+4,023 -> 4,094   0,0704s   đuôi chết
+```
+
+`scripts/tighten-scene-pacing.ts` cắt **đuôi trước, rồi nhịp dài nhất**: đuôi
+0,0704 → 0,03 và nhịp đầu 0,3009 → 0,1974. Kết quả 3,9500s.
+
+### Ba ràng buộc nằm trong code, không phải trong lời hứa
+
+1. **Mọi mép cắt rơi vào giữa một khoảng lặng `silencedetect` tìm được.** Không
+   một mẫu tiếng nói nào bị bỏ, và không có bộ lọc nào co giãn thời gian — giọng
+   nghe y hệt, chỉ bớt không khí.
+2. **Sàn cứng:** nhịp giữa câu ≥ 0,15s, đuôi ≥ 0,03s, đầu ≥ 0,05s. Hết sàn mà
+   vẫn chưa đủ thì script **DỪNG** và nói còn thiếu bao nhiêu, thay vì bào phẳng
+   các nhịp hoặc động vào chữ. Viết lại lời thoại là việc của người vận hành.
+3. **File TTS gốc không bị ghi đè.** Bản cắt là file mới; hàng `DialogueLine`
+   trỏ sang nó. Muốn quay lại chỉ cần trỏ ngược — tài sản đã trả tiền vẫn còn.
+
+### Đo lại sau khi render
+
+```
+video        26,09s -> 26,000s        (782 -> 780 frame)
+cắt cảnh     5,03 / 9,03 / 13,03 / 18,03  (trễ 1 frame, đúng mốc 5/9/13/18)
+phụ đề C5    18,000 -> 21,890         (trước: 18,000 -> 22,034, đè lên cảnh 6)
+phụ đề C6    22,000 -> 24,431         (trước: 22,094, vào trễ)
+nhịp còn lại 0,197 / 0,242 / 0,067    đúng như kế hoạch, trong bản trộn cuối
+tiếng nói    kết thúc 21,92, cách cảnh 6 một khoảng 0,15s
+cảnh báo mix KHÔNG còn audio_longer_than_scene
+```
+
+Cảnh 5 và 6 dùng cùng một bố cục nền phẳng nên `scene>0,3` không bắt được mối
+nối ở 22s. Đó là tính chất của kịch bản, không phải render thiếu cảnh — mốc phụ
+đề và thời lượng tổng đã chứng minh cảnh 6 nằm đúng chỗ.
+
+---
+
+## QĐ-064 — Prompt ảnh không có bộ dò mâu thuẫn, và cảnh 4 là hoá đơn
+
+Hai clip h3_max của lô thật được chấm từ 5 khung hình mỗi clip cộng hai phép đo
+không phụ thuộc mắt người: `scene_score` từng khung (ngân sách chuyển động, và
+bằng chứng không có cut) và **độ lệch nền ở ba dải biên** giữa khung đầu và
+khung cuối — nơi nhân vật không bao giờ đi tới, nên lệch ở đó là máy quay dịch.
+
+```
+cảnh 1  9,09/10   camera 10  motion 7   keyframeAdherence 8   promptAdherence 9
+cảnh 4  8,91/10   camera 10  motion 8   keyframeAdherence 10  promptAdherence 6
+```
+
+Camera **10/10 cả hai clip**: biên trái/phải 1,13–1,85 YAVG, đúng mức nhiễu nền.
+Guardrail camera đã làm được việc của nó trên dòng sản xuất thật.
+
+**Điểm 6 của cảnh 4 không phải lỗi của h3_max.** Keyframe gửi vào là một Max
+**đang cười** trên nền trống. Clip bám sát tấm ảnh đó — đúng nhiệm vụ của
+image-to-video, nên `keyframeAdherence` 10 và `promptAdherence` 6 cùng đúng một
+lúc. Chỗ hỏng nằm ở **bước tạo ảnh**, và có hai nguyên nhân khác nhau:
+
+| | |
+|---|---|
+| kịch bản tự mâu thuẫn | "backwards **along the board**" cạnh "**nothing else in frame**" → ảnh bỏ cầu nhảy |
+| bảng nhân vật đè cảnh | cảnh ghi "eyes stay wide"; bảng nhân vật lặp "always wide-eyed and eager" + "wide eager smile" → ảnh ra mặt cười |
+
+`findPromptContradictions` chỉ soi `videoPrompt`. `buildSceneImageRequest` ghép
+mô tả cảnh với bảng nhân vật rồi gửi đi mà **không ai đọc lại** — dù đây đúng là
+lớp lỗi mà guardrail video sinh ra để chặn. Chưa sửa ở bước này vì sửa xong phải
+tạo lại ảnh, tức trả tiền; ghi lại thành việc phải làm trước lô sau.
+
+**Không đổi lifecycle/routing của h3_max.** Hai mẫu sản xuất là dữ liệu thật và
+là lần đầu có dữ liệu loại đó, nhưng hai mẫu không đủ để đổi một luật định
+tuyến, và đó là quyết định của người vận hành chứ không phải của một script.
