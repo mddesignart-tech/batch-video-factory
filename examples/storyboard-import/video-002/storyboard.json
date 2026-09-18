@@ -1,0 +1,39 @@
+{
+  "video_id": "video-002",
+  "video_title": "Under the weather",
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 5,
+      "visual_description": "Max sits wrapped in a blanket, only his face showing.",
+      "character_action": "Max sniffs once.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"I am completely fine.\"",
+      "subtitle": "I am completely fine.",
+      "motion_mode": "AUTO",
+      "priority": "HIGH"
+    },
+    {
+      "scene_number": 2,
+      "duration": 4,
+      "visual_description": "A plain shot of Max holding a mug, steam rising.",
+      "character_action": "Max lifts the mug slowly.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"This is my third tea.\"",
+      "subtitle": "This is my third tea.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 3,
+      "duration": 4,
+      "visual_description": "Max on a plain background, blanket still on.",
+      "character_action": "Max shrugs once.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Under the weather means a bit unwell.\"",
+      "subtitle": "Under the weather = a bit unwell.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    }
+  ]
+}

@@ -1703,3 +1703,98 @@ không phải lỗi — prompt cũ sai — nhưng phải biết trước khi b�
 
 **Chưa tạo lại ảnh cảnh 4 trong bước này.** Bản vá là code; xem nó ra ảnh thế
 nào là một lần chi tiền, và đó là quyết định của người dùng.
+
+---
+
+## QĐ-066 — Import Storyboard V1: input thứ hai, **một** engine
+
+V1 bắt đầu từ một ý tưởng và trả tiền cho text model nghĩ ra phân cảnh. Đúng
+hình dạng khi **ý tưởng** là đầu vào. Sai hoàn toàn khi phân cảnh **đã có sẵn** —
+viết tay, xuất từ bảng tính, hoặc storyboard nơi khác đã vẽ sẵn keyframe. Đẩy
+chúng qua V1 nghĩa là trả tiền viết lại thứ đã viết, rồi trả tiền vẽ lại thứ đã
+vẽ.
+
+### Quy tắc kiến trúc, chỉ một câu
+
+Module import **chỉ sinh ra ROW**. Mọi thứ sau "đã có cảnh trong DB" là code V1
+đang dùng: `previewProjectCost` để dự toán, `BatchAuthorization` để duyệt,
+`batch_expand` để khởi động từng video, `generate_scene_media` để chạy, spend
+guard + reservation cho tiền, `resume-batch.ts` để chạy tiếp. Trong
+`storyboard-import.ts` **không có đường nào chạm tới provider**.
+
+Điều đó đạt được nhờ một mẹo nhỏ mà quan trọng: dự án nhập được tạo với
+`status: "script_ready"` và `scriptJson` đã có sẵn. `handleBatchExpand` tìm thấy
+dự án đã tồn tại, thấy nó ở `script_ready`, và gọi thẳng
+`startMediaForBatchVideo` — **không sửa một dòng nào** của batch_expand.
+
+### Hai cột mới, và vì sao không thể suy ra thay vì lưu
+
+| Cột | Vì sao |
+|---|---|
+| `Scene.imageSource` | `generateSceneImage` không phân biệt được "ảnh người ta đưa" với "chỗ trống sắp lấp". Cơ chế chống trả tiền hai lần cũng bó tay: nó khoá theo `ProviderJob`, mà ảnh nhập sẵn **không có** ProviderJob nào. Thiếu cột này, lần chạy đầu của một storyboard sẽ **mua ảnh cho mọi cảnh vốn đã có ảnh**. |
+| `Scene.motionMode` | `motionSource` là **quyết định**, và planner ghi đè nó mỗi lần lập lại kế hoạch. Một **chỉ thị** mà re-plan xoá được thì không phải chỉ thị. |
+
+### `VIDEO_AI` là chỉ thị, không phải sở thích
+
+QĐ-052 nói "miễn phí thắng": stored AI_VIDEO + fresh LOCAL_MOTION → LOCAL_MOTION,
+**trừ khi** có ghim tay. Người gõ `motion_mode=VIDEO_AI` trong storyboard đang ra
+đúng cái quyết định mà một ghim tay thể hiện, chỉ khác cách viết. Nên
+`deriveSceneVideoFacts` — **một chỗ dẫn xuất duy nhất**, theo QĐ-060 — coi
+`motionMode === "VIDEO_AI"` là pinned. Không có nó, luật "miễn phí thắng" sẽ âm
+thầm hạ cấp đúng cảnh người dùng bảo phải mua.
+
+### ZIP: từ chối là tính năng chính, không phải giải nén
+
+`src/lib/zip.ts` tự viết thay vì thêm dependency, vì thứ khó không phải giải nén
+mà là **từ chối**: một archive là input không tin được, và lỗi kinh điển là mục
+tên `../../../.ssh/authorized_keys` mà bộ giải nén tận tình ghi ra đúng chỗ đó.
+Ở đây tên được kiểm **khi đọc central directory**, trước khi chạm vào byte nào,
+nên caller không thể quên. Nó cũng không ghi ra đĩa: trả về entry trong bộ nhớ,
+service quyết định giữ gì.
+
+Chặn: `..`, đường dẫn tuyệt đối, ổ đĩa, UNC, NUL, mục mã hoá, phương thức nén lạ,
+ZIP64, quá 5000 mục, entry giải nén quá 64 MB (zip bomb), file quá 512 MB.
+
+### Một lỗi bộ test bắt được trước khi nó ra đời
+
+Bản đầu của `preflightImportedBatch` xếp `NEEDS_PROVIDER` **trước**
+`OVER_VIDEO_BUDGET`. `planBatch` đã ghi sẵn lời cảnh báo cho đúng chỗ này: khi
+trần/video là thứ router hết, **mọi** "không model nào hợp cảnh này" phía sau chỉ
+là **triệu chứng**. Báo thành NEEDS_PROVIDER là đẩy người vận hành vào trang Mô
+hình AI sửa một thứ không hỏng. Đã đảo lại đúng thứ tự của planner.
+
+### Không có nút "nhập rồi chạy"
+
+Lô nhập ra đời ở `PLANNED` + quyền chi `DRAFT` — **không chi được gì**. Duyệt một
+con số là hành động riêng, trên trang lô, qua đúng cổng lô V1 đi. Một nút gộp
+hai bước lại chính là thứ biến một lỗi gõ trong bảng tính thành hoá đơn.
+
+### Phụ lục QĐ-066 — hàng Idiom rỗng là quả mìn trong bảng dùng chung
+
+Bản đầu ghi `meaning`, `literalMeaning`, `exampleSentence` **rỗng** cho idiom do
+import tạo, với lập luận: video nhập không bao giờ cần script nên không ai đọc
+mấy ô đó. Sai, và bộ e2e bắt được — nhưng **không phải** ở file test của import:
+
+```
+✓ tests/storyboard-import.test.ts  (39 tests)      ← xanh khi chạy riêng
+× pipeline.e2e > expands an APPROVED batch ...     ← hỏng ở file KHÁC
+    → expected null to be truthy
+× pipeline.e2e > does not create a second project ...
+    → "meaning" String must contain at least 1 character(s)
+      "exampleSentence" String must contain at least 1 character(s)
+```
+
+Thư viện idiom là **của dùng chung**. `selectIdioms` lọc theo
+`status ∈ {unused, planned}`, nhưng bất kỳ đường nào khác cũng có thể chạm vào
+một hàng — và `ScriptSchema` đòi `meaning`/`exampleSentence` không rỗng. Một
+hàng có ô bắt buộc để trống **không hỏng lúc nhập**; nó hỏng lâu sau đó, trong
+một lô V1 chẳng liên quan gì tới import, với thông báo lỗi chẳng chỉ về đâu cả.
+
+**Luật rút ra:** hàng mà module này ghi phải là hàng phần còn lại của ứng dụng
+dùng được. Text nay được **dẫn xuất từ storyboard**, không bịa: `meaning` từ
+tiêu đề, `exampleSentence` từ câu thoại đầu tiên đã bỏ nhãn người nói. Và
+`status: "imported"` — cố ý **không** phải `unused`/`planned`, vì một storyboard
+đã nhập không phải gợi ý để làm video mới, **nó chính là video đó**.
+
+Hai test mới giữ chỗ này: idiom nhập phải có đủ ba ô không rỗng, và không được
+xuất hiện trong danh sách bộ chọn của V1.

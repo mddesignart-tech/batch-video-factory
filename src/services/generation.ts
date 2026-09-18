@@ -5,7 +5,7 @@ import type { AssetKind, ModelType, QualityMode, RouterStrategy } from "@/domain
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { sha256 } from "@/lib/crypto";
-import { projectSubdir, toRelative, uuidFilename } from "@/lib/paths";
+import { projectSubdir, toAbsolute, toRelative, uuidFilename } from "@/lib/paths";
 import { parseJson, round, sleep } from "@/lib/utils";
 import {
   referencePriority,
@@ -847,6 +847,43 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
   );
   if (!wantsKeyframe) {
     return null; // deliberately skipped in ECONOMY for simple scenes
+  }
+
+  // An imported storyboard brought its own keyframe. Redrawing it would buy an
+  // image the operator already has, and the duplicate-payment guard cannot stop
+  // it: that guard keys on a ProviderJob, and a supplied file has none. This is
+  // the only thing standing between an import and a bill for pictures it came
+  // with, which is why it is a stored FACT and not an inference.
+  if (scene.imageSource === "IMPORTED" && scene.imagePath) {
+    const supplied = toAbsolute(scene.imagePath);
+    if (fs.existsSync(supplied)) {
+      await logger.info({
+        event: "scene.keyframe_supplied",
+        projectId: project.id,
+        sceneId: scene.id,
+        message:
+          `Cảnh ${scene.sceneNumber} dùng ảnh do storyboard cung cấp, ` +
+          `KHÔNG gọi Image AI. Chi phí ảnh: $0,00.`,
+      });
+      if (scene.status === "pending") {
+        await prisma.scene.update({
+          where: { id: scene.id },
+          data: { status: "image_ready", errorMessage: null },
+        });
+      }
+      return supplied;
+    }
+    // The row says a file was supplied and it is not there. Refuse rather than
+    // silently falling through to a paid generation the operator never asked
+    // for - the same rule LOCAL_MOTION follows when its keyframe is missing.
+    throw new GenerationError(
+      `Cảnh ${scene.sceneNumber} khai báo ảnh nhập sẵn "${scene.imagePath}" ` +
+        `nhưng file không còn trên đĩa. Không tự tạo ảnh thay thế: hãy nhập lại ` +
+        `storyboard hoặc đổi cảnh sang tự tạo ảnh.`,
+      "image",
+      "import",
+      false,
+    );
   }
 
   const decision = routeFor(ctx, "image", { images: 1, jobs: 1 }, {

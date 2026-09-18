@@ -4,6 +4,51 @@
 
 ---
 
+## 🆕 MODULE MỚI: Import Storyboard / Batch From Scenes V1 (2026-09-18)
+
+Luồng sản xuất **thứ hai**, không thay luồng V1. Xem QĐ-066.
+
+```
+V1:      Ý TƯỞNG → SCRIPT(AI) → CẢNH → ẢNH(AI) → MOTION → VOICE → RENDER
+V2/nhập: STORYBOARD + ẢNH CÓ SẴN → VALIDATE → DỰ TOÁN → DUYỆT
+         → CHỈ TẠO PHẦN CÒN THIẾU → MOTION → VOICE → RENDER
+```
+
+**Đã có:** đọc JSON/CSV/thư mục/ZIP · 7 nhóm validate có mã lỗi + số dòng ·
+chép ảnh có sẵn thành keyframe (`imageSource=IMPORTED`, **không gọi Image AI**) ·
+`motion_mode` AUTO/LOCAL_MOTION/VIDEO_AI · ghim provider/model ·
+preflight dự toán từng video + cả lô · trang `/import` · `batch-report.json` ·
+39 test.
+
+**Chưa chạy thật lần nào.** Trước khi thử một storyboard thật, xem mục
+"Còn thiếu" bên dưới.
+
+### Cách dùng (miễn phí, chưa chi gì)
+
+```
+npx tsx scripts/import-storyboard.ts --source examples/storyboard-import
+npx tsx scripts/import-storyboard.ts --source batch.zip --apply   --name "Lô nhập 1" --max-per-video 1.50 --max-batch 4.00
+```
+
+Lô sinh ra ở `PLANNED` + quyền chi `DRAFT`. Duyệt tiền vẫn ở `/batches/<id>`.
+
+### Còn thiếu trước khi thử 1 storyboard thật
+
+- [ ] **Chưa chạy end-to-end với engine thật.** Đã test tới bước tạo row + dự
+      toán + bỏ qua Image AI; **chưa** chạy `batch_expand → generate_scene_media
+      → render` trên một lô nhập, kể cả ở mock.
+- [ ] **Nhân vật**: storyboard không có cột character. Ảnh vẫn nhận diện nhân vật
+      qua `repairSceneCharacters` (dò tên trong text). Storyboard không nhắc tên
+      nhân vật nào sẽ không có character sheet → ảnh tự do. Cần cột
+      `characters` hoặc chấp nhận giới hạn này.
+- [ ] **Không có `videoPrompt`**: cảnh nhập chưa có prompt video; guardrail camera
+      dựng nó từ `camera` + `characterAction`. Chưa kiểm trên dữ liệu nhập thật.
+- [ ] **Sửa cảnh trên UI**: `updateImportedScene` đã có (duration/motion/pin)
+      nhưng chưa nối vào trang lô.
+- [ ] **`prisma migrate`**: hai cột mới lại thêm bằng `db push`. Nợ này đang lớn.
+
+---
+
 ## ✅ XONG 2026-09-18: lô `a690a290` đã chạy hết và có MP4
 
 ```

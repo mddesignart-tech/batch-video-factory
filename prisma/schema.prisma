@@ -451,6 +451,28 @@ model Scene {
   /// recomputing it later against a changed registry would quietly move money.
   motionSource String @default("AI_VIDEO")
 
+  /// What the OPERATOR asked for, as opposed to what was decided.
+  ///
+  /// AUTO leaves the motion decision to the planner, which is V1's behaviour and
+  /// the default. LOCAL_MOTION and VIDEO_AI are instructions typed by a person
+  /// in an imported storyboard, and they are kept separately from `motionSource`
+  /// because that column records the DECISION - which the planner rewrites on
+  /// every re-plan. An instruction that a re-plan could erase is not one.
+  ///
+  /// VIDEO_AI carries the same weight as naming a model by hand: it is why
+  /// `deriveSceneVideoFacts` treats it as an explicit pin, so the "free wins"
+  /// rule cannot quietly downgrade a clip the operator asked to buy.
+  motionMode String @default("AUTO")
+
+  /// Where the keyframe came from: "GENERATED" or "IMPORTED".
+  ///
+  /// An imported keyframe must never be redrawn. `generateSceneImage` cannot
+  /// tell one from a path it is about to fill, and the duplicate-payment guard
+  /// cannot help either: it keys on a ProviderJob, and a supplied file has none.
+  /// Without this column the first run of an imported storyboard would buy an
+  /// image for every scene that already had one.
+  imageSource String @default("GENERATED")
+
   imageProvider     String?
   imageModel        String?
   videoProvider     String?

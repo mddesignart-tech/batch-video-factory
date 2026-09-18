@@ -51,6 +51,13 @@ export interface SceneFactsInput {
   complexity: string;
   spendPriority: string;
   motionSource: string;
+  /**
+   * AUTO | LOCAL_MOTION | VIDEO_AI - what a person asked for, if they did.
+   *
+   * Optional so every existing caller and fixture keeps working: a row without
+   * it has no instruction to honour, which is exactly what AUTO means.
+   */
+  motionMode?: string;
   imagePath: string | null;
   videoProvider: string | null;
   videoModel: string | null;
@@ -119,10 +126,19 @@ export function deriveSceneVideoFacts(
   const exists = opts.keyframeExists ?? defaultKeyframeExists;
   const hasKeyframe = Boolean(scene.imagePath) && exists(scene.imagePath ?? "");
 
+  // An explicit instruction, however it was written down.
+  //
+  // Naming a provider and a model is one way to say "buy a clip for this
+  // scene". An imported storyboard says it by writing motion_mode=VIDEO_AI,
+  // and that is the same decision by a person - so it gets the same weight.
+  // Without this, "free wins" would silently downgrade a scene the operator
+  // explicitly asked to send to a video model, which is the mirror image of
+  // the silent override that rule exists to prevent.
   const pinned =
     opts.ignoreManualPin === true
       ? false
-      : Boolean(scene.videoProvider && scene.videoModel);
+      : Boolean(scene.videoProvider && scene.videoModel) ||
+        scene.motionMode === "VIDEO_AI";
   const motion = effectiveMotionSource(
     scene.motionSource,
     decideMotion({
