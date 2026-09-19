@@ -13,7 +13,7 @@ import {
   type StoryboardScene,
   type StoryboardVideo,
 } from "@/domain/storyboard";
-import { sha256Bytes } from "@/lib/crypto";
+import { sha256, sha256Bytes } from "@/lib/crypto";
 import { toAbsolute } from "@/lib/paths";
 import { classifyScene, assignSpendPriority } from "./complexity";
 import {
@@ -50,6 +50,31 @@ import type { Complexity } from "@/domain/enums";
  * one it is about to be asked to make. Inferring it from "there is a path but
  * no ProviderJob" would be a guess, and a wrong guess buys an image.
  */
+
+/**
+ * A stable hash of one storyboard's CONTENT.
+ *
+ * Everything that changes what gets made goes in: the cast, the scenes, and
+ * every field of each scene. What stays out is anything about the import event
+ * rather than the material - the folder it came from, the file's timestamp, the
+ * order two files happened to be read in - because a fingerprint that moved for
+ * those would mark every re-import as a different storyboard and mean nothing.
+ *
+ * See QĐ-077.
+ */
+function importFingerprintOf(video: ResolvedVideo): string {
+  const payload = JSON.stringify({
+    videoId: video.videoId,
+    title: video.title,
+    characters: [...video.characters]
+      .sort((a, b) => a.characterId.localeCompare(b.characterId))
+      .map((c) => ({ id: c.characterId, name: c.name, bible: c.bible })),
+    scenes: [...video.scenes]
+      .map((s) => s.scene)
+      .sort((a, b) => a.sceneNumber - b.sceneNumber),
+  });
+  return sha256(payload).slice(0, 16);
+}
 
 // ------------------------------------------------------------- scanning ---
 
@@ -807,6 +832,12 @@ export async function materialiseImport(
           sourceFile: video.sourceFile,
           scenes: video.scenes.map((s) => s.scene),
         }),
+        // A hash of what was imported, not of when. Two imports of identical
+        // bytes carry the same fingerprint; a corrected file carries a
+        // different one. That is what lets "you already imported this" be told
+        // apart from "this is the fixed version" without reading every scene.
+        // QĐ-077.
+        importFingerprint: importFingerprintOf(video),
       },
     });
 

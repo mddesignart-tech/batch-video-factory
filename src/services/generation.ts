@@ -63,6 +63,7 @@ import {
   buildScenePrompt,
   requireCharacterSheetsByName,
   referenceAbsolutePath,
+  CORE_BIBLE_FIELDS,
   type CharacterSheet,
 } from "./character-service";
 import { overallQualityScore, QualityReportSchema } from "@/domain/script";
@@ -1115,6 +1116,33 @@ export async function buildSceneImageRequest(
     requireCharacterSheetsByName(ordered),
     resolveStylePrompt(stylePresetId),
   ]);
+
+  // NOTHING TO HOLD THE IDENTITY WITH.
+  //
+  // A character with no reference image AND no descriptive word is a name and a
+  // blank. Drawing them is buying a stranger, and buying them again in the next
+  // scene is buying a different stranger - which is the failure this whole
+  // subsystem exists to prevent, arriving by a route that looked like success.
+  //
+  // NOT the same as "no reference image", which is ordinary: a full written
+  // sheet with no master yet is exactly how a master gets made. Both halves
+  // have to be empty before this refuses. Non-retryable, because waiting will
+  // not produce a description. See QĐ-076.
+  const unusable = characters.filter(
+    (c) => c.references.length === 0 && c.missingFields.length === CORE_BIBLE_FIELDS.length,
+  );
+  if (unusable.length > 0) {
+    throw new GenerationError(
+      `Cảnh này có nhân vật không thể vẽ nhất quán: ` +
+        `${unusable.map((c) => c.name).join(", ")} — chưa có ảnh tham chiếu VÀ chưa có ` +
+        `một chữ nào mô tả ngoại hình. Tạo ảnh lúc này là mua một người lạ, và cảnh ` +
+        `sau sẽ mua một người lạ khác. Hãy tải ảnh tham chiếu lên hoặc điền hồ sơ ` +
+        `nhân vật (trang Nhân vật, hoặc ngay trên trang Nhập).`,
+      "image",
+      "identity",
+      false,
+    );
+  }
 
   // `visualDescription` is the scene; it is never optional.
   //

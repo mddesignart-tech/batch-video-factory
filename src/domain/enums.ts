@@ -301,6 +301,14 @@ export const VIDEO_PLAN_STATUSES = [
   "OVER_VIDEO_BUDGET",
   /** A scene wants AI video but no approved model can serve it. */
   "NEEDS_PROVIDER",
+  /**
+   * A character in this video cannot be drawn consistently at any price.
+   *
+   * No reference image AND no written description: the image step refuses it
+   * outright, so the video is not runnable and its estimate must not be counted
+   * among the work being approved. The one plan status money cannot fix. QĐ-076.
+   */
+  "NEEDS_CHARACTER_REFERENCE",
 ] as const;
 export type VideoPlanStatus = (typeof VIDEO_PLAN_STATUSES)[number];
 
@@ -395,6 +403,7 @@ export const VI_VIDEO_PLAN_STATUS: Record<VideoPlanStatus, string> = {
   OK: "Sẵn sàng",
   OVER_VIDEO_BUDGET: "Vượt hạn mức/video",
   NEEDS_PROVIDER: "Thiếu provider được duyệt",
+  NEEDS_CHARACTER_REFERENCE: "Thiếu nhận dạng nhân vật",
 };
 
 export const VI_JOB_STATUS: Record<JobStatus, string> = {

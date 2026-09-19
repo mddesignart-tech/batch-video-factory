@@ -94,6 +94,8 @@ export type LowAutoSceneFacts = Pick<
   | "contradictions"
   | "stage"
   | "motionSource"
+  | "motionScale"
+  | "multiCharacterInteraction"
   | "perVideoCapRemaining"
 > & {
   /**

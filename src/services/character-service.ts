@@ -391,6 +391,82 @@ export function identityFingerprint(char: CharacterRow): string {
   return sha256(parts.join("\u0000")).slice(0, 16);
 }
 
+/** Every Bible column an edit form may write. */
+export const EDITABLE_BIBLE_KEYS = [
+  "presentation",
+  "approximateAge",
+  "skinTone",
+  "hair",
+  "facialFeatures",
+  "distinguishingFeatures",
+  "outfit",
+  "bodyProportions",
+  "accessories",
+  "colorPalette",
+  "negativeIdentity",
+] as const;
+
+export type EditableBibleKey = (typeof EDITABLE_BIBLE_KEYS)[number];
+
+export interface SheetEdit {
+  /** Trimmed values to write. Only the keys the caller actually supplied. */
+  data: Record<string, string>;
+  /** The version to store: bumped only when the APPEARANCE moved. */
+  version: number;
+  /** Did the identity fingerprint change? */
+  changed: boolean;
+  /** Fingerprint before and after, so a caller can log or show the reason. */
+  before: string;
+  after: string;
+}
+
+/**
+ * Decide what an edit to a character's Bible actually changes.
+ *
+ * Pure, and shared by both edit paths - the Nhân vật page and the inline editor
+ * on the import screen. They had a copy each, which is two chances to disagree
+ * about when a version bumps, on the flag that decides whether an approved
+ * reference image still describes this character.
+ *
+ * ## What "changed" means, and what it does not
+ *
+ * The identity fingerprint covers the appearance fields and nothing else.
+ * Editing `notes`, `description`, `seed` or the generic negative prompt leaves
+ * the version alone: bumping it for a typo fix is how a master image somebody
+ * approved starts reading as stale, and how an operator learns to ignore the
+ * version number. Whitespace-only edits are no edits - values are trimmed
+ * before the comparison, so re-saving an untouched form is a no-op.
+ *
+ * NOTHING here writes an image, and nothing here touches a reference row. A
+ * character can be re-described as often as anyone likes for free; drawing the
+ * new description is a separate, paid, deliberate act. See QĐ-072.
+ */
+export function applySheetEdit(
+  current: CharacterRow,
+  input: Partial<Record<EditableBibleKey | "name", string>>,
+): SheetEdit {
+  const data: Record<string, string> = {};
+  for (const key of EDITABLE_BIBLE_KEYS) {
+    const value = input[key];
+    if (value !== undefined) data[key] = value.trim();
+  }
+  const name = input.name?.trim();
+  if (name !== undefined && name.length > 0 && name !== current.name) {
+    data.name = name;
+  }
+
+  const before = identityFingerprint(current);
+  const after = identityFingerprint({ ...current, ...data } as CharacterRow);
+  const changed = before !== after;
+  return {
+    data,
+    version: changed ? current.version + 1 : current.version,
+    changed,
+    before,
+    after,
+  };
+}
+
 /**
  * Find a character by name, ignoring case.
  *

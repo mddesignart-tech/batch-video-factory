@@ -105,6 +105,16 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
 
       {video.blockedReason ? <Alert tone="danger">{video.blockedReason}</Alert> : null}
 
+      {video.duplicateOf.length > 0 ? (
+        <Alert tone="warn">
+          Đây là <strong>một bản nhập MỚI</strong> của storyboard đã từng nhập (
+          {video.duplicateOf.map((d) => d.title).join(", ")}) — nội dung giống hệt, dấu vân
+          tay <code className="font-mono text-[11px]">{video.importFingerprint}</code>. Hệ
+          thống <strong>không</strong> giả vờ dùng lại video cũ: đây là một video riêng, sẽ
+          tốn tiền riêng. Nhân vật và ảnh tham chiếu thì vẫn dùng chung, không nhân đôi.
+        </Alert>
+      ) : null}
+
       {video.characters.length > 0 ? (
         <div className="flex flex-wrap gap-2 text-xs">
           {video.characters.map((c) => (

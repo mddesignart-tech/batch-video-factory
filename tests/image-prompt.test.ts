@@ -315,3 +315,211 @@ describe("prompt sạch và tính tất định", () => {
     expect(SCENE_4.sceneDescription).toContain("nothing else in frame");
   });
 });
+
+// ------------------------------------------ the holes the QĐ-065 audit found ---
+
+/**
+ * `scripts/audit-image-guard.ts` put eight named contradiction shapes through
+ * the guard and four of them came back silent. Silence from a guard is
+ * indistinguishable from "nothing was wrong", which is precisely how scene 4 of
+ * the first real batch was bought. These are the four, and they stay here so a
+ * future edit to a lexicon cannot quietly reopen one. See QĐ-075.
+ */
+describe("QĐ-075: bốn lỗ hổng bộ dò tìm ra khi audit", () => {
+  // 1. "does not smile" contains "smile", so a lexicon that only looks for
+  // words read a PROHIBITION as a REQUEST - and then agreed with a sheet that
+  // says "wide eager smile".
+  describe("phủ định biểu cảm không còn bị đọc thành yêu cầu", () => {
+    it("'không cười' + bảng nhân vật 'wide eager smile' -> BẮT ĐƯỢC", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max looks deadly serious and does not smile at all.",
+        camera: "Locked static medium shot.",
+        characters: [
+          { name: "Max", canonical: "a boy, wide eager smile, outfit: yellow hoodie" },
+        ],
+      });
+      const hit = out.find((c) => c.kind === "expression_vs_sheet");
+      expect(hit).toBeDefined();
+      expect(hit!.kept).toContain("SERIOUS");
+      expect(hit!.dropped).toBe("wide eager smile");
+    });
+
+    it("'serious' nay là một nhóm biểu cảm thật, không còn vô hình", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max is stern and unsmiling.",
+        camera: "",
+        characters: [{ name: "Max", canonical: "a boy, always smiling" }],
+      });
+      expect(out.map((c) => c.kind)).toContain("expression_vs_sheet");
+    });
+
+    // The rule must not fire the other way: a scene that AGREES with the sheet
+    // is not a contradiction, and rewriting it would be editing correct input.
+    it("cảnh và bảng nhân vật cùng nói cười -> KHÔNG báo gì", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max grins widely.",
+        camera: "",
+        characters: [{ name: "Max", canonical: "a boy, wide eager smile" }],
+      });
+      expect(out.filter((c) => c.kind === "expression_vs_sheet")).toEqual([]);
+    });
+  });
+
+  // 2. One body, two postures. No rule existed at all.
+  describe("đứng và ngồi cùng lúc", () => {
+    it("'stands ... while sitting' -> posture_conflict", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max stands at the end of the board while sitting on the bench.",
+        camera: "",
+        characters: [],
+      });
+      const hit = out.find((c) => c.kind === "posture_conflict");
+      expect(hit).toBeDefined();
+      expect(hit!.kept).toBe("stands");
+      expect(hit!.dropped).toBe("sitting");
+    });
+
+    // Not auto-resolved on purpose: deleting either half leaves a sentence that
+    // reads correctly and means something nobody wrote.
+    it("KHÔNG tự sửa, và nói rõ là không tự sửa", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max kneels by the door, then he stands in the hallway.",
+        camera: "",
+        characters: [],
+      });
+      const hit = out.find((c) => c.kind === "posture_conflict")!;
+      expect(hit.resolved).toBe(false);
+      expect(hit.message).toContain("KHÔNG tự sửa");
+    });
+
+    it("một tư thế duy nhất -> KHÔNG báo gì", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max stands still at the end of the diving board.",
+        camera: "",
+        characters: [],
+      });
+      expect(out.filter((c) => c.kind === "posture_conflict")).toEqual([]);
+    });
+
+    // "Stands out" is not a posture. A guard that fires on idioms gets muted.
+    it("'stands out' / 'stands for' KHÔNG phải tư thế", () => {
+      const out = findImageContradictions({
+        sceneDescription: "The jar stands out against the wall while Max is sitting.",
+        camera: "",
+        characters: [],
+      });
+      expect(out.filter((c) => c.kind === "posture_conflict")).toEqual([]);
+    });
+  });
+
+  // 3. A crowd beside "nothing else in frame" - the QĐ-064 failure with people
+  // instead of props.
+  describe("đám đông vs khung trống", () => {
+    it("'a cheering crowd' + 'nothing else is in frame' -> BẮT ĐƯỢC", () => {
+      const out = findImageContradictions({
+        sceneDescription:
+          "Max stands in front of a cheering crowd, and nothing else is in frame.",
+        camera: "",
+        characters: [],
+      });
+      const hit = out.find((c) => c.kind === "crowd_vs_empty_frame");
+      expect(hit).toBeDefined();
+      expect(hit!.resolved).toBe(true);
+    });
+
+    it("đám đông thắng, câu khung trống bị bỏ khỏi prompt", () => {
+      const resolved = resolveImagePrompt({
+        sceneDescription: "Max waves at the audience, and nothing else is in frame.",
+        camera: "",
+        characters: [],
+      });
+      expect(resolved.sceneDescription).toContain("audience");
+      expect(resolved.sceneDescription).not.toContain("nothing else");
+    });
+
+    // Nền phẳng một mình không phải mâu thuẫn - gần như mọi cảnh của dự án này
+    // đều là nền phẳng.
+    it("nền trống KHÔNG có đám đông -> KHÔNG báo gì", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max stands against a plain grey background, nothing else in frame.",
+        camera: "",
+        characters: [],
+      });
+      expect(out.filter((c) => c.kind === "crowd_vs_empty_frame")).toEqual([]);
+    });
+  });
+
+  // 4. A different garment entirely, not merely a recoloured one.
+  describe("trang phục khác hẳn với bộ đã khoá", () => {
+    it("'red raincoat' vs bộ khoá 'yellow hoodie, blue jeans' -> BẮT ĐƯỢC", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max wears a red raincoat and green wellies.",
+        camera: "",
+        characters: [
+          { name: "Max", canonical: "a boy. outfit: bright yellow hoodie, blue jeans" },
+        ],
+      });
+      const hits = out.filter((c) => c.kind === "garment_vs_locked_identity");
+      expect(hits.length).toBeGreaterThanOrEqual(1);
+      expect(hits.map((h) => h.dropped).join(" ")).toContain("raincoat");
+      // Not auto-resolved: a costume change and a mistake look identical from
+      // here, and only a person can tell them apart.
+      expect(hits[0]!.resolved).toBe(false);
+      expect(hits[0]!.character).toBe("Max");
+    });
+
+    it("mặc đúng đồ đã khoá -> KHÔNG báo gì", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max tugs at his yellow hoodie and looks down at his blue jeans.",
+        camera: "",
+        characters: [
+          { name: "Max", canonical: "a boy. outfit: bright yellow hoodie, blue jeans" },
+        ],
+      });
+      expect(out.filter((c) => c.kind === "garment_vs_locked_identity")).toEqual([]);
+    });
+
+    it("nhân vật chưa khai trang phục -> không có gì để so, KHÔNG báo gì", () => {
+      const out = findImageContradictions({
+        sceneDescription: "Max wears a red raincoat.",
+        camera: "",
+        characters: [{ name: "Max", canonical: "a boy with dark hair" }],
+      });
+      expect(out.filter((c) => c.kind === "garment_vs_locked_identity")).toEqual([]);
+    });
+  });
+
+  // The guard ran over all 29 real scenes during the audit and produced 11
+  // findings, every one auto-resolved and none of them from the three new
+  // rules. This pins the part that matters: the new rules are silent on the
+  // prose this project actually contains.
+  it("ba luật mới KHÔNG kêu oan trên văn phong storyboard thật", () => {
+    const realScenes = [
+      "Max stands alone at the end of a high diving board against a plain pale sky. Max holds still and looks ahead.",
+      "A plain shot of Max from the knees down, both feet sealed inside one slab of pale cartoon ice on the board. The feet stay exactly where they are.",
+      "Max stands alone against a plain light grey background, mouth slightly open, arms relaxed at his sides. Nobody else is in the shot. Max blinks once and tilts his head very slightly.",
+      "Max on a plain background, a little calmer, arms at his sides. Max stands still.",
+      "Max stands on plain ground against a clean background, arms relaxed at his sides. Max stays where he is.",
+    ];
+    for (const sceneDescription of realScenes) {
+      const out = findImageContradictions({
+        sceneDescription,
+        camera: "Locked static medium shot, no camera movement.",
+        characters: [
+          {
+            name: "Max",
+            canonical:
+              "young adult male cartoon character. hair: short messy dark brown hair. " +
+              "outfit: bright yellow hoodie with a single white chest stripe, blue jeans",
+          },
+        ],
+      });
+      const fresh = out.filter((c) =>
+        ["posture_conflict", "crowd_vs_empty_frame", "garment_vs_locked_identity"].includes(
+          c.kind,
+        ),
+      );
+      expect(fresh).toEqual([]);
+    }
+  });
+});

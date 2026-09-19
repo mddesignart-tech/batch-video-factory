@@ -107,7 +107,23 @@ export async function failJob(jobId: string, error: unknown): Promise<boolean> {
 
   const message =
     error instanceof Error ? error.message : String(error ?? "Lỗi không xác định");
-  const willRetry = job.attempts < job.maxAttempts;
+
+  // A FAILURE THAT SAYS IT WILL NOT PASS IS NOT RETRIED.
+  //
+  // `GenerationError` and `ProviderError` both carry `retryable`, and this
+  // counted attempts without ever reading it - so a 401, a malformed request,
+  // or a scene whose character has no description at all burned the whole retry
+  // budget re-proving the same thing. Free in the cases that refuse before the
+  // POST; NOT free where the vendor has already seen the request, because each
+  // attempt is another one it sees.
+  //
+  // Read structurally rather than by class name, so an error that travels
+  // through a boundary and loses its prototype still keeps its meaning.
+  const declaredRetryable =
+    typeof error === "object" && error !== null && "retryable" in error
+      ? (error as { retryable: unknown }).retryable
+      : undefined;
+  const willRetry = declaredRetryable === false ? false : job.attempts < job.maxAttempts;
 
   await prisma.job.update({
     where: { id: jobId },

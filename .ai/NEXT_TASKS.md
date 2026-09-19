@@ -1,112 +1,116 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-19 (đợt 2)
+**Cập nhật:** 2026-09-19 (đợt 3)
 
 ---
 
-## ⏸ CHỜ BẠN QUYẾT — không làm gì cho tới khi có trả lời
+## ⏸ CHỜ BẠN QUYẾT — blocker miễn phí đã hết
 
-### 1. Chạy thật lô nhiều video — bước duy nhất còn lại cần tiền
+Mọi việc làm được mà không tiêu tiền đều đã xong. Thứ còn lại **cần tiền**, và
+cần bạn đồng ý.
 
-Mọi thứ trước bước tiêu tiền đã chạy được và có bằng chứng: `npm run
-import:dryrun` đi hết IMPORT → VALIDATE → CHARACTER RESOLVE → ROUTING → COST
-PREVIEW trên 3 storyboard, một trong đó cố tình hỏng, và dừng đúng ở đó.
+### 1. Lô production nhiều video đầu tiên — đề xuất nhỏ nhất có ý nghĩa
 
-Lô thật nhỏ nhất đáng chạy: **2 video, 10 cảnh, 2 clip Video AI** — dự toán
-$0,52 theo giá mock; theo giá thật sẽ khác, phải chạy lại preflight với
-`AI_MOCK_MODE=false` để lấy `PRODUCTION_ESTIMATE` trước khi bạn duyệt.
+**2 video · 10 cảnh · 2 clip Video AI.** Đó là fixture `examples/batch-import-3`
+sau khi sửa nốt nhân vật `BatchMi` (thiếu ảnh tham chiếu), hoặc một bộ storyboard
+thật của bạn có hình dạng tương tự.
 
-**Hạn mức tổng chỉ còn $1,198863.** Cần bạn: (a) đồng ý chạy, (b) trần cho mỗi
-video và cho cả lô.
-
-### 2. Sàn chuyển động cho h3_max — vẫn treo từ đợt trước
-
-Clip `h3_max` của lần nhập storyboard đo được `scdet` trung bình **0,00047** —
-5,18 giây cho ba cái chớp mắt. Đề xuất: thêm **sàn chuyển động** vào cổng
-LOW_AUTO để cảnh chỉ-chớp-mắt về LOCAL_MOTION thay vì tốn $0,40. Đây là **luật
-định tuyến mới**, không phải sửa lỗi, nên chưa làm.
-
-### 3. Số dư ví Runway trong bản xem trước đang CŨ
-
-Setting ghi 671 credit ($6,71), đọc live ngày 2026-09-18 **trước** khi lô
-`a690a290` mua 2 clip (80 credit) và lần nhập mua 1 clip (40 credit). Số đúng
-bây giờ là **551 credit = $5,51**. Sổ nội bộ khớp hãng ($4,49 = 449 credit);
-chỉ con số hiển thị là cũ.
-
-Làm mới bằng một lệnh, **miễn phí** (GET, không phải POST):
+Vì sao là con số đó: nó **đủ nhỏ để sai mà không đau** và **đủ lớn để chứng minh
+điều chưa ai chứng minh** — hai video chạy song song dưới một quyền chi, mỗi
+video một vòng đời riêng, resume độc lập. Một video thì đã làm rồi
+(2026-09-18, $0,400122).
 
 ```
-npm run runway:balance
+dự toán theo giá MOCK      $0,246100 + $0,274700 = $0,520800
+  -> KHÔNG phải giá thật. Phải chạy lại preflight với AI_MOCK_MODE=false
+     để lấy PRODUCTION_ESTIMATE trước khi bạn duyệt.
+ước lượng theo giá THẬT    2 clip h3_max × $0,40      = $0,80
+                           3 ảnh gpt-image-2 × $0,041 ≈ $0,124
+                           voice 10 cảnh              ≈ $0,0002
+                           render FFmpeg              = $0
+                           ---------------------------------------
+                           ≈ $0,924
+max authorization nên nhập $1,00   (biên ~8%)
+max/video nên nhập         $0,60
 ```
 
-Chưa chạy vì bạn dặn không đụng phần provider budgets đang ổn.
+⚠️ **Hạn mức tổng chỉ còn $1,198863.** Lô này ăn gần hết. Nếu muốn giữ chỗ cho
+việc khác thì hoặc nâng hạn mức tổng, hoặc bỏ bớt một clip Video AI (mỗi clip
+$0,40 — và theo QĐ-074, clip chỉ-chớp-mắt vốn đáng ngờ về giá trị).
 
-### 4. Ba nhân vật vẫn chưa khai tuổi / tông da — và **không còn bị chặn**
+**Tôi không tự chạy.** Cần bạn: (a) đồng ý, (b) chốt hai con số trần.
 
-Max/Leo/Mia nay là **READY**. Hai ô đó để trống nghĩa là hai thuộc tính đó
-**không được khoá** — prompt giao chúng cho ảnh tham chiếu thay vì tuyên bố
-suông. Muốn khoá thật thì điền; không muốn thì thôi, hoặc ghi `unknown` để giao
-diện thôi nhắc. Sửa được ngay trên `/import` hoặc trang Nhân vật.
+### 2. Sàn chuyển động đã CHỐT, nhưng câu hỏi giá trị vẫn treo
 
-### 5. Ảnh cảnh 1, 4, 5 của `f2b68443` đã lệch khoá
+Sàn đã vào code (QĐ-074) và hiệu chỉnh theo đúng 7 mẫu đã đo. Câu hỏi còn lại là
+câu hỏi tiền, không phải câu hỏi kỹ thuật: **một cảnh chỉ chớp mắt có đáng $0,40
+không**, khi `scdet` của nó là 0,00047 và LOCAL_MOTION làm miễn phí?
 
-Từ QĐ-065 (prompt đổi) và nay thêm QĐ-072 (mệnh đề khoá đổi). **Không còn nguy
-hiểm**: `generateSceneImage` dùng lại ảnh đã trả tiền thay vì mua lại, trừ khi
-bấm "tạo lại ảnh". Muốn thấy bản vá ra ảnh thế nào thì vẫn phải **tạo lại cảnh
-4 — một lần chi tiền**.
+Tôi **không** tự hạ cảnh nào xuống LOCAL_MOTION — đó là đổi nội dung sản phẩm.
+Nếu bạn muốn, có thể đặt thêm một luật: cảnh SUBTLE mà *không có* dialogue nhấn
+mạnh thì mặc định LOCAL_MOTION.
 
----
+### 3. Số dư ví Runway — ĐÃ TỰ CẬP NHẬT, hiện đúng
 
-## Blocker còn lại của IMPORT STORYBOARD / BATCH FROM SCENES
+`npm run lowauto:prove` đọc số dư live như một phần việc của nó (một GET miễn
+phí, **không phải POST**), nên setting đã tự cập nhật trong phiên này:
 
-### Đã đóng 2026-09-19
+```
+551 credit = $5,51   đọc GET /organization lúc 2026-09-19T07:27:26Z
+source = CACHE (bản LIVE gần nhất)   liveBalanceAvailable = true
+```
 
-- [x] **Character consistency** (QĐ-070) — Bible 11 trường, readiness,
-      `NEEDS_CHARACTER_REFERENCE`, tên lạ ném lỗi.
-- [x] **Khoá giả trong prompt** (QĐ-072) — chỉ khoá thuộc tính đã khai, mỗi nhân
-      vật một dòng; tuổi/tông da **không bắt buộc**; `unknown` là một câu trả lời
-      hợp lệ; hoa-thường không tạo người thứ hai; ảnh tham chiếu trùng nội dung
-      thì dùng lại; fingerprint đi theo ngoại hình.
-- [x] **Resume không mua lại ảnh** (QĐ-072) — `force` tách RESUME khỏi TẠO LẠI.
-- [x] **Nhập nhiều storyboard, một video hỏng không kéo theo phần còn lại**
-      (QĐ-073) — `allowPartial`, `skipped[]` có tên + lý do.
-- [x] **Vòng đời từng video** — 7 trạng thái, dẫn xuất, không thêm cột.
-- [x] **Trang `/import` đầy đủ** — tóm tắt video, bảng cảnh, khối tiền, ví từng
-      nhà cung cấp, sửa hồ sơ nhân vật tại chỗ. Không gọi API nào.
-- [x] **Ghim tay tách khỏi bản ghi router** (QĐ-069).
-- [x] **Dự toán nói được "dùng lại"** (QĐ-071).
+Khớp tuyệt đối với sổ nội bộ: $4,49 đã chi = 449 credit; 1000 − 449 = 551.
+Không còn việc gì phải làm ở mục này.
 
-### Còn lại
+### 4. Ảnh cảnh 1, 4, 5 của `f2b68443` lệch khoá (QĐ-065 + QĐ-072 đổi prompt)
 
-- [ ] **Chưa chạy thật lô nhiều video lần nào.** Đây là blocker duy nhất còn
-      thật sự mở, và nó cần tiền — xem mục 1 ở trên.
-- [ ] **Chưa có UI cho 5 trường Bible mới ở trang `/characters`.** Trang
-      `/import` đã có đủ 11 ô; trang Nhân vật vẫn là bộ 6 ô cũ. Miễn phí.
-- [ ] **`resumeBatch` chưa được thử với một lô nhiều video** mà một video đang
-      BLOCKED. Từng video resume độc lập được về mặt dữ liệu (`Project` riêng,
-      job riêng, `retryScene` theo cảnh), nhưng chưa có test đi hết đường đó.
-- [ ] **Guard mâu thuẫn prompt ảnh (QĐ-065) vẫn chưa ai đọc kết quả trên văn
-      phong storyboard nhập tay.** Nó có chạy; chưa có người nhìn.
+**Không còn nguy hiểm**: `generateSceneImage` dùng lại ảnh đã trả tiền thay vì
+mua lại (QĐ-072). Muốn thấy bản vá ra ảnh thế nào thì vẫn phải tạo lại cảnh 4 —
+**một lần chi tiền**.
 
 ---
 
-## Kiến trúc Batch From Storyboards — soát lại 2026-09-19 (đợt 2)
+## Blocker miễn phí — ĐÃ HẾT
+
+| Việc | Xong ở |
+|---|---|
+| Character Bible đủ 11 trường trên `/characters` | QĐ-072 + đợt 3 |
+| Không ép tuổi/tông da; `unknown` là câu trả lời hợp lệ | QĐ-072 |
+| Hiển thị rõ trường nào ĐANG KHOÁ / chưa khoá / mô tả thêm | đợt 3 |
+| Sửa hồ sơ không tạo ảnh, không đụng ảnh tham chiếu | QĐ-072, có test |
+| Reference reuse xuyên suốt (hoa-thường, trùng nội dung, fingerprint) | QĐ-072 |
+| Test resume nhiều video xuyên pipeline | QĐ-076 |
+| Một video BLOCKED không ảnh hưởng video khác | QĐ-073, QĐ-076 |
+| Audit QĐ-065 trên dữ liệu thật + vá 4 lỗ | QĐ-075 |
+| Sàn chuyển động h3_max | QĐ-074 |
+| Dự toán nhiều video, BLOCKED không làm sai tiền | QĐ-076 |
+| Idempotency nhập hai lần + import fingerprint | QĐ-077 |
+
+### Còn lại, và đều là việc nhỏ
+
+- [ ] **`resumeBatch` chưa chạy thật trên lô nhiều video.** Test mock đã đi hết
+      đường; lần chạy trả tiền thì chưa.
+- [ ] **Sàn chuyển động chưa gặp cảnh MODERATE/VIGOROUS nào trong một lô THẬT.**
+      Nó đúng trên 29 cảnh đang có; chưa có lần chạy nào để nó phải từ chối.
+- [ ] **`veo3.1_fast`, `wan3`, `h3_max:480x854` vẫn PIN_ONLY, chưa benchmark.**
+      Cố ý: benchmark là tiền.
+
+---
+
+## Kiến trúc Batch From Storyboards — soát lại 2026-09-19 (đợt 3)
 
 | Yêu cầu | Trạng thái |
 |---|---|
-| một thư mục nhiều video | CÓ — `groupByStoryboard` |
-| storyboard JSON hoặc CSV | CÓ, cùng bộ mã lỗi + số dòng |
-| mỗi video một thư mục asset riêng | CÓ |
-| import ZIP | CÓ, entry không an toàn bị từ chối |
+| một thư mục nhiều video · JSON/CSV · ZIP · thư mục asset riêng | CÓ |
 | mỗi cảnh chọn LOCAL_MOTION / VIDEO_AI | CÓ — VIDEO_AI là **chỉ thị** |
-| nhân vật riêng từng video | CÓ — cast đọc từ CẢNH, gộp theo danh tính ở cấp lô |
-| một nhân vật lặp nhiều cảnh | CÓ — 1 hàng, 1 ảnh, mọi cảnh trỏ về |
-| cảnh có media sẵn thì dùng lại | CÓ — ảnh QĐ-067, clip/giọng QĐ-071, ảnh đã mua QĐ-072 |
-| cảnh thiếu media mới tạo | CÓ |
-| resume idempotent | CÓ — clip theo khoá từ hàng Scene, ảnh theo tệp + job đã trả tiền |
-| không mua lại image/video/voice đã có | CÓ, và bản dự toán **nói đúng như vậy** |
-| một video lỗi không hỏng cả lô | CÓ — `allowPartial` + `skipped[]`, và BLOCKED không lan |
+| nhân vật riêng từng video, một nhân vật lặp nhiều cảnh | CÓ — 1 hàng, 1 ảnh |
+| cảnh có media sẵn thì dùng lại | CÓ — ảnh, clip, giọng, và **ảnh đã mua** |
+| resume idempotent, không mua lại | CÓ — có test 3 video |
+| một video lỗi không hỏng cả lô | CÓ — `allowPartial` + BLOCKED không lan |
 | trạng thái riêng từng video | CÓ — 7 trạng thái dẫn xuất |
+| nhập lại không nhân đôi nhân vật/ảnh | CÓ — QĐ-072 + QĐ-077 |
+| dự toán: BLOCKED không làm sai tiền video khác | CÓ — QĐ-076 |
 
 ```
 IMPORT -> VALIDATE -> CHARACTER RESOLVE -> SCENE ROUTING -> COST PREVIEW
@@ -114,9 +118,9 @@ IMPORT -> VALIDATE -> CHARACTER RESOLVE -> SCENE ROUTING -> COST PREVIEW
        -> SUBTITLE -> FFMPEG RENDER -> FINAL MP4
 ```
 
-Mọi bước tới **COST PREVIEW** đã chạy trên 3 storyboard (`npm run
-import:dryrun`, $0). Từ **USER APPROVAL** trở đi đã chạy thật với **1 video**
-(2026-09-18, $0,400122); với **nhiều video** thì chưa.
+Tới **COST PREVIEW**: đã chạy trên 3 storyboard, $0 (`npm run import:dryrun`).
+Từ **USER APPROVAL** trở đi: đã chạy thật với **1 video**; với **nhiều video**
+thì chưa — và đó là blocker duy nhất còn lại.
 
 ---
 ## 🆕 MODULE MỚI: Import Storyboard / Batch From Scenes V1 (2026-09-18)

@@ -414,6 +414,15 @@ model Project {
   language        String   @default("en")
   scriptJson      String?
   scriptHash      String?
+  /// Hash of the STORYBOARD this project was imported from, when it was.
+  ///
+  /// A second import of the same file is a second project on purpose - it
+  /// usually carries a correction, which is the reason anyone re-imports. What
+  /// would be dishonest is leaving the two indistinguishable: this says whether
+  /// the bytes were identical, so "you already imported this" and "this is the
+  /// fixed version" can be told apart without reading every scene. Null for a
+  /// project V1 wrote itself. See QĐ-077.
+  importFingerprint String?
   angleKey        String?
   scriptScoreJson String?
   youtubeMetaJson String?

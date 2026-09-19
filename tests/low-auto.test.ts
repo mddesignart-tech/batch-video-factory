@@ -28,6 +28,11 @@ function input(over: Partial<LowAutoInput> = {}): LowAutoInput {
     hasKeyframe: true,
     cameraMode: "LOCKED_CAMERA",
     repeatedSmallObjects: false,
+    // The motion floor (QĐ-074). SUBTLE is the only band with evidence behind
+    // it, so it is what a passing fixture has to state - and leaving it out is
+    // tested below for the refusal it is supposed to produce.
+    motionScale: "SUBTLE",
+    multiCharacterInteraction: false,
     // LOW_AUTO, not LOW_AUTO_CANDIDATE. The gate now demands the GRANT, and the
     // candidate state is tested below for the refusal it is supposed to produce.
     modelLifecycle: "LOW_AUTO",

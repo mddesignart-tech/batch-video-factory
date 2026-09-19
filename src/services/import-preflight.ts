@@ -2,13 +2,14 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { round } from "@/lib/utils";
 import { basisForProviders, recommendAuthorization } from "@/domain/cost-basis";
-import type { QualityMode } from "@/domain/enums";
+import type { QualityMode, VideoPlanStatus } from "@/domain/enums";
 import { spendStatus } from "./spend-guard";
 import { providerSpendBreakdown } from "./provider-budget";
 import { productionProviderNames, availableProviderNames } from "./provider-health";
 import { previewProjectCost } from "./project-service";
 import {
   characterReadiness,
+  CORE_BIBLE_FIELDS,
   findCharacterByName,
   hasAnyDescriptiveField,
   missingBibleFields,
@@ -144,7 +145,7 @@ export interface ImportVideoPreview {
   };
   counts: AssetCounts;
   estimatedCost: number;
-  status: "OK" | "OVER_VIDEO_BUDGET" | "NEEDS_PROVIDER";
+  status: VideoPlanStatus;
   /**
    * Where this ONE video is in its own life, independent of its neighbours.
    *
@@ -159,6 +160,16 @@ export interface ImportVideoPreview {
   warnings: string[];
   /** Cast of this video, resolved against the character table. */
   characters: ImportVideoCharacter[];
+  /**
+   * Hash of the storyboard this video was imported from.
+   *
+   * Shown so a re-import reads as a NEW import of the same material rather than
+   * pretending to be a reuse of the old one - and so a corrected file is
+   * visibly different from an identical one. Null for a project V1 wrote. QĐ-077.
+   */
+  importFingerprint: string | null;
+  /** Other projects already imported from byte-identical material. */
+  duplicateOf: { projectId: string; title: string }[];
   scenes: ImportSceneLine[];
 }
 
@@ -337,41 +348,6 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     const videoAi = sceneLines.length - localMotion;
     const total = round(estimate.breakdown.total, 6);
 
-    const videoWarnings: string[] = [...estimate.errors];
-
-    // Budget verdict FIRST, exactly as `planBatch` orders it, and for the same
-    // reason: when the per-video ceiling is what the router ran out of, every
-    // downstream "no model fits this scene" is a SYMPTOM of it. Reporting that
-    // as NEEDS_PROVIDER sends the operator into the model registry to fix
-    // something that is not broken.
-    const ranOutOfBudget = estimate.errorCodes.includes("over_budget");
-    const overCeiling = total > batch.maxCostPerVideo;
-
-    let status: ImportVideoPreview["status"] = "OK";
-    if (ranOutOfBudget || overCeiling) {
-      status = "OVER_VIDEO_BUDGET";
-      videoWarnings.push(
-        ranOutOfBudget
-          ? `Hạn mức $${batch.maxCostPerVideo.toFixed(2)} cho một video không đủ để định ` +
-            `tuyến hết các cảnh. Hãy nâng hạn mức/video hoặc bỏ bớt cảnh Video AI.`
-          : `Dự toán $${total.toFixed(6)} vượt hạn mức $${batch.maxCostPerVideo.toFixed(2)} ` +
-            `cho một video.`,
-      );
-      videoWarnings.push(
-        "Video này sẽ KHÔNG chạy; các video khác trong lô không bị ảnh hưởng.",
-      );
-    } else if (estimate.needsProvider.length > 0 || estimate.errors.length > 0) {
-      status = "NEEDS_PROVIDER";
-    }
-
-    const providers = [
-      ...new Set(
-        estimate.scenes
-          .flatMap((s) => [s.image?.provider, s.video?.provider, s.voice?.provider])
-          .filter((p): p is string => typeof p === "string" && p.length > 0),
-      ),
-    ].sort();
-
     // THE CAST OF THIS VIDEO, resolved against the character table.
     //
     // Read from the scenes rather than from the storyboard file, because the
@@ -412,6 +388,65 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     }
     characters.sort((a, b) => b.sceneCount - a.sceneCount || a.name.localeCompare(b.name));
 
+    // Neither a picture nor a word. `generateSceneImage` refuses these, so the
+    // preview has to as well - a plan that prices work the pipeline will not do
+    // is a plan that gets approved and then stalls.
+    const unusableCharacters = characters
+      .filter(
+        (c) =>
+          c.referenceCount === 0 && c.missingFields.length === CORE_BIBLE_FIELDS.length,
+      )
+      .map((c) => c.name);
+
+    const videoWarnings: string[] = [...estimate.errors];
+
+    // Budget verdict FIRST, exactly as `planBatch` orders it, and for the same
+    // reason: when the per-video ceiling is what the router ran out of, every
+    // downstream "no model fits this scene" is a SYMPTOM of it. Reporting that
+    // as NEEDS_PROVIDER sends the operator into the model registry to fix
+    // something that is not broken.
+    const ranOutOfBudget = estimate.errorCodes.includes("over_budget");
+    const overCeiling = total > batch.maxCostPerVideo;
+
+    let status: ImportVideoPreview["status"] = "OK";
+    if (unusableCharacters.length > 0) {
+      // FIRST, because it is the one that cannot be fixed with money. A
+      // character with no reference image AND no written description cannot be
+      // drawn twice the same way at any price, and `generateSceneImage` refuses
+      // outright - so this video is not runnable and its estimate must not be
+      // counted among the work the operator is about to approve. QĐ-076.
+      status = "NEEDS_CHARACTER_REFERENCE";
+      videoWarnings.push(
+        `Không thể vẽ nhất quán: ${unusableCharacters.join(", ")} — chưa có ảnh tham ` +
+          `chiếu VÀ chưa có một chữ nào mô tả ngoại hình.`,
+      );
+      videoWarnings.push(
+        "Video này sẽ KHÔNG chạy; các video khác trong lô không bị ảnh hưởng.",
+      );
+    } else if (ranOutOfBudget || overCeiling) {
+      status = "OVER_VIDEO_BUDGET";
+      videoWarnings.push(
+        ranOutOfBudget
+          ? `Hạn mức $${batch.maxCostPerVideo.toFixed(2)} cho một video không đủ để định ` +
+            `tuyến hết các cảnh. Hãy nâng hạn mức/video hoặc bỏ bớt cảnh Video AI.`
+          : `Dự toán $${total.toFixed(6)} vượt hạn mức $${batch.maxCostPerVideo.toFixed(2)} ` +
+            `cho một video.`,
+      );
+      videoWarnings.push(
+        "Video này sẽ KHÔNG chạy; các video khác trong lô không bị ảnh hưởng.",
+      );
+    } else if (estimate.needsProvider.length > 0 || estimate.errors.length > 0) {
+      status = "NEEDS_PROVIDER";
+    }
+
+    const providers = [
+      ...new Set(
+        estimate.scenes
+          .flatMap((s) => [s.image?.provider, s.video?.provider, s.voice?.provider])
+          .filter((p): p is string => typeof p === "string" && p.length > 0),
+      ),
+    ].sort();
+
     // A video's own state, decided by its own row and its own price.
     //
     // The order is "what has already happened" before "what is in the way",
@@ -433,11 +468,15 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     } else if (status !== "OK") {
       lifecycle = "BLOCKED";
       blockedReason =
-        status === "OVER_VIDEO_BUDGET"
-          ? `Dự toán $${total.toFixed(6)} vượt trần $${batch.maxCostPerVideo.toFixed(2)} cho một video.`
-          : (estimate.needsProvider[0] ??
-            estimate.errors[0] ??
-            "Có cảnh chưa định tuyến được model.");
+        status === "NEEDS_CHARACTER_REFERENCE"
+          ? `Không thể vẽ nhất quán: ${unusableCharacters.join(", ")} — chưa có ảnh ` +
+            `tham chiếu VÀ chưa có một chữ nào mô tả ngoại hình. Tải ảnh lên hoặc ` +
+            `điền hồ sơ nhân vật rồi dự toán lại.`
+          : status === "OVER_VIDEO_BUDGET"
+            ? `Dự toán $${total.toFixed(6)} vượt trần $${batch.maxCostPerVideo.toFixed(2)} cho một video.`
+            : (estimate.needsProvider[0] ??
+              estimate.errors[0] ??
+              "Có cảnh chưa định tuyến được model.");
     } else if (moneyApproved) {
       lifecycle = "APPROVED";
     } else {
@@ -448,6 +487,19 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       lifecycle,
       blockedReason,
       characters,
+      importFingerprint: project.importFingerprint,
+      duplicateOf: project.importFingerprint
+        ? (
+            await prisma.project.findMany({
+              where: {
+                importFingerprint: project.importFingerprint,
+                id: { not: project.id },
+              },
+              select: { id: true, title: true },
+              orderBy: { createdAt: "asc" },
+            })
+          ).map((p) => ({ projectId: p.id, title: p.title }))
+        : [],
       projectId: project.id,
       title: project.title,
       sceneCount: project.scenes.length,

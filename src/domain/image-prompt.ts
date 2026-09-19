@@ -72,7 +72,14 @@ export type ImageContradictionKind =
   | "framing_conflict"
   | "camera_move_in_still"
   | "object_present_and_absent"
-  | "outfit_vs_locked_identity";
+  | "outfit_vs_locked_identity"
+  // --- added QĐ-075, after an audit found the guard silent on all three ---
+  /** Standing and sitting in one description. Nobody can draw both. */
+  | "posture_conflict"
+  /** A crowd, beside a claim that the frame is empty. */
+  | "crowd_vs_empty_frame"
+  /** A garment the locked outfit does not contain, not merely recoloured. */
+  | "garment_vs_locked_identity";
 
 export interface ImageContradiction {
   kind: ImageContradictionKind;
@@ -141,6 +148,13 @@ const EXPRESSION_GROUPS: Array<[string, RegExp]> = [
   ["ANGRY", /\b(angry|furious|glares?|glaring|scowls?|scowling|cross)\b/],
   ["CALM", /\b(calm|neutral|relaxed|composed|serene|impassive)\b/],
   ["EYES_SHUT", /\b(eyes closed|squints?|squinting|blinks?|winks?)\b/],
+  // Added QĐ-075. "Deadly serious" had no group at all, so a scene that asked
+  // for it agreed with a sheet that said "wide eager smile" - two faces, no
+  // complaint. Kept apart from CALM: composed and stern are different faces.
+  [
+    "SERIOUS",
+    /\b(serious|stern|grave|solemn|deadpan|straight[- ]faced|unsmiling|poker[- ]faced)\b/,
+  ],
 ];
 
 /**
@@ -173,6 +187,24 @@ const SHOT_BUCKETS: Array<[string, RegExp]> = [
   ["WIDE", /\b(?:full[- ]body|full[- ]length|wide shot|long shot|establishing shot)\b/gi],
 ];
 
+/**
+ * Postures, bucketed. One body cannot be in two of them.
+ *
+ * Deliberately narrow verbs. "Stands out", "stands for" and "standing by" are
+ * not postures, so the patterns require the bare verb or an explicit posture
+ * noun - a guard that fires on "his reputation stands" is one that gets muted.
+ */
+const POSTURE_BUCKETS: Array<[string, RegExp]> = [
+  ["STANDING", /\b(?:stands?|standing)\b(?!\s+(?:out|for|by|to reason))|\bon (?:his|her|their) feet\b|\bupright\b/gi],
+  ["SITTING", /\b(?:sits?|sitting|seated|perched)\b(?!\s+(?:out|through))/gi],
+  ["LYING", /\b(?:lies? down|lying down|lies? on|sprawled|flat on (?:his|her|their) back)\b/gi],
+  ["KNEELING", /\b(?:kneels?|kneeling|crouch(?:es|ing)?|squats?|squatting)\b/gi],
+];
+
+/** People in the background, as a group. */
+const CROWD_RE =
+  /\b(?:a |the )?(?:cheering |applauding |waiting |large |small |busy )?(?:crowds?|audiences?|throngs?|onlookers?|bystanders?|spectators?|queues?|a (?:group|row) of people|(?:several|many|dozens of|lots of) (?:people|children|kids|adults))\b/gi;
+
 const CENTERED_RE = /\b(?:centred|centered|dead cent(?:re|er)|middle of (?:the )?frame)\b/gi;
 const EDGE_RE =
   /\b(?:far (?:left|right) edge|edge of (?:the )?frame|extreme (?:left|right)|hard against the (?:left|right))\b/gi;
@@ -203,8 +235,20 @@ const NON_OBJECT_NOUNS = new Set([
 const OBJECT_PHRASE_RE =
   /\b(?:along|onto|off|across|around|behind|under|over|upon|against|beside|towards?|from|on)\s+(?:the|a|an)\s+([a-z][a-z-]{2,20}(?:\s+[a-z][a-z-]{2,20})?)\b/gi;
 
+/**
+ * Garments the rules below can reason about.
+ *
+ * Widened in QĐ-075: an audit put "Max wears a red raincoat and green wellies"
+ * against a locked yellow hoodie and the guard said nothing, because neither
+ * word was in this list. A lexicon is only as good as its coverage, and the
+ * missing entries were all ordinary clothes.
+ */
 const GARMENT_WORDS =
-  "hoodie|jacket|shirt|jeans|trousers|skirt|dress|sneakers|shoes|boots|hat|cap|scarf";
+  "hoodie|hoody|jacket|coat|raincoat|overcoat|blazer|cardigan|sweater|jumper|" +
+  "shirt|t-shirt|tshirt|blouse|vest|jeans|trousers|pants|shorts|skirt|dress|" +
+  "overalls|dungarees|uniform|pyjamas|apron|sneakers|trainers|shoes|boots|" +
+  "wellies|wellingtons|sandals|slippers|hat|cap|beanie|helmet|scarf|gloves|" +
+  "mittens|tie|backpack";
 
 /**
  * A garment with the colour word directly in front of it.
@@ -242,9 +286,22 @@ function normalise(text: string): string {
     .trim();
 }
 
+/**
+ * Spans where an expression word is being FORBIDDEN rather than requested.
+ *
+ * "does not smile at all" contains "smile", so a lexicon that only looks for
+ * words reads a prohibition as a request - and then agrees with a character
+ * sheet that says "wide eager smile", which is the exact opposite of what the
+ * scene asked for. Found and removed before grouping. See QĐ-075.
+ */
+const NEGATED_SPAN_RE =
+  /\b(?:does\s+not|doesn'?t|do\s+not|don'?t|never|without|no|not|nor|refuses?\s+to|stops?\s+)\s+(?:\w+\s+){0,2}?(?:smiles?|smiling|grins?|grinning|laughs?|laughing|frowns?|frowning|scowls?|scowling|winks?|blinks?|cries|crying)\b/gi;
+
 /** Groups a piece of text belongs to, in lexicon order. */
 function groupsIn(text: string): string[] {
-  const t = text.toLowerCase();
+  // A forbidden expression is not a requested one. Stripped first, so
+  // "does not smile" contributes nothing rather than contributing SMILE.
+  const t = text.toLowerCase().replace(NEGATED_SPAN_RE, " ");
   const out: string[] = [];
   for (const [name, re] of EXPRESSION_GROUPS) {
     if (re.test(t)) out.push(name);
@@ -280,6 +337,17 @@ function firstBucket(text: string): { bucket: string; phrase: string } | null {
 function allBuckets(text: string): { bucket: string; phrase: string; index: number }[] {
   const out: { bucket: string; phrase: string; index: number }[] = [];
   for (const [bucket, re] of SHOT_BUCKETS) {
+    for (const m of text.matchAll(new RegExp(re.source, re.flags))) {
+      if (m.index !== undefined) out.push({ bucket, phrase: m[0], index: m.index });
+    }
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
+
+/** Postures found, in the order they were written. */
+function allPostures(text: string): { bucket: string; phrase: string; index: number }[] {
+  const out: { bucket: string; phrase: string; index: number }[] = [];
+  for (const [bucket, re] of POSTURE_BUCKETS) {
     for (const m of text.matchAll(new RegExp(re.source, re.flags))) {
       if (m.index !== undefined) out.push({ bucket, phrase: m[0], index: m.index });
     }
@@ -382,6 +450,54 @@ export function resolveImagePrompt(src: ImagePromptSource): ResolvedImagePrompt 
           (removable
             ? " Giữ câu liền mạch (CONTINUITY), bỏ cụm nhắc lại."
             : " KHÔNG tự sửa được mà không làm hỏng câu — hãy sửa kịch bản."),
+      });
+    }
+  }
+
+  // --- B2. one body, two postures
+  //
+  // NOT auto-resolved. Removing "while sitting on the bench" leaves a sentence
+  // that reads correctly and means something the author did not write, and the
+  // guard has no way to tell which half was the mistake. Reported loudly so a
+  // person fixes the sentence. See QĐ-075.
+  const postures = allPostures(scene);
+  if (postures.length > 1 && postures.some((p) => p.bucket !== postures[0]!.bucket)) {
+    const second = postures.find((p) => p.bucket !== postures[0]!.bucket)!;
+    contradictions.push({
+      kind: "posture_conflict",
+      kept: postures[0]!.phrase,
+      dropped: second.phrase,
+      keptLayer: "ACTION",
+      droppedLayer: "ACTION",
+      resolved: false,
+      message:
+        `Cảnh mô tả hai tư thế cùng lúc: "${postures[0]!.phrase}" ` +
+        `(${postures[0]!.bucket}) và "${second.phrase}" (${second.bucket}). ` +
+        `Một người không thể vừa ${postures[0]!.bucket} vừa ${second.bucket}; ` +
+        `KHÔNG tự sửa vì không đoán được vế nào là ý bạn — hãy sửa câu mô tả cảnh.`,
+    });
+  }
+
+  // --- B3. a crowd, beside a claim that the frame is empty
+  //
+  // The mirror of the rule QĐ-064 paid for, with people instead of props. The
+  // crowd is staging; "nothing else in frame" is boilerplate, and boilerplate
+  // loses to what the scene is actually about.
+  const crowds = matchesOf(scene, CROWD_RE);
+  if (crowds.length > 0) {
+    const emptyClaims = matchesOf(scene, EMPTY_FRAME_RE);
+    for (const claim of emptyClaims) {
+      scene = removePhrase(scene, claim);
+      contradictions.push({
+        kind: "crowd_vs_empty_frame",
+        kept: `đám đông trong khung ("${crowds[0]}")`,
+        dropped: claim.trim(),
+        keptLayer: "ACTION",
+        droppedLayer: "DECORATIVE",
+        resolved: true,
+        message:
+          `Cảnh có "${crowds[0]}" nhưng lại ghi "${claim.trim()}". Hai thứ không thể ` +
+          `cùng đúng; giữ đám đông (đó là nội dung cảnh) và bỏ câu nói khung trống.`,
       });
     }
   }
@@ -539,6 +655,49 @@ export function resolveImagePrompt(src: ImagePromptSource): ResolvedImagePrompt 
             `nên sửa mô tả cảnh về đúng màu khoá.`,
         });
       }
+    }
+  }
+
+  // --- D2. a garment the locked outfit does not contain at all
+  //
+  // D1 above catches a RECOLOURED garment - "red hoodie" against a locked
+  // yellow one - and says nothing about a different garment entirely. An audit
+  // found "Max wears a red raincoat" beside a locked "yellow hoodie, blue
+  // jeans" passing in silence, which is the same failure wearing a different
+  // coat. See QĐ-075.
+  //
+  // NOT auto-resolved. Rewriting "a red raincoat" into "bright yellow hoodie,
+  // blue jeans" mid-sentence produces English nobody wrote, and the system
+  // genuinely cannot tell a deliberate costume change from a mistake. Said out
+  // loud instead, so the person who knows decides.
+  for (const character of characters) {
+    const outfit = (
+      /(?:^|\.\s*)outfit:\s*([^.]+)/i.exec(character.canonical)?.[1] ?? ""
+    ).toLowerCase();
+    if (outfit.trim().length === 0) continue;
+
+    const lockedGarments = new Set(
+      [...outfit.matchAll(garmentRe(GARMENT_WORDS))].map((m) => (m[3] ?? "").toLowerCase()),
+    );
+    if (lockedGarments.size === 0) continue;
+
+    for (const s of scene.matchAll(garmentRe(GARMENT_WORDS))) {
+      const worn = (s[3] ?? "").toLowerCase();
+      if (worn.length === 0 || lockedGarments.has(worn)) continue;
+      contradictions.push({
+        kind: "garment_vs_locked_identity",
+        kept: `trang phục khoá: ${outfit.trim()}`,
+        dropped: s[0]!.trim(),
+        keptLayer: "IDENTITY",
+        droppedLayer: "ACTION",
+        character: character.name,
+        resolved: false,
+        message:
+          `Cảnh cho ${character.name} mặc "${s[0]!.trim()}" nhưng trang phục KHOÁ của ` +
+          `nhân vật này là "${outfit.trim()}" — không có món đó. Trang phục nằm trong ` +
+          `nhóm thuộc tính bị khoá. KHÔNG tự sửa: hệ thống không phân biệt được một ` +
+          `lần thay đồ có chủ ý với một lỗi. Hãy sửa cảnh, hoặc cập nhật hồ sơ nhân vật.`,
+      });
     }
   }
 

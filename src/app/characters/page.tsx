@@ -102,6 +102,11 @@ export default async function CharactersPage() {
                   bodyProportions: character.bodyProportions,
                   accessories: character.accessories,
                   colorPalette: character.colorPalette,
+                  presentation: character.presentation,
+                  approximateAge: character.approximateAge,
+                  skinTone: character.skinTone,
+                  distinguishingFeatures: character.distinguishingFeatures,
+                  negativeIdentity: character.negativeIdentity,
                 }}
               />
 

@@ -18,9 +18,9 @@ import {
 } from "@/services/storyboard-import";
 import { preflightImportedBatch, type ImportPreflight } from "@/services/import-preflight";
 import {
+  applySheetEdit,
   findCharacterByName,
   getCharacterSheet,
-  identityFingerprint,
 } from "@/services/character-service";
 import {
   approveCharacterReference,
@@ -578,27 +578,9 @@ export async function updateImportedCharacter(input: {
     });
     if (!current) return { ok: false, message: "Không tìm thấy nhân vật." };
 
-    const data: Record<string, string> = {};
-    for (const key of [
-      "presentation",
-      "approximateAge",
-      "skinTone",
-      "hair",
-      "facialFeatures",
-      "distinguishingFeatures",
-      "outfit",
-      "bodyProportions",
-      "accessories",
-      "colorPalette",
-      "negativeIdentity",
-    ] as const) {
-      const value = input[key];
-      if (value !== undefined) data[key] = value.trim();
-    }
-
     // Renaming has to carry the SCENES with it, or the scenes go on naming
     // somebody who no longer exists and the image step refuses every one of
-    // them. Done in the same transaction as the rename for that reason.
+    // them. Checked before the write for that reason.
     const newName = input.name?.trim();
     const renaming = newName !== undefined && newName.length > 0 && newName !== current.name;
     if (renaming) {
@@ -611,19 +593,16 @@ export async function updateImportedCharacter(input: {
             "làm một — hãy chọn tên khác, hoặc sửa các cảnh để dùng thẳng nhân vật kia.",
         };
       }
-      data.name = newName;
     }
 
-    const changed = identityFingerprint(current) !== identityFingerprint({ ...current, ...data });
+    // The same rule the Nhân vật page uses: the version follows the LOOK, not
+    // the paperwork, and no image is created either way. QĐ-072.
+    const edit = applySheetEdit(current, input);
+    const changed = edit.changed;
 
     await prisma.character.update({
       where: { id: input.characterId },
-      data: {
-        ...data,
-        // The version follows the LOOK, not the paperwork. Editing a note must
-        // not make an approved reference image read as stale. QĐ-072.
-        version: changed ? current.version + 1 : current.version,
-      },
+      data: { ...edit.data, version: edit.version },
     });
 
     if (renaming) {

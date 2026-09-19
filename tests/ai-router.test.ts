@@ -360,6 +360,8 @@ function facts(over: Record<string, unknown> = {}) {
     hasKeyframe: true,
     cameraMode: "LOCKED_CAMERA" as const,
     repeatedSmallObjects: false,
+    motionScale: "SUBTLE" as const,
+    multiCharacterInteraction: false,
     promptGuarded: true,
     contradictions: [] as string[],
     providerBudgets: { mock: 10 } as Record<string, number | null>,

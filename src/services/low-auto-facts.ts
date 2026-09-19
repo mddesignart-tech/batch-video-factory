@@ -8,6 +8,7 @@ import {
   type GuardedPrompt,
 } from "@/domain/video-prompt";
 import { decideMotion, effectiveMotionSource, type MotionResolution } from "@/domain/local-motion";
+import { classifyMotionScale, type MotionScaleVerdict } from "@/domain/motion-scale";
 import { sceneCharacters } from "@/domain/scene-characters";
 import { extractSignals } from "./complexity";
 import { toAbsolute } from "@/lib/paths";
@@ -89,6 +90,8 @@ export interface SceneFactsResult {
   videoPrompt: string;
   guarded: GuardedPrompt;
   cameraIntent: CameraIntent;
+  /** How big a movement the scene asks for, and why. */
+  motionScale: MotionScaleVerdict;
   motion: MotionResolution;
   characterCount: number;
   /** True when the row names an image AND that image is on disk. */
@@ -129,6 +132,14 @@ export function deriveSceneVideoFacts(
 ): SceneFactsResult {
   const characterCount = sceneCharacters(scene).present.length || 1;
   const cameraIntent = classifyCameraIntent(scene);
+  // How much movement the scene asks for, from the same words the author wrote.
+  // Derived HERE so the dry-run, the estimate and the pipeline all read one
+  // answer - the lesson QĐ-060 paid for. QĐ-074.
+  const motionScale = classifyMotionScale({
+    characterAction: scene.characterAction,
+    visualDescription: scene.visualDescription,
+    characterCount,
+  });
   const guarded = applyCameraGuardrails(scene.videoPrompt, cameraIntent, RUNWAY_MAX_PROMPT_CHARS);
   const contradictions = findPromptContradictions(guarded.text);
 
@@ -175,6 +186,8 @@ export function deriveSceneVideoFacts(
       hasKeyframe,
       cameraMode: cameraIntent.mode,
       repeatedSmallObjects: extractSignals(scene).repeatedSmallObjects,
+      motionScale: motionScale.scale,
+      multiCharacterInteraction: motionScale.multiCharacterInteraction,
       // `skipped` counts as guarded: the composer looked at the prompt and
       // found the guardrail already present. Treating that as ungoverned would
       // refuse the very prompts that were written correctly to begin with.
@@ -184,6 +197,7 @@ export function deriveSceneVideoFacts(
     videoPrompt: guarded.text,
     guarded,
     cameraIntent,
+    motionScale,
     motion,
     characterCount,
     hasKeyframe,

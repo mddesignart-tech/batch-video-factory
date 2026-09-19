@@ -2263,3 +2263,196 @@ trong bảng nhân vật thật mãi mãi. Một lần chạy khô mà làm bẩ
 phải chạy khô. (Lần chạy đầu tiên của chính script này đã để lại 3 nhân vật + 2
 dự án rác trong DB thật; đã dọn bằng tay, đối chiếu không có ProviderJob và không
 có CostEntry nào dính vào.)
+
+---
+
+## QĐ-074 — Sàn chuyển động: h3_max chỉ được TỰ CHỌN cho cỡ động tác đã đo
+
+Bảy mẫu đã chấm, sáu mẫu ≥ 8,69. Đọc như một giấy phép cho mọi cảnh LOW. Nhìn
+vào **nội dung** sáu mẫu đó thì giấy phép hẹp lại rất nhanh:
+
+```
+canh 1  cúi đầu, mở to mắt                    9,10 / 9,09
+canh 3  chớp mắt, nghiêng đầu rất nhẹ         8,69
+canh 4  lắc đầu một cái, lui nửa bước         8,91
+canh 5  giữ nguyên tư thế (A/B prompt)        9,20
+canh 6  một cú đưa tay rồi hạ, một cái gật    8,92
+```
+
+Chớp mắt. Gật đầu. Một cú đưa tay. Nửa bước chân. `scdet` trung bình 0,00047 →
+0,0023 — một tấm ảnh biết thở. **Chưa ai từng trả tiền cho model này vẽ người
+đang chạy**, và đọc "độ khó LOW" thành "được phép thử" là suy diễn từ bằng chứng
+không tồn tại, giá $0,40 một lần đoán.
+
+`classifyMotionScale` xếp cảnh vào `SUBTLE / MODERATE / VIGOROUS` từ chính chữ
+tác giả viết (`characterAction`, fallback `visualDescription`; **không** đọc lời
+thoại — "tôi sẽ chạy" là một câu nói, không phải một động tác). Cổng LOW_AUTO
+chỉ nhận `SUBTLE`, và **không biết thì chặn**: một điều kiện chưa ai đánh giá là
+một điều kiện chưa được thoả.
+
+Thêm `multiCharacterInteraction`: mẫu hai nhân vật duy nhất có Leo và Mia **lần
+lượt** nói và gật, không chạm nhau. Phối hợp giữa người với người chưa được đo.
+
+### Đây không phải phán xét về model
+
+Ghim tay vẫn tới thẳng model, short-circuit trước toàn bộ phần này — như mọi
+điều kiện LOW_AUTO khác. Không ai nói h3_max sẽ vẽ hỏng một cú chạy; chỉ là
+**không ai biết**, và router không phải người nên bỏ $0,40 ra để biết.
+
+### Đối chiếu trên toàn bộ 29 cảnh thật
+
+```
+SUBTLE 21 · MODERATE 3 · VIGOROUS 5
+cả BA clip h3_max đã mua đều SUBTLE:
+  Cold feet nhập #3  "blinks once and tilts his head very slightly"
+  Cold feet lô   #1  "lowers his chin slowly, eyes widening"
+  Cold feet lô   #4  "shakes his head once, then eases one short pace back"
+```
+
+Sàn này **không mâu thuẫn với bất kỳ lần mua nào đã xảy ra** — nó được hiệu
+chỉnh theo chính các mẫu đó, chứ không phải đặt ra từ cảm tính. Cảnh MODERATE
+duy nhất đang trỏ h3_max (`Spill the beans #5`) là **ghim tay**, không bị ảnh
+hưởng.
+
+`scripts/prove-low-auto.ts` nay có 13 negative control (thêm I1/I2/I3 cho cỡ
+chuyển động và J cho tương tác), và bản thân script đã **thôi tự viết dữ kiện**
+— nó lấy `motionScale` từ `deriveSceneVideoFacts` như mọi caller khác.
+
+---
+
+## QĐ-075 — Audit QĐ-065: bộ dò mâu thuẫn im lặng ở bốn dạng
+
+QĐ-065 gắn bộ dò mâu thuẫn vào đường ẢNH sau khi cảnh 4 của lô thật đầu tiên trả
+về một bức chân dung tươi cười trên nền trống. Nó đã chạy trên mọi ảnh từ đó, và
+**chưa ai đọc kết quả của nó** trên văn phong storyboard viết tay.
+
+`scripts/audit-image-guard.ts` đẩy tám dạng mâu thuẫn có tên qua bộ dò. **Bốn
+dạng im lặng.** Im lặng từ một cái guard không phân biệt được với "không có gì
+sai" — đó chính xác là cách cảnh 4 được mua.
+
+### 1. Phủ định bị đọc thành yêu cầu
+
+`"does not smile at all"` **chứa** chữ "smile", nên một từ điển chỉ tra từ đọc
+một lời **cấm** thành một lời **xin** — rồi đồng ý với bảng nhân vật ghi "wide
+eager smile", tức là đúng ngược lại điều cảnh yêu cầu. `NEGATED_SPAN_RE` cắt các
+đoạn bị phủ định trước khi phân nhóm.
+
+### 2. "serious" không thuộc nhóm biểu cảm nào
+
+Không có nhóm thì không có mâu thuẫn. Thêm nhóm `SERIOUS`, tách khỏi `CALM`:
+điềm tĩnh và nghiêm nghị là hai khuôn mặt khác nhau.
+
+### 3. Không có luật nào cho TƯ THẾ
+
+"stands ... while sitting" đi thẳng tới model. Thêm `posture_conflict`
+(STANDING / SITTING / LYING / KNEELING). **Không tự sửa**: xoá vế nào cũng để
+lại một câu đọc trôi chảy và mang nghĩa không ai viết, và guard không đoán được
+vế nào là lỗi. Báo to, để người sửa câu.
+
+### 4. Đám đông đứng cạnh "nothing else in frame"
+
+Chính là thất bại QĐ-064, thay đạo cụ bằng người. Thêm `crowd_vs_empty_frame`:
+giữ đám đông (đó là **nội dung** cảnh), bỏ câu văn mẫu.
+
+### 5. Trang phục KHÁC HẲN, không chỉ đổi màu
+
+Luật cũ bắt "red hoodie" chọi "yellow hoodie" — cùng món, khác màu. Nó **không**
+thấy "red raincoat" chọi bộ khoá "yellow hoodie, blue jeans", vì cả "raincoat"
+lẫn "wellies" đều không có trong từ điển trang phục. Thêm
+`garment_vs_locked_identity` và mở rộng từ điển. **Không tự sửa**: viết lại "a
+red raincoat" thành "bright yellow hoodie, blue jeans" giữa câu tạo ra thứ tiếng
+Anh không ai viết, và hệ thống thật sự không phân biệt được một lần thay đồ có
+chủ ý với một lỗi.
+
+### Kết quả
+
+8/8 dạng bắt được. Trên **29 cảnh thật**: 11 cảnh có phát hiện, **tất cả đều tự
+xử lý được**, 0 cảnh treo — và **ba luật mới không kêu oan lần nào**, đúng như
+mong đợi với văn phong của dự án này. **QĐ-065 đóng.**
+
+---
+
+## QĐ-076 — Một cái tên và một chỗ trống thì không vẽ được, ở bất kỳ giá nào
+
+Nhân vật **không có ảnh tham chiếu VÀ không một chữ nào** mô tả ngoại hình là
+một cái tên và một chỗ trống. Vẽ họ là mua một người lạ; vẽ họ ở cảnh sau là mua
+một người lạ **khác**. Đó chính là thất bại mà cả hệ thống nhân vật sinh ra để
+chặn, đến bằng một con đường trông như thành công.
+
+Khác hẳn với "chưa có ảnh tham chiếu", vốn hoàn toàn bình thường: một hồ sơ viết
+đầy đủ mà chưa có ảnh chuẩn chính là cách ảnh chuẩn được tạo ra. **Phải trống cả
+hai vế** thì mới từ chối.
+
+- `generateSceneImage` ném `GenerationError` **không thử lại**, nêu đích danh
+  nhân vật.
+- `preflightImportedBatch` đánh video đó `BLOCKED` với **status
+  `NEEDS_CHARACTER_REFERENCE`** — người vận hành biết **trước khi duyệt tiền**,
+  chứ không phải sau khi job ảnh đầu tiên hỏng.
+
+### Tiền của video BỊ CHẶN không được nằm trong số sắp duyệt
+
+Ban đầu tôi để `lifecycle` quyết định nhãn còn `status` quyết định tiền, nên một
+video bị chặn vì nhân vật **vẫn được tính vào `estimatedTotal`**. Trần đề xuất
+khi đó được dựng trên công việc sẽ không chạy. Một quyết định, hai kết quả:
+`status` mới chi phối cả hai.
+
+```
+trước: du toan chay duoc $0,520800   de xuat tran $0,50   (gồm cả video bị chặn)
+sau  : du toan chay duoc $0,246100   de xuat tran $0,28   ke ca video bi chan $0,520800
+```
+
+### Lỗi đã khai là KHÔNG thử lại thì đừng đốt lượt thử
+
+`failJob` đếm số lần thử và **chưa bao giờ đọc** cờ `retryable` mà cả
+`GenerationError` lẫn `ProviderError` đều mang. Nên một lỗi 401, một request sai
+định dạng, hay một cảnh có nhân vật rỗng đều đốt sạch ngân sách thử lại để chứng
+minh lại đúng một điều. Miễn phí ở các ca từ chối **trước** khi POST; **không**
+miễn phí ở nơi nhà cung cấp đã nhìn thấy request — mỗi lần thử là một lần nữa nó
+nhìn thấy.
+
+Đọc theo **cấu trúc** chứ không theo tên lớp, để một lỗi đi qua ranh giới và mất
+prototype vẫn giữ được nghĩa.
+
+### Ba video, ba trạng thái, một lần khởi động lại
+
+`tests/multi-video-resume.test.ts` — A xong, B dở, C bị chặn:
+
+```
+A  0 job mới, 0 hàng đổi, vẫn completed
+B  chạy tiếp; ảnh cảnh 1 DÙNG LẠI (1 image job, không phải 2); cảnh 2 mới mua
+C  hỏng riêng nó, nêu tên ResumeGhost, 0 ProviderJob
+   -> A và B không bị dừng
+retryCount  tất cả vẫn 0     ProviderJob  không trùng khoá
+reservation không trùng      reserved = 0 (không treo đồng nào)
+sau khi thêm ảnh cho C: CHỈ C chạy tiếp, A/B đứng yên tuyệt đối
+```
+
+---
+
+## QĐ-077 — Nhập lại là một bản nhập MỚI, và phải nói thẳng ra như vậy
+
+Nhập lại không phải ca hiếm; đó là cách bình thường để sửa một lỗi gõ. Nên câu
+hỏi không phải "có xảy ra không" mà là "tốn gì", và câu trả lời phải là: không
+tốn thứ gì không đáng.
+
+**Dùng chung**: `Character` là một **con người**, và con người thì dùng chung qua
+mọi lần nhập có nhắc tên. Ảnh tham chiếu của họ cũng vậy. Hai thứ này **không
+bao giờ** được nhân đôi (QĐ-072 đã khoá theo tên gấp hoa-thường và theo nội dung
+ảnh).
+
+**Không dùng chung**: `Project` là một **việc**, và lần nhập thứ hai là một việc
+thứ hai — thường mang theo bản sửa, vốn là lý do người ta nhập lại. Nó có dự án
+riêng, cảnh riêng, lô riêng.
+
+Thứ khiến điều đó **trung thực thay vì khó hiểu** là `Project.importFingerprint`:
+băm nội dung storyboard (cast + cảnh, đã sắp xếp), **không** băm thư mục hay
+thời điểm. Nhờ vậy:
+
+- cùng byte → cùng vân tay → trang `/import` nói rõ *"đây là một bản nhập MỚI
+  của storyboard đã từng nhập … hệ thống KHÔNG giả vờ dùng lại video cũ: đây là
+  một video riêng, sẽ tốn tiền riêng"*;
+- file đã sửa → vân tay khác → không bị nhầm thành bản trùng.
+
+Và điều phải đúng bằng mọi giá: **nhập không tạo `ProviderJob` hay
+`CostReservation` nào**, quyền chi cả hai lô đều `DRAFT`, trần đã duyệt = 0. Có
+test khẳng định trực tiếp thay vì tin lời.

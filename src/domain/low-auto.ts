@@ -1,5 +1,6 @@
 import { COMFORTABLE_CAST } from "./crowding";
 import type { CameraMode } from "./camera-intent";
+import type { MotionScale } from "./motion-scale";
 
 /**
  * May the router buy a paid clip for this scene on its own?
@@ -53,6 +54,16 @@ export interface LowAutoInput {
   cameraMode: CameraMode;
   /** Beans, coins, confetti: the signal that cost this project two failed clips. */
   repeatedSmallObjects: boolean;
+  /**
+   * How big the movement this scene asks for is.
+   *
+   * UNDEFINED BLOCKS, like every other fact here: a caller that routes video
+   * without saying what moves has not satisfied a condition, it has skipped
+   * one. See `motionScaleBlock` below and QĐ-074.
+   */
+  motionScale?: MotionScale;
+  /** Two or more people doing something to each other. Unmeasured on h3_max. */
+  multiCharacterInteraction?: boolean;
   /** Registry lifecycle of the candidate model. */
   modelLifecycle: string;
   /** Registry reliability of the candidate model. */
@@ -191,6 +202,34 @@ export function lowAutoEligibility(input: LowAutoInput): LowAutoVerdict {
       code: "dense_small_objects",
       message:
         "cảnh có nhiều vật thể nhỏ lặp lại — đúng loại cảnh đã làm hỏng hai clip trả phí",
+    });
+  }
+
+  // THE MOTION FLOOR.
+  //
+  // Every scored sample of this model is a blink, a nod, one hand raised and
+  // lowered, or half a step - measured at scdet means of 0.00047 to 0.0023.
+  // Reading "LOW complexity" as permission to buy a running shot would be
+  // extrapolating from evidence that does not exist. Undefined blocks too: a
+  // condition nobody evaluated has not been met.
+  if (input.motionScale !== "SUBTLE") {
+    blockers.push({
+      code: "motion_too_large",
+      message:
+        input.motionScale === undefined
+          ? "chưa xác định được cỡ chuyển động của cảnh — không tự định tuyến khi không biết"
+          : `cảnh yêu cầu chuyển động cỡ ${input.motionScale}; model này mới chỉ được ` +
+            `đo trên chuyển động rất nhỏ (chớp mắt, gật đầu, một cử chỉ tay, nửa bước chân)`,
+    });
+  }
+
+  // Two people doing something TO each other. The one two-character sample had
+  // them taking turns, not touching; choreography between people is unmeasured.
+  if (input.multiCharacterInteraction === true) {
+    blockers.push({
+      code: "multi_character_interaction",
+      message:
+        "cảnh có tương tác trực tiếp giữa các nhân vật — chưa có mẫu nào đo dạng này",
     });
   }
 

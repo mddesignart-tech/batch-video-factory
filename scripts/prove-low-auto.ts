@@ -62,6 +62,9 @@ interface Case {
   perVideoCap: number | null;
   stage: "PLANNING" | "VIDEO";
   motionSource: "AI_VIDEO" | "LOCAL_MOTION";
+  /** The motion floor, QĐ-074. Undefined blocks, so a case must state it. */
+  motionScale: "SUBTLE" | "MODERATE" | "VIGOROUS" | undefined;
+  multiCharacterInteraction: boolean;
 }
 
 interface Outcome {
@@ -89,6 +92,8 @@ function run(base: ModelRegistry[], model: ModelRegistry, c: Case, providers: st
     hasKeyframe: c.hasKeyframe,
     cameraMode: c.cameraMode,
     repeatedSmallObjects: c.repeatedSmallObjects,
+    motionScale: c.motionScale,
+    multiCharacterInteraction: c.multiCharacterInteraction,
     promptGuarded: c.promptGuarded,
     contradictions: c.contradictions,
     providerBudgets: { [PROVIDER]: c.providerBudgetUsd, openai: 6, groq: null },
@@ -241,6 +246,10 @@ async function main() {
     perVideoCap: null,
     stage: "VIDEO",
     motionSource: derived.motion.source,
+    // From the shared derivation, like every other fact here. Hand-writing it
+    // is how the simulation and the pipeline come to disagree - QĐ-060.
+    motionScale: derived.facts.motionScale,
+    multiCharacterInteraction: derived.facts.multiCharacterInteraction === true,
   };
 
   // ---- route as production stands: pinned, candidate lifecycle ----------
@@ -297,6 +306,13 @@ async function main() {
     { id: "F2", name: "lifecycle = DISABLED", lock: "autoRouteBlock", expect: "vòng đời", c: { ...baseCase, lifecycle: "DISABLED" } },
     { id: "G", name: "ví nhà cung cấp không đủ ($0.10)", lock: "cổng LOW_AUTO", expect: "ví nhà cung cấp", c: { ...baseCase, providerBudgetUsd: 0.1 } },
     { id: "H", name: "hạn mức chung không đủ ($0.10)", lock: "cổng LOW_AUTO", expect: "hạn mức chung", c: { ...baseCase, globalBudget: 0.1 } },
+    // The motion floor, QĐ-074. Every scored sample of this model is a blink, a
+    // nod or half a step; a running shot has never been bought from it, and the
+    // router may not be the one who finds out what that costs.
+    { id: "I1", name: "chuyển động VIGOROUS (chạy/nhảy)", lock: "cổng LOW_AUTO", expect: "chuyển động", c: { ...baseCase, motionScale: "VIGOROUS" } },
+    { id: "I2", name: "chuyển động MODERATE (đi/ngồi xuống)", lock: "cổng LOW_AUTO", expect: "chuyển động", c: { ...baseCase, motionScale: "MODERATE" } },
+    { id: "I3", name: "không biết cỡ chuyển động", lock: "cổng LOW_AUTO", expect: "chưa xác định", c: { ...baseCase, motionScale: undefined } },
+    { id: "J", name: "hai nhân vật tương tác trực tiếp", lock: "cổng LOW_AUTO", expect: "tương tác", c: { ...baseCase, characterCount: 2, multiCharacterInteraction: true } },
   ];
 
   console.log("=== NEGATIVE CONTROL — mỗi lần đổi ĐÚNG MỘT yếu tố ===");

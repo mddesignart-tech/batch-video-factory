@@ -13,8 +13,8 @@ import {
 } from "@/services/character-master";
 import {
   buildMasterPrompt,
+  applySheetEdit,
   getCharacterSheet,
-  identityFingerprint,
 } from "@/services/character-service";
 import { spendStatus } from "@/services/spend-guard";
 import { discoverImageModels } from "@/services/model-discovery";
@@ -220,17 +220,15 @@ export async function saveCharacterSheet(
     const current = await prisma.character.findUnique({ where: { id: characterId } });
     if (!current) return { ok: false, message: "Không tìm thấy nhân vật." };
 
-    const before = identityFingerprint(current);
-    const after = identityFingerprint({ ...current, ...parsed.data });
-    const changed = before !== after;
+    // One rule, shared with the import screen's inline editor. Nothing here
+    // writes an image and nothing here touches a reference row.
+    const edit = applySheetEdit(current, parsed.data);
 
     await prisma.character.update({
       where: { id: characterId },
-      data: {
-        ...parsed.data,
-        version: changed ? current.version + 1 : current.version,
-      },
+      data: { ...edit.data, version: edit.version },
     });
+    const changed = edit.changed;
 
     revalidatePath("/characters");
     return {

@@ -11,6 +11,9 @@ Ngày 2026-09-19, **$0 chi thêm**: chấm clip `h3_max` của lần nhập stor
 định tuyến và nhân vật (QĐ-069, QĐ-070, QĐ-071). Đợt 2 cùng ngày: bỏ cái **khoá
 giả** trong prompt ảnh, cho nhập nhiều storyboard một lần với một video hỏng
 không kéo theo phần còn lại, và dựng trang `/import` đầy đủ — QĐ-072, QĐ-073.
+Đợt 3: **sàn chuyển động** cho h3_max, **đóng QĐ-065** sau khi audit tìm ra 4 lỗ,
+chặn nhân vật không thể vẽ nhất quán, và dấu vân tay cho lần nhập lại — QĐ-074
+đến QĐ-077.
 
 Lô `a690a290` "Cold feet": duyệt 2026-09-17 với trần $1,24, dừng giữa chừng ở
 cảnh 1, chạy tiếp và hoàn tất 2026-09-18 với **$1,047095** thật — 6 cảnh, 1080x1920.
@@ -80,7 +83,7 @@ Ví **tách riêng từng nhà cung cấp, không bao giờ cộng chung**:
 | Ví | Đã chi | Số gọi | Số dư |
 |---|---|---|---|
 | openai | $2,282283 | 62 | $6,00 — **khai báo**, API key không đọc được số dư |
-| runway | $4,490000 | 10 | **551 credit = $5,51** — LIVE, đọc 2026-09-18 |
+| runway | $4,490000 | 10 | **551 credit = $5,51** — LIVE, đọc lại 2026-09-19T07:27Z |
 | groq | $0,028854 | 24 | external, nhà cung cấp tự quản |
 
 Sổ runway khớp tuyệt đối với hãng: $4,49 = 449 credit, 1000 − 449 = **551**.
@@ -1469,5 +1472,127 @@ và **ví từng nhà cung cấp không cộng chung** (`null` hiện là *khôn
 Sửa hồ sơ nhân vật ngay tại chỗ: tải ảnh lên, đặt ảnh chính, sửa tên (kéo theo
 các cảnh), 11 trường Bible — **không ép tuổi/tông da**, và **không có đường nào
 tới Image API**.
+
+---
+
+---
+
+## Sàn chuyển động cho h3_max — 2026-09-19 (đợt 3), $0
+
+`runway/h3_max:768x1280` giữ nguyên `LOW_AUTO`, nhưng router nay **chỉ được tự
+chọn** nó cho đúng cỡ động tác đã có bằng chứng. Xem QĐ-074.
+
+```
+ĐƯỢC (SUBTLE)   chớp mắt · gật/lắc đầu · nghiêng đầu · biểu cảm · thở ·
+                đứng yên · đổi chân · nhìn · nửa bước ("one short pace")
+BỊ CHẶN         chạy · nhảy · đánh nhau · quay người mạnh · nhảy múa · ngã ·
+   (VIGOROUS)   ném · leo/đu · rượt đuổi · bơi/bay
+BỊ CHẶN         đi · đứng lên/ngồi xuống · xoay người · cúi/quỳ · với/cầm ·
+   (MODERATE)   đẩy/kéo/nâng · chỉ/vẫy · bước
+BỊ CHẶN         hai nhân vật CHẠM nhau: ôm, bắt tay, trao đồ, xô/kéo
+KHÔNG BIẾT      cũng CHẶN — điều kiện chưa ai đánh giá là chưa được thoả
+```
+
+Đối chiếu trên **29 cảnh thật**: SUBTLE 21 · MODERATE 3 · VIGOROUS 5. **Cả ba
+clip h3_max đã mua đều SUBTLE** — sàn này được hiệu chỉnh theo chính các mẫu đó,
+không mâu thuẫn với bất kỳ lần mua nào đã xảy ra. Cảnh MODERATE duy nhất đang
+trỏ h3_max là **ghim tay**, không bị ảnh hưởng (ghim luôn short-circuit).
+
+`npm run lowauto:prove` nay có **13 negative control** và vẫn `SAFE TO ENABLE`.
+
+---
+
+## QĐ-065 đã ĐÓNG — audit tìm ra 4 lỗ, đã vá — 2026-09-19 (đợt 3), $0
+
+Bộ dò mâu thuẫn prompt ảnh chạy trên mọi ảnh từ QĐ-065, và **chưa ai đọc kết quả
+của nó** trên văn phong storyboard viết tay. `npx tsx scripts/audit-image-guard.ts`
+đẩy 8 dạng mâu thuẫn có tên qua bộ dò — **4 dạng im lặng**. Xem QĐ-075.
+
+| Lỗ | Nguyên nhân | Đã vá |
+|---|---|---|
+| "does not smile" đọc thành "smile" | từ điển chỉ tra từ, không thấy phủ định | `NEGATED_SPAN_RE` cắt đoạn bị phủ định trước khi phân nhóm |
+| "serious" vô hình | không thuộc nhóm biểu cảm nào | thêm nhóm `SERIOUS`, tách khỏi `CALM` |
+| đứng + ngồi cùng lúc | không có luật nào cho tư thế | `posture_conflict`, **không tự sửa**, báo to |
+| đám đông + "nothing else in frame" | luật cũ chỉ soi đạo cụ | `crowd_vs_empty_frame`, giữ đám đông |
+| "red raincoat" vs bộ khoá | từ điển trang phục thiếu từ; luật cũ chỉ bắt đổi MÀU | `garment_vs_locked_identity` + mở rộng từ điển |
+
+```
+8/8 dạng bắt được
+29 cảnh thật: 11 cảnh có phát hiện · TẤT CẢ tự xử lý được · 0 cảnh treo
+3 luật mới: 0 lần kêu oan trên văn phong dự án này
+```
+
+---
+
+## Không vẽ được ở bất kỳ giá nào — 2026-09-19 (đợt 3), $0
+
+Nhân vật **không có ảnh tham chiếu VÀ không một chữ nào** mô tả ngoại hình là một
+cái tên và một chỗ trống. Vẽ họ là mua một người lạ; cảnh sau là một người lạ
+khác. **Phải trống cả hai vế** mới từ chối — hồ sơ viết đầy đủ mà chưa có ảnh
+chuẩn là hoàn toàn bình thường. Xem QĐ-076.
+
+- `generateSceneImage` ném lỗi **không thử lại**, nêu đích danh nhân vật.
+- Preflight đánh video đó `BLOCKED`, status mới `NEEDS_CHARACTER_REFERENCE` —
+  biết **trước khi duyệt tiền**.
+- **Tiền của video bị chặn ra khỏi số sắp duyệt**: một quyết định (`status`) chi
+  phối cả nhãn lẫn tiền.
+
+```
+trước: du toan chay duoc $0,520800  de xuat tran $0,50  (gồm cả video bị chặn)
+sau  : du toan chay duoc $0,246100  de xuat tran $0,28  ke ca bi chan $0,520800
+```
+
+### `failJob` thôi đốt lượt thử cho lỗi đã khai là không thử lại
+
+Nó đếm số lần thử và **chưa bao giờ đọc** cờ `retryable` mà cả `GenerationError`
+lẫn `ProviderError` đều mang. Một lỗi 401 hay một request sai định dạng đốt sạch
+ngân sách thử lại để chứng minh lại đúng một điều — miễn phí ở ca từ chối trước
+POST, **không** miễn phí ở nơi nhà cung cấp đã nhìn thấy request.
+
+### Ba video, ba trạng thái, một lần khởi động lại
+
+```
+A  COMPLETED  0 job mới · 0 hàng đổi · vẫn completed
+B  dở dang    chạy tiếp · ảnh cảnh 1 DÙNG LẠI (1 image job) · cảnh 2 mới mua
+C  BỊ CHẶN    hỏng riêng nó · 0 ProviderJob · KHÔNG dừng A/B
+retryCount tất cả 0 · ProviderJob không trùng khoá · reservation không trùng
+reserved = 0 (không treo đồng nào)
+sau khi thêm ảnh cho C: CHỈ C chạy tiếp, A/B đứng yên tuyệt đối
+```
+
+---
+
+## Nhập lại: một bản nhập MỚI, nói thẳng ra — 2026-09-19 (đợt 3), $0
+
+`Project.importFingerprint` — băm **nội dung** storyboard (cast + cảnh, đã sắp
+xếp), không băm thư mục hay thời điểm. Xem QĐ-077.
+
+- **Dùng chung**: `Character` và ảnh tham chiếu của họ. Không bao giờ nhân đôi.
+- **Không dùng chung**: `Project`. Lần nhập thứ hai là một việc thứ hai — thường
+  mang bản sửa, vốn là lý do người ta nhập lại.
+- Trang `/import` nói rõ: *"đây là một bản nhập MỚI … hệ thống KHÔNG giả vờ dùng
+  lại video cũ: đây là một video riêng, sẽ tốn tiền riêng."*
+- Cùng byte → cùng vân tay. File đã sửa → vân tay khác.
+- **Nhập không tạo `ProviderJob` hay `CostReservation` nào**; quyền chi cả hai lô
+  `DRAFT`, trần đã duyệt = 0. Có test khẳng định trực tiếp.
+
+---
+
+## Trang Nhân vật: đủ 11 trường, và nói rõ trường nào đang KHOÁ
+
+Form `/characters` nay có cả 5 cột QĐ-070 (`presentation`, `approximateAge`,
+`skinTone`, `distinguishingFeatures`, `negativeIdentity`). Mỗi ô mang một nhãn:
+
+```
+ĐANG KHOÁ    có giá trị -> prompt nêu đích danh, kèm "must not change"
+chưa khoá    để trống   -> prompt giao thuộc tính đó cho ẢNH tham chiếu
+mô tả thêm   không bao giờ nằm trong câu khoá (presentation, bảng màu, negativeIdentity)
+```
+
+Không ép tuổi/tông da. `applySheetEdit` là **một luật dùng chung** cho cả trang
+Nhân vật lẫn ô sửa nhanh trên trang Nhập — trước đó mỗi nơi một bản, tức là hai
+cơ hội để bất đồng về lúc nào tăng phiên bản.
+
+Max/Leo/Mia: **READY**, mỗi người 1 ảnh chuẩn đã duyệt.
 
 ---

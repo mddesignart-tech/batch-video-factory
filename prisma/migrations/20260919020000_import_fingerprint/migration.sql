@@ -1,0 +1,13 @@
+-- Tell a re-import apart from a corrected import.
+--
+-- A second import of the same storyboard creates a second project by design:
+-- re-importing is how an operator fixes a typo, and the corrected scenes have
+-- to land somewhere. What was missing is any way to see WHICH of the two it
+-- was. This records a hash of the storyboard content, so identical bytes
+-- produce an identical fingerprint and a corrected file does not.
+--
+-- Additive and nullable: every existing project keeps NULL, which is the
+-- truthful answer for work V1 wrote itself. See QĐ-077.
+--
+-- AddColumn
+ALTER TABLE "Project" ADD COLUMN "importFingerprint" TEXT;
