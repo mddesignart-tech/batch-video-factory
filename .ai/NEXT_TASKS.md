@@ -1,101 +1,72 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-19 (đợt 4 — preflight sản xuất)
+**Cập nhật:** 2026-09-19 (đợt 5 — preflight READY)
 
 ---
 
-## ⏸ CHỜ BẠN — lô 2 video đầu tiên, NOT READY vì 2 việc chỉ bạn làm được
+## ⏸ CHỜ BẠN DUYỆT TIỀN — lô 2 video đầu tiên đã **READY**
 
-`npm run preflight:production` đã chạy với **giá thật**
-(`AI_MOCK_MODE=false`, registry/ví/nhân vật production). Kết quả:
-
-```
-READY    All ears          5 cảnh · 5 LOCAL_MOTION · 0 clip · $0,247300
-BLOCKED  Bite the bullet   5 cảnh · 4 LOCAL_MOTION · 1 clip · $0,659300
-```
-
-### Việc 1 — XÁC NHẬN GIÁ `runway/h3_max:768x1280`
-
-Đây là lý do video 1 BLOCKED, và là **đúng ổ khoá đã làm lô `a690a290` chết giữa
-chừng** (QĐ-062). Danh sách xác nhận hiện có:
+Hai việc chỉ bạn làm được ở đợt 4 **bạn đã quyết**: xác nhận giá h3_max, và nâng
+trần mỗi video lên $0,70. Chạy lại preflight giá thật:
 
 ```
-groq/openai/gpt-oss-120b · openai/gpt-image-2:medium · openai/gpt-4o-mini-tts
-openai/sora-2:720x1280   · runway/gen4_turbo:720x1280 · runway/gen4.5:720x1280
-                                          ^ KHÔNG có h3_max
+npm run preflight:production -- --max-per-video 0.70 --max-batch 1.00
 ```
 
-Mở trang **Nhà cung cấp AI**, xem giá $0,08/giây, bấm xác nhận. Tôi **không tự
-cấp** — đó là chữ ký của bạn, không phải của tôi.
+```
+READY    Bite the bullet   5 cảnh · 4 LOCAL_MOTION · 1 clip h3_max · $0,659300
+READY    All ears          5 cảnh · 5 LOCAL_MOTION · 0 clip       · $0,247300
 
-Từ nay preflight **bắt được việc này trước khi duyệt tiền** thay vì để nó nổ
-giữa chừng (QĐ-078).
+TEXT $0 · IMAGE $0,480000 · VIDEO $0,400000 · VOICE $0,000200 · RENDER $0
+RETRY (dự phòng) $0,026400                          TỔNG  $0,906600
+trần đề xuất $1,000000 · dự án còn $1,198863 · sau lô còn ~$0,29
+```
 
-### Việc 2 — quyết một trong ba cách cho trần mỗi video
+**0 mục HỎNG.** `REAL MULTI-VIDEO PREFLIGHT: READY`.
 
-Video 1 giá thật **$0,659300**, vượt trần `$0,60/video` bạn đặt. Tôi **không tự
-cắt cảnh, không tự đổi provider, không tự hạ chất lượng**.
+### Việc duy nhất còn lại là **chữ ký của bạn**
 
-| Cách | Tổng lô | Trần/video cần | Đánh đổi |
-|---|---|---|---|
-| **A. Nâng trần/video lên $0,70** | **$0,906600** | $0,70 | Vượt mục tiêu $0,90 đúng **$0,0066**; vẫn dưới hard cap $1,00. Giữ nguyên nội dung. |
-| **B. Bỏ 1 cảnh LOCAL_MOTION của video 1** (5→4) | $0,857200 | $0,62 | Vẫn hơi vượt $0,60. Mất một nhịp. |
-| **C. Bỏ 2 cảnh LOCAL_MOTION của video 1** (5→3) | $0,807600 | $0,60 ✓ | Vừa trần, nhưng video 1 còn 3 cảnh — mỏng cho một Short. |
+Tôi **không tự duyệt**. Để chạy thật, mở trang `/import`, duyệt lô với
+**max authorization $1,000000**, rồi bấm chạy. Hoặc bảo tôi, tôi sẽ chạy.
 
-**Tôi đề xuất A.** Chi phí vượt mục tiêu là $0,0066 (0,7%), còn nội dung thì
-nguyên vẹn — và mục đích của lô này là chứng minh **cỗ máy nhiều video**, không
-phải tiết kiệm $0,0066.
+Trạng thái hiện tại: lô `PLANNED`, quyền chi `DRAFT`, trần đã duyệt `0`,
+`ProviderJob 0`, `CostReservation 0`, `CREATE_ATTEMPT_TOKEN null`.
 
-### Không có cách nào rẻ hơn mà không đánh đổi thật
+### Lô sẽ mua gì
 
-- `h3_max` **tối thiểu 5 giây** (`H3_MAX_MIN_SECONDS`), nên $0,40 là sàn cho một
-  clip. Không rút ngắn được.
-- `wan3:480x854` rẻ hơn ($0,05/s → $0,25) nhưng `PIN_ONLY`, `UNVERIFIED`, và
-  480x854 kéo lên 1080x1920 là **hạ chất lượng thật**. Bạn dặn không tự đổi.
-- Ảnh là khoản lớn nhất: **$0,432 / $0,9066 = 48%**. 9 ảnh mới vì đây là hai
-  video hoàn toàn mới, chưa có một tấm ảnh nào. Không có gì để REUSE.
+```
+2 video · 10 cảnh · 1 clip Video AI · 10 ảnh mới · 10 giọng mới
+ảnh   $0,480000   10 × $0,048  (48% tổng chi — hai video mới, không có gì REUSE)
+clip  $0,400000   runway/h3_max:768x1280, 5 giây, cảnh 3 của video 1
+giọng $0,000200
+retry $0,026400   dự phòng
+```
+
+Điều đáng nhìn: **không có một dòng REUSE nào**. Đây là hai video hoàn toàn mới.
+Lô sau, khi Max đã có ảnh, con số này sẽ khác hẳn — và đó là thứ lô này tồn tại
+để chứng minh.
 
 ---
 
-## Lô đề xuất, nếu bạn duyệt cách A
+## Việc còn lại sau khi lô chạy xong
 
-```
-2 video · 10 cảnh · 1 clip Video AI · 9 ảnh mới · 10 giọng mới
-TEXT    $0,000000     (kịch bản đã có sẵn — QĐ-079)
-IMAGE   $0,432000
-VIDEO   $0,400000     runway/h3_max:768x1280, 5 giây, 1 clip
-VOICE   $0,000200
-RENDER  $0,000000     FFmpeg tại máy
-RETRY   $0,027100     dự phòng ~3%
-------------------------------------
-TỔNG    $0,906600
-max authorization đề xuất  $1,000000
-max/video cần nâng lên      $0,700000
-```
-
-Ngân sách dự án còn **$1,198863** → sau lô này còn khoảng **$0,29**.
-
----
-
-## Blocker miễn phí — vẫn HẾT
-
-Đợt này đóng thêm ba thứ tìm ra khi chạy preflight thật:
-
-- [x] **Preflight không kiểm danh sách xác nhận** (QĐ-078) — nay chặn ở lúc lập
-      kế hoạch, và tiền của video bị chặn ra khỏi trần đề xuất.
-- [x] **Dự toán tính tiền viết kịch bản cho storyboard nhập sẵn** (QĐ-079) — và
-      khoản text ma còn ăn mất chỗ của cảnh cuối trong trần mỗi video.
-- [x] **Chưa có công cụ preflight giá thật** (QĐ-080) — `npm run
-      preflight:production`, DB riêng, 7 phép kiểm chứng minh không tiêu đồng nào.
-- [x] **Dự toán in ra con số bị cắt cụt** (QĐ-081) — video vượt trần từng in
-      "phần lọt vào trần" như thể đó là chi phí. Nay in cả hai.
-
-### Còn lại
-
-- [ ] **Chưa chạy thật lô nhiều video lần nào.** Chờ hai việc ở trên.
+- [ ] **Chạy lô nhiều video lần đầu.** Chờ đúng chữ ký ở trên.
+- [ ] **Sau khi chạy: chấm clip h3_max mẫu thứ 4** và ghi `VideoBenchmark`.
+- [ ] **Kiểm tra REUSE thật sự hoạt động** ở lô kế tiếp dùng lại Max.
 - [ ] **Sàn chuyển động chưa gặp cảnh MODERATE/VIGOROUS trong một lô THẬT.**
+      Lô này chỉ có 1 cảnh SUBTLE, nên sàn chưa bị thử lửa.
 - [ ] **`veo3.1_fast`, `wan3`, `h3_max:480x854` vẫn PIN_ONLY, chưa benchmark.**
       Cố ý: benchmark là tiền.
+
+### Blocker miễn phí — vẫn HẾT
+
+Đợt này đóng thêm hai thứ, cả hai đều $0:
+
+- [x] **Giá h3_max ghi là chép từ docs trong khi đã có 7 hoá đơn thật**
+      (QĐ-082) — nay `OBSERVED_CHARGE`, và `BENCHMARK_VERIFIED`/`LOW_AUTO`/`OK`
+      được đọc lại từ DB để chứng minh không trục nào bị đụng.
+- [x] **Mục tiêu mềm $0,90 sót lại từ đợt trước đánh trượt một lô đã được duyệt**
+      (QĐ-083) — `--target` nay chỉ kiểm khi bạn truyền vào. Hai trần cứng không đổi.
 
 ---
 ## 🆕 MODULE MỚI: Import Storyboard / Batch From Scenes V1 (2026-09-18)

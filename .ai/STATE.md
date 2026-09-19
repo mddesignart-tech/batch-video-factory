@@ -1655,3 +1655,46 @@ tuyến), `Character` + ảnh **nguyên id**, và `StylePreset`. Hạn mức th�
 | Trần/video $0,60 → $0,70 | video 1 giá thật $0,659300. Không tự cắt cảnh. |
 
 ---
+
+## Preflight sản xuất, đợt 5 — **READY**, chờ bạn duyệt tiền, $0 chi thêm
+
+Hai việc "chỉ người vận hành làm được" ở trên **đã được bạn quyết**. Kết quả chạy
+lại `npm run preflight:production -- --max-per-video 0.70 --max-batch 1.00`:
+
+```
+READY    Bite the bullet   5 cảnh · 4 LOCAL_MOTION · 1 clip h3_max · $0,659300
+READY    All ears          5 cảnh · 5 LOCAL_MOTION · 0 clip      · $0,247300
+
+TEXT $0 · IMAGE $0,480000 · VIDEO $0,400000 · VOICE $0,000200 · RENDER $0
+RETRY (dự phòng) $0,026400        TỔNG $0,906600
+trần đề xuất $1,000000 · dự án còn $1,198863 · runway 551 credit = $5,51 (LIVE)
+```
+
+**0 mục HỎNG.** Không video nào BLOCKED, không thiếu xác nhận, không thiếu ảnh
+chuẩn, không trùng reservation. Sau lô này dự án còn khoảng **$0,29**.
+
+### Giá h3_max nay là giá **quan sát**, không phải giá chép lại
+
+`pricingSource` = `OBSERVED_CHARGE`, dựa trên **7 task Runway đã trả tiền**
+(5 giây = 40 credit, 7/7 không lệch). `verification` vẫn `BENCHMARK_VERIFIED`,
+`lifecycle` vẫn `LOW_AUTO`, `reliability` vẫn `OK` — đọc lại từ DB để chứng minh.
+Riêng tỷ lệ $0,01/credit vẫn là `MANUAL_DOCS` vì Runway không có endpoint báo giá.
+`runway/h3_max:768x1280` đã vào `spend.confirmedProviders`. Xem QĐ-082.
+
+### Con số $0,4800 tiền ảnh là **bằng chứng** lỗi cắt cụt đã hết
+
+Đợt 4 báo IMAGE `$0,432000` — **9 ảnh**, vì cảnh 5 của *Bite the bullet* bị trần
+nuốt mất. Nay `$0,480000` — **10 ảnh**, đúng số cảnh. Tổng vẫn `$0,906600` vì
+đợt 4 đã cộng đúng phần chưa cắt vào "tổng nếu cả hai chạy"; thứ từng sai là con
+số **hiển thị cho từng video**, và nay nó khớp với việc sẽ thật sự chạy.
+
+Chạy ngược để chứng minh trần vẫn siết: `--max-batch 0,50` → NOT READY, và dự
+toán vẫn báo **$0,906600**, không tự co xuống cho vừa. `--max-per-video 0,50` →
+video 1 **BLOCKED** vì router từ chối cảnh 3 chứ **không** lặng lẽ đổi sang model
+rẻ hơn. Xem QĐ-081, QĐ-083.
+
+**Chưa chi một đồng nào:** `ProviderJob = 0`, `CostReservation = 0`,
+`CREATE_ATTEMPT_TOKEN = null`, quyền chi `DRAFT`, lô `PLANNED`. Ledger production
+đứng yên **$6,801137 / $8,00**.
+
+---

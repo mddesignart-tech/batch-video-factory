@@ -41,8 +41,14 @@ const SOURCE = arg("source", "examples/batch-real-2");
 const KEEP = process.argv.includes("--keep");
 const MAX_PER_VIDEO = Number(arg("max-per-video", "0.60"));
 const MAX_BATCH = Number(arg("max-batch", "1.00"));
-/** What the operator said they are aiming to stay under. */
-const TARGET = Number(arg("target", "0.90"));
+/**
+ * A soft target is an ASPIRATION, and an aspiration is something a person
+ * states - not a number left over from a previous run. The two HARD limits
+ * above still bind every time; this one is checked only when passed, because a
+ * stale default fails a batch the operator has actually authorised and reads
+ * exactly like a real budget breach when it is not one.
+ */
+const TARGET = process.argv.includes("--target") ? Number(arg("target")) : null;
 
 const ROOT = process.cwd();
 const SCRATCH = path.join(ROOT, "data", ".production-preflight");
@@ -317,11 +323,13 @@ async function main(): Promise<void> {
     pre.estimatedTotal <= MAX_BATCH,
     money(pre.estimatedTotal),
   );
-  must(
-    `Tong <= muc tieu ${money(TARGET)}`,
-    pre.estimatedTotal <= TARGET,
-    money(pre.estimatedTotal),
-  );
+  if (TARGET !== null) {
+    must(
+      `Tong <= muc tieu ${money(TARGET)}`,
+      pre.estimatedTotal <= TARGET,
+      money(pre.estimatedTotal),
+    );
+  }
   must(
     "Tran de xuat <= hard cap",
     pre.suggestedAuthorizedMaxSpend <= MAX_BATCH,

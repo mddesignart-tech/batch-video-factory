@@ -2576,3 +2576,64 @@ vẫn mang khoản **text ma** mà QĐ-079 vừa bỏ đi. Bỏ khoản đó xon
 chặn vì ngân sách đóng góp gần **$0** — vì có gì được định tuyến đâu. Bài test
 không sai về ý; nó khẳng định một bất biến mà chỗ dựa là một con số lẽ ra không
 nên tồn tại. Nay nó khẳng định `uncappedCost`, tức là thứ nó vẫn luôn muốn nói.
+
+---
+
+## QĐ-082 — Một con số lấy từ hoá đơn khác một con số chép từ trang giá
+
+`runway/h3_max:768x1280` vẫn ghi **$0,08/giây** như cũ. Thứ thay đổi không phải
+con số, mà là **lời khai về nguồn gốc** của nó: `pricingSource` nói `MANUAL_DOCS`
+— ai đó gõ lại từ trang giá Runway — trong khi dự án đã trả tiền **7 task thật**
+và cả bảy đều nói đúng một điều.
+
+```
+b6fddf11 · d45c9a40 · c744478e · 3a314183 · d4f779ed · ced4ec15 · dd0a31dd
+mỗi task 5 giây = 40 credit, 7/7 không lệch một lần nào, 15→19/09
+```
+
+Nên `pricingSource` thành `OBSERVED_CHARGE`, kèm `pricingCheckedAt`,
+`lastVerifiedAt` và `sourceNote` trỏ thẳng vào bảng `VideoBenchmark`. Trường này
+không bị enum ràng buộc, nên thêm một giá trị **trung thực hơn** không phá gì.
+
+### Điều buộc phải nói thật
+
+Thứ **quan sát được** là khoản trừ **credit**. Đồng đô la thì dựa vào giá công bố
+$0,01/credit — Runway **không có endpoint nào báo con số đó**, nên riêng tỷ lệ
+quy đổi ấy vẫn là `MANUAL_DOCS`, và `sourceNote` ghi rõ như vậy thay vì để người
+đọc tưởng đô la là thứ đã nhìn thấy trên hoá đơn.
+
+### Ba trục không được đụng tới
+
+`verification`, `lifecycle`, `reliability` trả lời ba câu hỏi khác nhau, và
+**không câu nào là "cái này giá bao nhiêu"**. Script đọc trước, ghi, rồi đọc lại
+và khẳng định cả ba đứng yên — `BENCHMARK_VERIFIED` / `LOW_AUTO` / `OK` — thay vì
+hứa suông. Nếu giá quan sát **lệch** với giá đang lưu, script **dừng**: một con số
+lệch là một câu hỏi, không phải một lỗi gõ để tự sửa.
+
+### Nguồn gốc và chữ ký là hai việc
+
+`pricingSource` nói giá **ở đâu ra**. `spend.confirmedProviders` nói **người**
+đã đồng ý trả. Gộp chúng lại nghĩa là cải thiện một trích dẫn thì lặng lẽ cấp
+quyền tiêu tiền — đúng thứ thiết kế hai ổ khoá sinh ra để chặn. Nên script ghi
+hai chỗ, bằng hai lệnh, và chỉ chạy lệnh thứ hai vì **bạn đã nói ra**.
+
+Đây là ổ khoá đã làm lô `a690a290` chết giữa chừng (QĐ-062), và là thứ QĐ-078
+kéo lên tận lúc lập kế hoạch. Nay nó mở — hợp lệ.
+
+---
+
+## QĐ-083 — Mục tiêu mềm là thứ người ta nói ra, không phải số sót lại từ lần trước
+
+Preflight có ba ngưỡng: trần mỗi video, trần cả lô, và một **mục tiêu** $0,90 từ
+đợt trước. Đợt này bạn đặt lại hai trần ($0,70 / $1,00) và **không nhắc tới mục
+tiêu** — nhưng `--target` vẫn mặc định $0,90, nên lô $0,906600 mà bạn vừa cho
+phép bị báo HỎNG vì lệch $0,0066.
+
+Một lô **được duyệt** mà bị đánh trượt trông y hệt một lần vượt ngân sách thật,
+và đó là kiểu cảnh báo dạy người ta bỏ qua cảnh báo. Nay `--target` **chỉ được
+kiểm khi bạn truyền vào**; không truyền thì không có mục tiêu nào để trượt.
+
+Hai trần cứng **không** đổi: vẫn kiểm mọi lần, và đã chứng minh bằng một lần
+chạy ngược — `--max-batch 0,50` cho ra NOT READY, và quan trọng hơn, dự toán
+vẫn báo **$0,906600** chứ không tự co xuống cho vừa $0,50. Đúng thứ QĐ-081 sửa.
+
