@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import {
   Alert,
@@ -17,7 +16,6 @@ import {
   Td,
   Th,
 } from "@/components/ui";
-import { formatUSD } from "@/lib/utils";
 import {
   createImportBatch,
   validateStoryboardSource,
@@ -25,6 +23,9 @@ import {
 } from "@/app/actions/storyboard-import";
 import type { ImportPreflight } from "@/services/import-preflight";
 import { SceneEditor } from "./scene-editor";
+import { CharacterEditor } from "./character-editor";
+import { PreflightPanel } from "./preflight-panel";
+import { reestimateImportBatch } from "@/app/actions/storyboard-import";
 
 /**
  * Three buttons, in the order the money actually moves.
@@ -40,6 +41,9 @@ export function ImportForm() {
   const [name, setName] = useState("");
   const [perVideo, setPerVideo] = useState("1.50");
   const [perBatch, setPerBatch] = useState("5.00");
+  // Off by default: importing less than the operator handed over is a choice
+  // they make, not a convenience the tool grants itself. QĐ-073.
+  const [allowPartial, setAllowPartial] = useState(false);
   const [busy, setBusy] = useState<"validate" | "create" | null>(null);
   const [view, setView] = useState<ImportValidationView | null>(null);
   const [preflight, setPreflight] = useState<ImportPreflight | null>(null);
@@ -77,6 +81,7 @@ export function ImportForm() {
         name,
         maxCostPerVideo: Number(perVideo),
         maxCostForBatch: Number(perBatch),
+        allowPartial,
       });
       setMessage({ tone: result.ok ? "ok" : "danger", text: result.message });
       if (result.ok) {
@@ -134,6 +139,14 @@ export function ImportForm() {
               />
             </Field>
           </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={allowPartial}
+              onChange={(e) => setAllowPartial(e.target.checked)}
+            />
+            Nhập phần chạy được — bỏ qua video còn lỗi (sẽ nêu tên từng video bị bỏ)
+          </label>
           <div className="flex flex-wrap gap-3">
             <Button onClick={onValidate} disabled={busy !== null || source.trim().length === 0}>
               {busy === "validate" ? <Loader2 className="size-4 animate-spin" /> : null}
@@ -142,7 +155,7 @@ export function ImportForm() {
             <Button
               variant="secondary"
               onClick={onCreate}
-              disabled={busy !== null || view === null || !view.ok}
+              disabled={busy !== null || view === null || (!view.ok && !allowPartial)}
             >
               {busy === "create" ? <Loader2 className="size-4 animate-spin" /> : null}
               DỰ TOÁN &amp; TẠO LÔ
@@ -257,88 +270,22 @@ export function ImportForm() {
         </Card>
       ) : null}
 
+      {batchId ? (
+        <CharacterEditor
+          batchId={batchId}
+          onChanged={async () => {
+            // Editing a character invalidates the frozen estimate on purpose,
+            // so the panel below is re-priced rather than left describing the
+            // batch as it was a moment ago. Free: no provider is contacted.
+            const again = await reestimateImportBatch(batchId);
+            if (again.preflight) setPreflight(again.preflight);
+          }}
+        />
+      ) : null}
+
       {batchId ? <SceneEditor batchId={batchId} onEstimated={setPreflight} /> : null}
 
-      {preflight ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Dự toán lô nhập</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Video</Th>
-                  <Th>Cảnh</Th>
-                  <Th>LOCAL</Th>
-                  <Th>AI</Th>
-                  <Th>Ảnh có sẵn</Th>
-                  <Th>TEXT</Th>
-                  <Th>IMAGE</Th>
-                  <Th>VIDEO</Th>
-                  <Th>VOICE</Th>
-                  <Th>Tổng</Th>
-                  <Th>Trạng thái</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {preflight.videos.map((v) => (
-                  <tr key={v.projectId}>
-                    <Td>{v.title}</Td>
-                    <Td>{v.sceneCount}</Td>
-                    <Td>{v.localMotionCount}</Td>
-                    <Td>{v.videoAiCount}</Td>
-                    <Td>
-                      {v.suppliedImages}/{v.sceneCount}
-                    </Td>
-                    <Td>{formatUSD(v.breakdown.text)}</Td>
-                    <Td>{formatUSD(v.breakdown.image)}</Td>
-                    <Td>{formatUSD(v.breakdown.video)}</Td>
-                    <Td>{formatUSD(v.breakdown.voice)}</Td>
-                    <Td className="font-medium">{formatUSD(v.estimatedCost)}</Td>
-                    <Td>
-                      <Badge tone={v.status === "OK" ? "ok" : "warn"}>{v.status}</Badge>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-
-            <div className="grid gap-2 text-sm md:grid-cols-2">
-              <div>
-                Tổng dự toán: <strong>{formatUSD(preflight.estimatedTotal)}</strong> (cơ sở giá{" "}
-                {preflight.costBasis})
-              </div>
-              <div>
-                Kể cả video bị chặn:{" "}
-                <strong>{formatUSD(preflight.estimatedTotalIncludingBlocked)}</strong>
-              </div>
-              <div>
-                Chạy được / bị chặn: {preflight.runnableCount} / {preflight.blockedCount}
-              </div>
-              <div>Trần cả lô: {formatUSD(preflight.maxCostForBatch)}</div>
-              <div>Trần mỗi video: {formatUSD(preflight.maxCostPerVideo)}</div>
-              <div>Đề xuất duyệt: {formatUSD(preflight.suggestedAuthorizedMaxSpend)}</div>
-            </div>
-
-            {preflight.warnings.map((w) => (
-              <Alert key={w} tone="warn">
-                {w}
-              </Alert>
-            ))}
-
-            {batchId ? (
-              <Alert tone="info">
-                Lô đã tạo nhưng <strong>chưa được cấp phép chi</strong>.{" "}
-                <Link className="underline" href={`/batches/${batchId}`}>
-                  Mở trang lô để xem lại và DUYỆT
-                </Link>
-                .
-              </Alert>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
+      {preflight ? <PreflightPanel preflight={preflight} batchId={batchId} /> : null}
     </div>
   );
 }

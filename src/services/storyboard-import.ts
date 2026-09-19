@@ -6,7 +6,6 @@ import { DIRS, projectSubdir, toRelative, uuidFilename } from "@/lib/paths";
 import { readZipFile, ZipError, type ZipEntry } from "@/lib/zip";
 import {
   hasAllowedImageExtension,
-  hasErrors,
   isSafeRelativePath,
   parseStoryboardFile,
   type ImportIssue,
@@ -14,10 +13,15 @@ import {
   type StoryboardScene,
   type StoryboardVideo,
 } from "@/domain/storyboard";
+import { sha256Bytes } from "@/lib/crypto";
+import { toAbsolute } from "@/lib/paths";
 import { classifyScene, assignSpendPriority } from "./complexity";
 import {
   characterReadiness,
+  findCharacterByName,
+  hasAnyDescriptiveField,
   missingBibleFields,
+  unlockedAttributes,
   type CharacterReadiness,
 } from "./character-service";
 import type { Complexity } from "@/domain/enums";
@@ -329,10 +333,16 @@ export interface ResolvedCharacter extends StoryboardCharacter {
    * the folder being imported. See QĐ-070.
    */
   readiness: CharacterReadiness;
-  /** Required Bible fields still unstated, as labels. Empty when complete. */
+  /** Core descriptive fields still unstated, as labels. Advice, not a blocker. */
   missingFields: string[];
+  /** Lockable attributes with no value, so the prompt will not claim to lock them. */
+  unlockedAttributes: string[];
   /** True when this name already existed in the character table. */
   existing: boolean;
+  /** The existing row's id, so the UI can edit it without a second lookup. */
+  characterRowId: string | null;
+  /** Reference images this character will have once the import lands. */
+  referenceCount: number;
 }
 
 export interface ResolvedVideo {
@@ -397,44 +407,56 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
       // A name is not an identity. `Character` rows are matched by name and
       // reused, so this reports the row that will actually be used - including
       // one a previous import created with nothing but a name in it.
-      const existing = await prisma.character.findUnique({
-        where: { name: character.name },
-      });
-      const approvedPrimary = existing
-        ? await prisma.characterReference.findFirst({
-            where: { characterId: existing.id, isPrimary: true, approved: true },
-          })
-        : null;
+      //
+      // Matched case-insensitively, because "max" and "Max" are one person and
+      // a second row would give them two different faces. SQLite compares
+      // strings with a BINARY collation, so `findUnique({ name })` does not do
+      // this on its own.
+      const existing = await findCharacterByName(character.name);
+      if (existing && existing.name !== character.name) {
+        issues.push(
+          issue(
+            "warning",
+            "character_name_case",
+            `Storyboard viết "${character.name}", bảng Nhân vật đang có ` +
+              `"${existing.name}". Dùng lại nhân vật đã có chứ KHÔNG tạo người thứ hai.`,
+            { videoId: video.videoId, sourceFile: video.sourceFile },
+          ),
+        );
+      }
+      const references = existing
+        ? await prisma.characterReference.count({ where: { characterId: existing.id } })
+        : 0;
+
       // For a character that does not exist yet, the row that WILL exist is the
       // one built from the storyboard's Bible below - so that is what gets
       // checked. Judging a new character against an empty row would report
       // every field missing on a storyboard that in fact stated them all.
-      const missingFields = missingBibleFields(
-        existing ?? {
-          id: "",
-          name: character.name,
-          version: 1,
-          visualPrompt: "",
-          negativePrompt: "",
-          seed: null,
-          presentation: character.bible.presentation,
-          approximateAge: character.bible.approximateAge,
-          skinTone: character.bible.skinTone,
-          hair: character.bible.hair,
-          facialFeatures: character.bible.face,
-          distinguishingFeatures: character.bible.distinguishingFeatures,
-          outfit: character.bible.outfit,
-          bodyProportions: character.bible.bodyProportions,
-          accessories: character.bible.accessories,
-          colorPalette: character.bible.colorPalette,
-          negativeIdentity: character.bible.negativeIdentity,
-        },
-      );
+      const row = existing ?? {
+        id: "",
+        name: character.name,
+        version: 1,
+        visualPrompt: "",
+        negativePrompt: "",
+        seed: null,
+        presentation: character.bible.presentation,
+        approximateAge: character.bible.approximateAge,
+        skinTone: character.bible.skinTone,
+        hair: character.bible.hair,
+        facialFeatures: character.bible.face,
+        distinguishingFeatures: character.bible.distinguishingFeatures,
+        outfit: character.bible.outfit,
+        bodyProportions: character.bible.bodyProportions,
+        accessories: character.bible.accessories,
+        colorPalette: character.bible.colorPalette,
+        negativeIdentity: character.bible.negativeIdentity,
+      };
+      const missingFields = missingBibleFields(row);
       const readiness = characterReadiness({
         // The storyboard's own image counts: after `materialiseImport` it
-        // becomes the approved primary for a character that had none.
-        hasApprovedReference: approvedPrimary !== null || asset !== null,
-        missingFields,
+        // becomes the reference for a character that had none.
+        hasReference: references > 0 || asset !== null,
+        hasAnyDescriptiveField: hasAnyDescriptiveField(row),
       });
 
       if (readiness === "NEEDS_CHARACTER_REFERENCE") {
@@ -442,10 +464,11 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
           issue(
             "warning",
             "character_needs_reference",
-            `Nhân vật "${character.name}" chưa có ảnh tham chiếu đã duyệt và ` +
-              `storyboard cũng không kèm ảnh. Hệ thống KHÔNG tự tạo ảnh nhân vật: ` +
-              `hãy tải ảnh lên ở trang Nhân vật, hoặc thêm character_reference_image ` +
-              `vào storyboard. Thiếu ảnh thì mỗi cảnh sẽ vẽ một người khác nhau.`,
+            `Nhân vật "${character.name}" chưa có ảnh tham chiếu và storyboard cũng ` +
+              `không kèm ảnh. Hệ thống KHÔNG tự tạo ảnh nhân vật: hãy tải ảnh lên ở ` +
+              `trang Nhân vật (hoặc ngay trên trang Nhập), hoặc thêm ` +
+              `character_reference_image vào storyboard. Thiếu ảnh thì mỗi cảnh sẽ vẽ ` +
+              `một người khác nhau.`,
             { videoId: video.videoId, sourceFile: video.sourceFile },
           ),
         );
@@ -454,15 +477,37 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
           issue(
             "warning",
             "character_identity_thin",
-            `Nhân vật "${character.name}" có ảnh tham chiếu nhưng hồ sơ nhận dạng ` +
-              `còn thiếu: ${missingFields.join(", ")}. Cảnh nào không gửi kèm được ` +
-              `ảnh sẽ chỉ còn mấy chữ này để giữ cho nhân vật không đổi.`,
+            `Nhân vật "${character.name}" có ảnh tham chiếu nhưng KHÔNG có một chữ nào ` +
+              `mô tả ngoại hình. Cảnh nào không gửi kèm được ảnh sẽ không còn gì để ` +
+              `bám. Điền ít nhất một trong: tóc, khuôn mặt, trang phục, dáng người.`,
+            { videoId: video.videoId, sourceFile: video.sourceFile },
+          ),
+        );
+      } else if (missingFields.length > 0) {
+        // READY, and still worth saying. Never an error and never a blocker:
+        // "chưa đầy đủ" is advice about robustness, not a refusal to proceed.
+        issues.push(
+          issue(
+            "warning",
+            "character_identity_incomplete",
+            `Nhân vật "${character.name}" chạy được, nhưng hồ sơ nhận dạng chưa đầy ` +
+              `đủ — chưa khai: ${missingFields.join(", ")}. Ảnh tham chiếu đang gánh ` +
+              `phần còn thiếu.`,
             { videoId: video.videoId, sourceFile: video.sourceFile },
           ),
         );
       }
 
-      cast.push({ ...character, asset, readiness, missingFields, existing: existing !== null });
+      cast.push({
+        ...character,
+        asset,
+        readiness,
+        missingFields,
+        unlockedAttributes: unlockedAttributes(row),
+        existing: existing !== null,
+        characterRowId: existing?.id ?? null,
+        referenceCount: references + (asset !== null && references === 0 ? 1 : 0),
+      });
     }
     // A scene may name a character the video never declared at the top. That is
     // an IMPLICIT declaration, not an error: `collectCharacters` has already
@@ -595,12 +640,28 @@ export interface MaterialiseOptions {
   maxCostPerVideo: number;
   /** Ceiling for the whole import. Written onto the batch, approved later. */
   maxCostForBatch: number;
+  /**
+   * Import the videos that are clean and skip the ones that are not.
+   *
+   * Off by default, so nothing starts importing a subset of what it was given
+   * without a caller having asked for that.
+   */
+  allowPartial?: boolean;
 }
 
 export interface MaterialiseResult {
   batchId: string;
   projects: { projectId: string; videoId: string; title: string; scenes: number }[];
   copiedImages: number;
+  /**
+   * Character reference images that were already held, byte for byte.
+   *
+   * Counted separately from `copiedImages` so re-importing the same storyboard
+   * shows as reuse rather than silently growing the reference list. QĐ-072.
+   */
+  reusedCharacterImages: number;
+  /** Videos left out because they still had errors, each with its reasons. */
+  skipped: { videoId: string; title: string; reasons: string[] }[];
 }
 
 /**
@@ -615,19 +676,62 @@ export async function materialiseImport(
   validated: ValidationResult,
   opts: MaterialiseOptions,
 ): Promise<MaterialiseResult> {
-  if (hasErrors(validated.issues)) {
+  // ONE BAD VIDEO IS ONE BAD VIDEO, not a bad batch.
+  //
+  // This used to refuse the whole import if any video had an error, which is
+  // the wrong shape for the thing being imported: a folder of three storyboards
+  // is three pieces of work that happen to be approved together, and a typo in
+  // the third is no reason to throw away the first two. The operator then has
+  // to fix the typo and re-import everything, and re-importing is exactly when
+  // duplicates get made.
+  //
+  // Skipped, never silent: every skipped video is named, with its own errors,
+  // in `skipped`. `allowPartial` is off by default so no existing caller starts
+  // importing less than it asked for without saying so. See QĐ-073.
+  const errorsByVideo = new Map<string, ImportIssue[]>();
+  for (const issue of validated.issues) {
+    if (issue.level !== "error") continue;
+    const key = issue.videoId ?? "";
+    errorsByVideo.set(key, [...(errorsByVideo.get(key) ?? []), issue]);
+  }
+  // An error with no video attached belongs to the SOURCE - an unreadable ZIP
+  // entry, a missing folder - and there is no subset of the import that
+  // survives it.
+  const sourceErrors = errorsByVideo.get("") ?? [];
+  if (sourceErrors.length > 0) {
     throw new Error(
-      "Không thể tạo lô: bản nhập còn lỗi. Hãy sửa hết lỗi rồi nhập lại.",
+      `Không thể tạo lô: nguồn nhập có lỗi không thuộc về video nào — ` +
+        `${sourceErrors[0]!.message}`,
     );
   }
-  if (validated.videos.length === 0) {
+
+  const skipped: MaterialiseResult["skipped"] = [];
+  const importable = validated.videos.filter((v) => {
+    const errors = errorsByVideo.get(v.videoId) ?? [];
+    if (errors.length === 0) return true;
+    skipped.push({
+      videoId: v.videoId,
+      title: v.title,
+      reasons: errors.map((e) => e.message),
+    });
+    return false;
+  });
+
+  if (skipped.length > 0 && !opts.allowPartial) {
+    throw new Error(
+      `Không thể tạo lô: ${skipped.length} video còn lỗi ` +
+        `(${skipped.map((v) => v.title).join(", ")}). Hãy sửa hết lỗi rồi nhập lại, ` +
+        `hoặc bật "nhập phần chạy được" để bỏ qua các video hỏng.`,
+    );
+  }
+  if (importable.length === 0) {
     throw new Error("Không có video nào để nhập.");
   }
 
   const batch = await prisma.batch.create({
     data: {
       name: opts.batchName,
-      amount: validated.videos.length,
+      amount: importable.length,
       qualityMode: opts.qualityMode ?? "BALANCED",
       stylePresetId: opts.stylePresetId ?? null,
       targetDuration: opts.targetDuration ?? 25,
@@ -641,8 +745,9 @@ export async function materialiseImport(
 
   const projects: MaterialiseResult["projects"] = [];
   let copiedImages = 0;
+  let reusedCharacterImages = 0;
 
-  for (const video of validated.videos) {
+  for (const video of importable) {
     // An imported video is not an idiom, but `Project.idiomId` is required and
     // the library is what gives a project a title everywhere else in the app.
     // One row per imported video, keyed by a slug that makes re-importing the
@@ -719,7 +824,9 @@ export async function materialiseImport(
     // that is regenerated afterwards.
     const castByStoryboardId = new Map<string, string>();
     for (const character of video.characters) {
-      const existing = await prisma.character.findUnique({ where: { name: character.name } });
+      // Case-insensitive, so importing "max" twice does not end up as two
+      // people with two faces. QĐ-072.
+      const existing = await findCharacterByName(character.name);
       const row =
         existing ??
         (await prisma.character.create({
@@ -754,28 +861,52 @@ export async function materialiseImport(
       castByStoryboardId.set(character.characterId, row.name);
 
       if (character.asset) {
-        const hasPrimary = await prisma.characterReference.findFirst({
-          where: { characterId: row.id, isPrimary: true },
+        const bytes = character.asset.read();
+        // THE SAME PICTURE IS THE SAME REFERENCE.
+        //
+        // Re-importing a storyboard used to copy its reference image again and
+        // write a second row pointing at a byte-identical file. Harmless-looking
+        // and not: the reference list grows on every import, the provider's
+        // reference cap starts spending slots on duplicates of one picture, and
+        // "which image is this character?" stops having one answer. Keyed on the
+        // CONTENT, because the filename inside an archive is not an identity.
+        // See QĐ-072.
+        const digest = sha256Bytes(bytes);
+        const existingRefs = await prisma.characterReference.findMany({
+          where: { characterId: row.id },
         });
-        const destination = path.join(
-          DIRS.characters,
-          `${row.id}-${uuidFilename(path.extname(character.asset.label) || ".png")}`,
-        );
-        fs.mkdirSync(path.dirname(destination), { recursive: true });
-        fs.writeFileSync(destination, character.asset.read());
-        await prisma.characterReference.create({
-          data: {
-            characterId: row.id,
-            filePath: toRelative(destination),
-            source: "upload",
-            // Only promoted to the master when the character has none. An
-            // import must not demote a reference a human already approved.
-            isPrimary: !hasPrimary,
-            approved: !hasPrimary,
-            notes: `Ảnh tham chiếu nhập từ storyboard ${video.videoId}`,
-          },
+        const duplicate = existingRefs.find((r) => {
+          try {
+            return sha256Bytes(fs.readFileSync(toAbsolute(r.filePath))) === digest;
+          } catch {
+            // A row whose file is gone cannot be the duplicate we would reuse.
+            return false;
+          }
         });
-        copiedImages += 1;
+
+        if (duplicate) {
+          reusedCharacterImages += 1;
+        } else {
+          const destination = path.join(
+            DIRS.characters,
+            `${row.id}-${uuidFilename(path.extname(character.asset.label) || ".png")}`,
+          );
+          fs.mkdirSync(path.dirname(destination), { recursive: true });
+          fs.writeFileSync(destination, bytes);
+          await prisma.characterReference.create({
+            data: {
+              characterId: row.id,
+              filePath: toRelative(destination),
+              source: "upload",
+              // Only promoted to the master when the character has none. An
+              // import must not demote a reference a human already approved.
+              isPrimary: existingRefs.length === 0,
+              approved: existingRefs.length === 0,
+              notes: `Ảnh tham chiếu nhập từ storyboard ${video.videoId}`,
+            },
+          });
+          copiedImages += 1;
+        }
       }
     }
     const castNames = [...new Set(castByStoryboardId.values())];
@@ -890,8 +1021,9 @@ export async function materialiseImport(
     event: "import.materialised",
     message:
       `Đã nhập ${projects.length} video (${projects.reduce((n, p) => n + p.scenes, 0)} cảnh, ` +
-      `${copiedImages} ảnh có sẵn) vào lô ${batch.id}. Chưa cấp phép chi gì.`,
+      `${copiedImages} ảnh có sẵn, ${reusedCharacterImages} ảnh nhân vật dùng lại) ` +
+      `vào lô ${batch.id}. Chưa cấp phép chi gì.`,
   });
 
-  return { batchId: batch.id, projects, copiedImages };
+  return { batchId: batch.id, projects, copiedImages, reusedCharacterImages, skipped };
 }

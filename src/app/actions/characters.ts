@@ -14,6 +14,7 @@ import {
 import {
   buildMasterPrompt,
   getCharacterSheet,
+  identityFingerprint,
 } from "@/services/character-service";
 import { spendStatus } from "@/services/spend-guard";
 import { discoverImageModels } from "@/services/model-discovery";
@@ -184,14 +185,27 @@ const SheetInput = z.object({
   bodyProportions: z.string().default(""),
   accessories: z.string().default(""),
   colorPalette: z.string().default(""),
+  // The Character Bible fields. NONE of them is required - in particular not
+  // age or skin tone, which are often genuinely unknown and which an operator
+  // may leave blank or write "unknown" in. QĐ-072.
+  presentation: z.string().default(""),
+  approximateAge: z.string().default(""),
+  skinTone: z.string().default(""),
+  distinguishingFeatures: z.string().default(""),
+  negativeIdentity: z.string().default(""),
 });
 
 /**
  * Save the detailed appearance fields.
  *
- * Bumps `version` whenever any of them actually changed, so images generated
+ * Bumps `version` when the IDENTITY FINGERPRINT moves, so images generated
  * against the old description stay distinguishable from current ones - and so
  * the idempotency key changes, allowing a legitimate regeneration.
+ *
+ * The fingerprint rather than a field-by-field diff, because the question being
+ * asked is "does this character look different now?" and only the appearance
+ * fields answer it. A version bumped for an edit that changed nothing visible
+ * is how an approved reference image starts reading as stale. QĐ-072.
  */
 export async function saveCharacterSheet(
   characterId: string,
@@ -206,9 +220,9 @@ export async function saveCharacterSheet(
     const current = await prisma.character.findUnique({ where: { id: characterId } });
     if (!current) return { ok: false, message: "Không tìm thấy nhân vật." };
 
-    const changed = (Object.keys(parsed.data) as (keyof typeof parsed.data)[]).some(
-      (key) => (current[key] ?? "") !== parsed.data[key],
-    );
+    const before = identityFingerprint(current);
+    const after = identityFingerprint({ ...current, ...parsed.data });
+    const changed = before !== after;
 
     await prisma.character.update({
       where: { id: characterId },

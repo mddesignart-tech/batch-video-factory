@@ -5,10 +5,15 @@ import {
   buildCanonicalDescription,
   buildNegativePrompt,
   characterReadiness,
+  CORE_BIBLE_FIELDS,
   getCharacterSheetsByName,
+  identityFingerprint,
+  isDeliberatelyUnspecified,
+  isStated,
+  lockedAttributesFor,
   missingBibleFields,
   requireCharacterSheetsByName,
-  REQUIRED_BIBLE_FIELDS,
+  unlockedAttributes,
   UnknownCharacterError,
 } from "@/services/character-service";
 
@@ -159,7 +164,11 @@ describe("canonical description: thêm trường mà KHÔNG làm đổi chuỗi 
 // ------------------------------------------------------------- readiness ---
 
 describe("hồ sơ nhận dạng: thiếu gì thì nói thiếu gì", () => {
-  it("nhân vật cũ thiếu tuổi và tông da", () => {
+  // QĐ-072. Tuổi và tông da KHÔNG còn nằm trong danh sách cốt lõi: chúng
+  // thường không ai biết, và việc đòi chúng vừa làm ba nhân vật đã khai đủ
+  // trông như thiếu, vừa nhét cả hai vào mệnh đề khoá của mọi prompt mà không
+  // có giá trị nào đứng sau.
+  it("nhân vật khai đủ bốn trường cốt lõi thì KHÔNG thiếu gì", () => {
     const missing = missingBibleFields({
       id: "x",
       name: "BibleOld",
@@ -174,11 +183,29 @@ describe("hồ sơ nhận dạng: thiếu gì thì nói thiếu gì", () => {
       colorPalette: "",
       seed: null,
     });
-    expect(missing).toEqual(["apparent age", "skin tone"]);
+    expect(missing).toEqual([]);
+  });
+
+  it("thiếu trường cốt lõi nào thì nêu đúng trường đó", () => {
+    const missing = missingBibleFields({
+      id: "x",
+      name: "N",
+      version: 1,
+      visualPrompt: "v",
+      negativePrompt: "",
+      hair: "h",
+      facialFeatures: "",
+      outfit: "",
+      bodyProportions: "b",
+      accessories: "",
+      colorPalette: "",
+      seed: null,
+    });
+    expect(missing).toEqual(["face", "outfit"]);
   });
 
   it("điền đủ thì không thiếu gì", () => {
-    const full = Object.fromEntries(REQUIRED_BIBLE_FIELDS.map((k) => [k, "x"]));
+    const full = Object.fromEntries(CORE_BIBLE_FIELDS.map((k) => [k, "x"]));
     expect(
       missingBibleFields({
         id: "x",
@@ -196,15 +223,158 @@ describe("hồ sơ nhận dạng: thiếu gì thì nói thiếu gì", () => {
 
   // The reference is reported first because it is the one an operator has to
   // SUPPLY rather than type - and because nothing here may generate it.
-  it("thiếu ảnh tham chiếu được báo trước, kể cả khi cũng thiếu trường", () => {
+  it("thiếu ảnh tham chiếu được báo trước", () => {
     expect(
-      characterReadiness({ hasApprovedReference: false, missingFields: ["hair"] }),
+      characterReadiness({ hasReference: false, hasAnyDescriptiveField: true }),
     ).toBe("NEEDS_CHARACTER_REFERENCE");
+  });
+
+  // READY không có nghĩa là đầy đủ. Có ảnh + một nét mô tả là đủ để chạy ra
+  // sản phẩm nhất quán; phần còn thiếu là lời khuyên, không phải cái chặn.
+  it("có ảnh + ít nhất một nét mô tả -> READY", () => {
     expect(
-      characterReadiness({ hasApprovedReference: true, missingFields: ["hair"] }),
+      characterReadiness({ hasReference: true, hasAnyDescriptiveField: true }),
+    ).toBe("READY");
+  });
+
+  it("có ảnh nhưng KHÔNG một chữ mô tả nào -> NEEDS_IDENTITY_FIELDS", () => {
+    expect(
+      characterReadiness({ hasReference: true, hasAnyDescriptiveField: false }),
     ).toBe("NEEDS_IDENTITY_FIELDS");
-    expect(characterReadiness({ hasApprovedReference: true, missingFields: [] })).toBe(
-      "READY",
+  });
+});
+
+// ---------------------------------------- "chưa rõ" cũng là một câu trả lời ---
+
+describe("tuổi / tông da có thể là không biết, và không bị ép", () => {
+  it("rỗng, 'unknown', 'not_specified', 'chưa rõ' đều là CHƯA KHAI", () => {
+    for (const v of ["", "  ", "unknown", "NOT_SPECIFIED", "not specified", "chưa rõ", "n/a"]) {
+      expect(isStated(v)).toBe(false);
+    }
+    expect(isStated("around eight")).toBe(true);
+  });
+
+  it("'unknown' khác rỗng ở chỗ: người ta đã nhìn vào ô đó rồi", () => {
+    expect(isDeliberatelyUnspecified("unknown")).toBe(true);
+    expect(isDeliberatelyUnspecified("")).toBe(false);
+    expect(isDeliberatelyUnspecified("around eight")).toBe(false);
+  });
+
+  // "apparent age: unknown" trong prompt còn tệ hơn im lặng: đó là một từ để
+  // model diễn giải.
+  it("giá trị 'unknown' KHÔNG lọt vào canonical description", () => {
+    const out = buildCanonicalDescription({
+      id: "x",
+      name: "N",
+      version: 1,
+      visualPrompt: "v",
+      negativePrompt: "",
+      hair: "h",
+      facialFeatures: "",
+      outfit: "",
+      bodyProportions: "",
+      accessories: "",
+      colorPalette: "",
+      approximateAge: "unknown",
+      skinTone: "not_specified",
+      seed: null,
+    });
+    expect(out).toBe("v. hair: h");
+    expect(out).not.toContain("unknown");
+    expect(out).not.toContain("not_specified");
+  });
+});
+
+// ------------------------------------------------------ khoá cái có thật ---
+
+describe("mệnh đề khoá chỉ nêu thuộc tính ĐÃ có giá trị", () => {
+  const row = (over: Record<string, string> = {}) => ({
+    id: "x",
+    name: "N",
+    version: 1,
+    visualPrompt: "v",
+    negativePrompt: "",
+    hair: "",
+    facialFeatures: "",
+    outfit: "",
+    bodyProportions: "",
+    accessories: "",
+    colorPalette: "",
+    seed: null,
+    ...over,
+  });
+
+  it("chưa khai tuổi/tông da -> hai thứ đó KHÔNG nằm trong mệnh đề khoá", () => {
+    const locked = lockedAttributesFor(row({ hair: "h", outfit: "o" }));
+    expect(locked).toContain("hair colour and hairstyle");
+    expect(locked).toContain("signature outfit and its colours");
+    expect(locked).not.toContain("apparent age");
+    expect(locked).not.toContain("skin tone");
+  });
+
+  it("khai tuổi rồi thì tuổi mới trở thành khoá thật", () => {
+    expect(lockedAttributesFor(row({ approximateAge: "around eight" }))).toContain(
+      "apparent age",
+    );
+  });
+
+  it("khai 'unknown' thì vẫn KHÔNG khoá — đó là một khoá giả", () => {
+    expect(lockedAttributesFor(row({ approximateAge: "unknown" }))).not.toContain(
+      "apparent age",
+    );
+  });
+
+  it("chưa khai gì thì không khoá gì, thay vì khoá cả bảng từ vựng", () => {
+    expect(lockedAttributesFor(row())).toEqual([]);
+  });
+
+  it("unlockedAttributes nói đúng những gì sẽ KHÔNG được khoá", () => {
+    const un = unlockedAttributes(row({ hair: "h" }));
+    expect(un).toContain("apparent age");
+    expect(un).toContain("skin tone");
+    expect(un).not.toContain("hair");
+  });
+});
+
+// ----------------------------------------------------------- fingerprint ---
+
+describe("fingerprint: chỉ đổi khi NGOẠI HÌNH đổi", () => {
+  const base = {
+    id: "x",
+    name: "N",
+    version: 1,
+    visualPrompt: "v",
+    negativePrompt: "blurry",
+    hair: "h",
+    facialFeatures: "f",
+    outfit: "o",
+    bodyProportions: "b",
+    accessories: "",
+    colorPalette: "",
+    seed: null,
+  };
+
+  it("cùng một hàng -> cùng một fingerprint", () => {
+    expect(identityFingerprint(base)).toBe(identityFingerprint(base));
+  });
+
+  it("đổi tóc -> fingerprint đổi", () => {
+    expect(identityFingerprint({ ...base, hair: "khác" })).not.toBe(
+      identityFingerprint(base),
+    );
+  });
+
+  // Đây là điều khiến sửa ghi chú không làm mất ảnh tham chiếu cũ.
+  it("đổi negativePrompt chung / seed -> fingerprint GIỮ NGUYÊN", () => {
+    expect(identityFingerprint({ ...base, negativePrompt: "khác hẳn" })).toBe(
+      identityFingerprint(base),
+    );
+    expect(identityFingerprint({ ...base, seed: 42 })).toBe(identityFingerprint(base));
+  });
+
+  it("đổi negativeIdentity -> fingerprint đổi, vì nó nói về nhận dạng", () => {
+    expect(identityFingerprint({ ...base, negativeIdentity: "no glasses" })).not.toBe(
+      identityFingerprint(base),
     );
   });
 });

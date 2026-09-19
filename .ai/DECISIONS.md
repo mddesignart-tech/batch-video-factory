@@ -2103,3 +2103,163 @@ vẫn phải mua dòng còn lại.
 Và `buildPlannedScenes` thôi truyền cặp provider/model như một cái ghim: nó
 truyền ghim **chỉ khi** `videoModelPinned` (QĐ-069). Bản dự toán phải hỏi đúng
 câu mà pipeline sẽ hỏi.
+
+---
+
+## QĐ-072 — Khoá một thuộc tính không ai khai là một cái khoá GIẢ
+
+`LOCKED_ATTRIBUTES` được dán nguyên văn vào **mọi** prompt ảnh, trong đó có
+**"apparent age"** và **"skin tone"** — cho những nhân vật mà hàng dữ liệu không
+nói gì về cả hai.
+
+Câu đó không có gì để mà nghĩa. Model tự chọn một độ tuổi, rồi **chính câu lệnh
+kia đi bảo vệ cái nó vừa chọn**. Mỗi lần chạy một kiểu, và mỗi kiểu đều được nói
+bằng giọng của một quy tắc.
+
+QĐ-070 làm nửa việc đúng (thêm cột để khai), nhưng lại bắt khai: `approximateAge`
+và `skinTone` nằm trong danh sách **bắt buộc**, nên Max/Leo/Mia — ba nhân vật
+viết tay đầy đủ nhất trong dự án — đều đọc ra `NEEDS_IDENTITY_FIELDS`. Một cái
+form từ chối lưu khi thiếu tuổi chỉ dạy người ta **gõ đại một con số**, và con số
+đó sẽ nằm trong mọi prompt của nhân vật đó mãi mãi, **không ai phân biệt được
+với một sự thật**.
+
+### Ba trạng thái, và định nghĩa lại cho đúng
+
+```
+NEEDS_CHARACTER_REFERENCE  không có ảnh tham chiếu nào
+NEEDS_IDENTITY_FIELDS      có ảnh, nhưng KHÔNG một chữ nào mô tả ngoại hình
+READY                      có ảnh + ít nhất một nét mô tả
+```
+
+`READY` **không có nghĩa là đầy đủ**. Nhân vật có ảnh và mới điền mỗi "tóc" vẫn
+chạy ra sản phẩm nhất quán; phần còn thiếu đi vào `warnings` — lời khuyên, không
+phải cái chặn. Yêu cầu một bộ hồ sơ đầy đủ trước khi cho nhập là đánh đổi sai:
+nó chặn công việc vốn sẽ ra kết quả tốt, và đẩy người bị chặn sang chỗ bịa số.
+
+`"unknown"` / `"not_specified"` / `"chưa rõ"` được nhận là **đã nhìn vào ô đó
+rồi**, khác với để trống — nhưng **giống nhau ở chỗ không khoá**, và **không bao
+giờ** lọt vào prompt: `apparent age: unknown` còn tệ hơn im lặng, vì đó là một
+từ để model diễn giải.
+
+### Mệnh đề khoá dựng từ cái có thật, mỗi nhân vật một dòng
+
+Một dòng cho mỗi người, chứ không hợp nhất cả dàn: gộp lại thì "signature outfit
+and its colours" sẽ đứng trước mặt một nhân vật chưa khai trang phục — đúng cái
+khoá giả cũ, dựng lại ở cấp nhóm. Những gì không khoá được thì **giao cho ảnh**:
+
+```
+Keep RefMax identical to the reference: hair colour and hairstyle, face shape
+and facial features, signature outfit and its colours, body proportions must not change.
+Keep RefLeo identical to the reference: hair colour and hairstyle, accessories must not change.
+Only pose, expression and camera angle may differ.
+Every other aspect of their appearance must match the reference image exactly,
+whether or not it is described above.
+```
+
+Câu cuối chỉ xuất hiện khi **có ảnh thật**. Không ảnh, không khai gì, thì không
+nói gì — chứ không tuyên bố một cái khoá lên khoảng trống.
+
+### Một nhân vật là một người, dù viết hoa kiểu gì
+
+SQLite so chuỗi bằng collation BINARY, nên `findUnique({ name: "max" })` **trượt**
+một hàng đang lưu `"Max"`, và người gọi vui vẻ tạo **người thứ hai**. Hai hàng,
+hai khuôn mặt, một nhân vật dưới mắt người xem. `findCharacterByName` và
+`getCharacterSheetsByName` nay gấp chữ hoa/thường; hai cách viết trong cùng một
+cảnh chỉ ra **một** sheet, để giới hạn số ảnh tham chiếu của nhà cung cấp không
+bị tiêu một suất cho bản sao.
+
+### Ảnh tham chiếu trùng: cùng nội dung là cùng một ảnh
+
+Nhập lại một storyboard là cách bình thường để sửa một lỗi gõ. Trước đây mỗi lần
+nhập lại chép thêm một bản y hệt và ghi thêm một hàng `CharacterReference`. Khoá
+theo **nội dung** (`sha256Bytes`), không theo tên tệp — tên tệp trong một cái ZIP
+không phải là một danh tính.
+
+### Fingerprint: phiên bản đi theo NGOẠI HÌNH, không theo giấy tờ
+
+`identityFingerprint` băm đúng các trường ngoại hình. Sửa `notes`, `description`,
+`seed` hay negative chung **không** tăng `version` — tăng version cho một lần sửa
+chính tả là cách một ảnh chuẩn đã duyệt bắt đầu đọc ra là cũ.
+
+### Và cái giá của việc đổi prompt: ảnh phải có đường DÙNG LẠI
+
+Đổi mệnh đề khoá làm đổi chuỗi prompt, mà khoá idempotency của ảnh **băm chính
+chuỗi đó**. Nghĩa là mọi cảnh đã xong bỗng trông như **chưa mua** — và lần resume
+kế tiếp sẽ trả tiền lần thứ hai. QĐ-065 cũng từng đổi prompt và cũng có đúng lỗ
+này; không ai để ý vì chưa ai resume sau đó.
+
+Sửa không phải bằng một cái hash khôn hơn. Sửa bằng cách **người gọi nói rõ mình
+đang làm gì**: `generateSceneImage(id)` là resume → dùng lại; `{ force: true }`
+là người bấm "tạo lại ảnh" → được mua. Điều kiện dùng lại là **tệp có thật trên
+đĩa + một ProviderJob ảnh đã hoàn tất** — chứ không phải chuỗi prompt, thứ sẽ đổi
+mỗi lần guardrail tốt lên.
+
+---
+
+## QĐ-073 — Một lô là chỗ duyệt tiền MỘT LẦN, không phải một đơn vị công việc
+
+Một thư mục ba storyboard là **ba việc** tình cờ được duyệt chung. Hệ thống lại
+cư xử như thể nó là một: chỉ cần video thứ ba có một dòng sai là **cả lần nhập bị
+từ chối**. Người dùng sửa dòng đó rồi nhập lại tất cả — và nhập lại chính là lúc
+nhân vật trùng và ảnh tham chiếu trùng được sinh ra.
+
+```
+materialiseImport(..., { allowPartial: true })
+  -> nhập các video sạch
+  -> BỎ QUA video còn lỗi, và trả về `skipped[]` có TÊN + LÝ DO từng video
+```
+
+Mặc định vẫn **tắt**: không có gì được tự ý nhập ít hơn thứ người dùng đưa cho.
+Và một lỗi thuộc về **nguồn** (ZIP hỏng, thư mục không đọc được) thì vẫn chặn cả
+lô — không có tập con nào của lần nhập đó sống sót được.
+
+### Mỗi video một vòng đời của riêng nó
+
+```
+IMPORTED · BLOCKED · READY · APPROVED · RUNNING · COMPLETED · FAILED
+```
+
+Dẫn xuất, không thêm cột: từ `Project.status`, quyền chi của lô, và phán quyết
+dự toán — theo đúng thứ tự đó. Một video đã render xong thì **đã xong**, bất kể
+bây giờ dự toán nói gì; một video đã hỏng thì cần đọc cái hỏng của nó chứ không
+phải bản dự toán. Một video BLOCKED không làm hai video kia đọc không được.
+
+### Màn hình `/import` nói hết trước khi ai duyệt tiền
+
+Từ vựng trạng thái được giữ **phân biệt**, không gộp:
+
+| | |
+|---|---|
+| `REUSE` | đã có, đã trả tiền rồi. $0, và là **tiết kiệm thật** |
+| `LOCAL_FREE` | FFmpeg làm. $0, và **không phải tiết kiệm** — chưa bao giờ có gì để mua |
+| `WILL_CREATE` | lần chạy này trả tiền |
+| `READY` / `BLOCKED` | video chạy được / không, có nêu lý do |
+| `NEEDS_REFERENCE` | nhân vật chưa có ảnh — mọi cảnh vẽ người đó đều là đoán lại |
+
+Gộp `REUSE` với `LOCAL_FREE` thành một chữ "miễn phí" là phép đơn giản hoá hấp
+dẫn, và là một lời nói dối về việc khoản tiết kiệm đến từ đâu.
+
+Trang này **không gọi API nào**. Điều đó quan trọng hơn vẻ ngoài của nó: ngay khi
+việc xem một bản kế hoạch bắt đầu tốn tiền, người ta sẽ thôi xem.
+
+### Sửa hồ sơ nhân vật ngay trên trang nhập
+
+Luồng mà nó tồn tại để phục vụ: nhập ba storyboard, thấy một nhân vật chưa có
+ảnh, và phải sửa **trước khi** duyệt tiền. Bắt người ta sang trang khác, tìm nhân
+vật, quay lại, dự toán lại — là cách bước kiểm tra đó bị bỏ qua.
+
+Nhưng **không tạo gì**: đường duy nhất để một ảnh tham chiếu vào đây là **tải
+lên**. Tạo ảnh chuẩn cho nhân vật là tiêu tiền, và đó là một quyết định phải được
+bấm có chủ ý ở trang Nhân vật, không phải tác dụng phụ của việc dọn dẹp một lần
+nhập. Đổi tên nhân vật thì **kéo theo các cảnh** trong cùng lô, nếu không thì cảnh
+vẫn gọi một cái tên không còn ai mang và bước tạo ảnh sẽ từ chối tất cả.
+
+### Dry-run chạy trên DB riêng
+
+`scripts/import-batch-dryrun.ts` đi hết IMPORT → VALIDATE → CHARACTER RESOLVE →
+ROUTING → COST PREVIEW rồi **dừng**. Nó dựng DB riêng từ migration, vì `Character`
+**không thuộc về** cái lô đầu tiên nhắc tới nó: xoá lô đi vẫn để lại "BatchBo" nằm
+trong bảng nhân vật thật mãi mãi. Một lần chạy khô mà làm bẩn bảng thật thì không
+phải chạy khô. (Lần chạy đầu tiên của chính script này đã để lại 3 nhân vật + 2
+dự án rác trong DB thật; đã dọn bằng tay, đối chiếu không có ProviderJob và không
+có CostEntry nào dính vào.)

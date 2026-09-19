@@ -838,7 +838,28 @@ async function saveAsset(opts: {
 
 // ------------------------------------------------------------------ image ---
 
-export async function generateSceneImage(sceneId: string): Promise<string | null> {
+/**
+ * Options for the image step.
+ *
+ * `force` is what separates a RESUME from a REGENERATE, and they had no way to
+ * say which they were. Reuse was decided entirely by the prompt hash, so any
+ * change to the prompt text - a guardrail added, a lock clause corrected - made
+ * every finished scene look unbought, and the next resume paid for its images a
+ * second time. QĐ-065 and QĐ-072 both moved that text.
+ *
+ * So the caller states its intent. A worker picking up an unfinished batch
+ * reuses; a person pressing "tạo lại ảnh" forces. Neither has to know what the
+ * prompt looked like the first time.
+ */
+export interface SceneImageOptions {
+  /** Buy a new image even though one exists. Only ever set by an explicit ask. */
+  force?: boolean;
+}
+
+export async function generateSceneImage(
+  sceneId: string,
+  opts: SceneImageOptions = {},
+): Promise<string | null> {
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
 
@@ -894,6 +915,33 @@ export async function generateSceneImage(sceneId: string): Promise<string | null
       "import",
       false,
     );
+  }
+
+  // ALREADY BOUGHT, STILL ON DISK, NOBODY ASKED FOR A NEW ONE.
+  //
+  // Checked before routing, for the reason the video path checks before routing
+  // (QĐ-068): the router refuses on budget, and a project that has spent its
+  // budget is exactly the project that must be allowed to reuse what it paid
+  // for. The test is the FILE plus a settled paid job for this scene - not the
+  // prompt hash, which moves whenever a guardrail is improved and would make
+  // every finished scene look unbought. QĐ-072.
+  if (!opts.force && scene.imagePath && fs.existsSync(toAbsolute(scene.imagePath))) {
+    const paid = await prisma.providerJob.findFirst({
+      where: { sceneId: scene.id, kind: "image", status: "completed" },
+    });
+    if (paid) {
+      await logger.info({
+        event: "provider.job.reused",
+        provider: scene.imageProvider ?? "?",
+        model: scene.imageModel ?? "?",
+        projectId: project.id,
+        sceneId: scene.id,
+        message:
+          `Cảnh ${scene.sceneNumber} đã có ảnh đã trả tiền, dùng lại, ` +
+          `không định tuyến lại. Chi phí ảnh: $0,00.`,
+      });
+      return toAbsolute(scene.imagePath);
+    }
   }
 
   const decision = routeFor(ctx, "image", { images: 1, jobs: 1 }, {

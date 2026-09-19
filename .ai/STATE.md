@@ -8,7 +8,9 @@ cùng ngày ($0,400122). Milestone 2 xong trước đó (Text + Image + Video + 
 
 Ngày 2026-09-19, **$0 chi thêm**: chấm clip `h3_max` của lần nhập storyboard
 (8,69/10, mẫu sản xuất thật thứ **ba**), rồi sửa ba nhóm lỗi tìm ra khi soi lại
-định tuyến và nhân vật — xem QĐ-069, QĐ-070, QĐ-071.
+định tuyến và nhân vật (QĐ-069, QĐ-070, QĐ-071). Đợt 2 cùng ngày: bỏ cái **khoá
+giả** trong prompt ảnh, cho nhập nhiều storyboard một lần với một video hỏng
+không kéo theo phần còn lại, và dựng trang `/import` đầy đủ — QĐ-072, QĐ-073.
 
 Lô `a690a290` "Cold feet": duyệt 2026-09-17 với trần $1,24, dừng giữa chừng ở
 cảnh 1, chạy tiếp và hoàn tất 2026-09-18 với **$1,047095** thật — 6 cảnh, 1080x1920.
@@ -1332,16 +1334,13 @@ canonical** — trường rỗng bị bỏ qua, và chuỗi đó được băm v
 của ảnh master, nên một byte lệch là mua lại toàn bộ ảnh nhân vật. Có test khoá
 đúng chuỗi cũ từng byte.
 
-```
-Max   refs=1 approvedPrimary=1   thiếu: apparent age, skin tone
-Leo   refs=1 approvedPrimary=1   thiếu: apparent age, skin tone
-Mia   refs=1 approvedPrimary=1   thiếu: apparent age, skin tone
-```
+> **Phần này đã bị QĐ-072 sửa lại cùng ngày.** Việc **bắt khai** tuổi và tông da
+> là sai, và tệ hơn: hai thứ đó vẫn nằm trong mệnh đề khoá của mọi prompt dù
+> không có giá trị nào đứng sau. Trạng thái hiện hành của Max/Leo/Mia là
+> **READY** — xem mục *"Character Bible: khoá cái có thật"* bên dưới.
 
-Ba nhân vật hiện có đều `NEEDS_IDENTITY_FIELDS`. Chúng **vô tình** vẫn đúng, vì
-`visualPrompt` viết tay có sẵn "young adult male/female"; chỗ trống chỉ là chỗ
-trống, **không tự điền** — một giá trị bịa ra ở đây sẽ nằm trong mọi prompt của
-nhân vật đó mãi mãi và không ai biết nó là bịa.
+Chỗ trống vẫn chỉ là chỗ trống và **không tự điền** — một giá trị bịa ra ở đây sẽ
+nằm trong mọi prompt của nhân vật đó mãi mãi và không ai biết nó là bịa.
 
 - `characterReadiness()` → `NEEDS_CHARACTER_REFERENCE` / `NEEDS_IDENTITY_FIELDS`
   / `READY`. Thiếu ảnh báo **trước**, vì đó là thứ phải **đưa vào** chứ không gõ
@@ -1372,5 +1371,103 @@ text/image/video/voice/quality/retries/**render ($0, nói ra)** · tổng mỗi 
 tổng lô · **safetyMargin tách riêng** · trần đã duyệt · hạn mức tổng còn lại ·
 **ví từng nhà cung cấp, không cộng chung** (`null` = *không rõ*, không phải
 $0,00) · `costBasis`.
+
+---
+
+---
+
+## Character Bible: khoá cái có thật — 2026-09-19 (đợt 2), $0
+
+QĐ-070 thêm cột để khai tuổi và tông da, rồi **bắt khai** — nên Max/Leo/Mia, ba
+nhân vật viết tay đầy đủ nhất dự án, đọc ra `NEEDS_IDENTITY_FIELDS`. Sai hai lần:
+bắt khai một thứ thường không ai biết, và **vẫn dán "apparent age / skin tone"
+vào mệnh đề khoá của mọi prompt** dù không có giá trị nào đứng sau. Xem QĐ-072.
+
+```
+Max   READY   1 ảnh · khoá: tóc, mặt, trang phục, dáng · không khoá: tuổi, tông da, đặc điểm
+Leo   READY   1 ảnh · khoá: tóc, mặt, trang phục, dáng, phụ kiện · không khoá: tuổi, tông da, đặc điểm
+Mia   READY   1 ảnh · khoá: tóc, mặt, trang phục, dáng · không khoá: tuổi, tông da, phụ kiện
+```
+
+- Ba trạng thái định nghĩa lại: `NEEDS_CHARACTER_REFERENCE` (không ảnh) →
+  `NEEDS_IDENTITY_FIELDS` (có ảnh, **không một chữ** mô tả) → `READY` (có ảnh +
+  ít nhất một nét). **READY không có nghĩa là đầy đủ**; phần thiếu là
+  `warnings`, không phải cái chặn.
+- `"unknown"` / `"not_specified"` / `"chưa rõ"` = đã nhìn vào ô đó, **vẫn không
+  khoá**, và **không bao giờ** lọt vào prompt.
+- Mệnh đề khoá dựng **mỗi nhân vật một dòng**, chỉ nêu thuộc tính đã khai. Cái
+  không khai thì giao cho ảnh: *"Every other aspect … must match the reference
+  image exactly"* — và câu đó chỉ xuất hiện khi **có ảnh thật**.
+- `findCharacterByName` / `getCharacterSheetsByName` gấp hoa-thường. SQLite so
+  BINARY, nên `"max"` từng trượt `"Max"` và người gọi tạo **người thứ hai**.
+- Ảnh tham chiếu trùng khoá theo **nội dung** (`sha256Bytes`), không theo tên tệp.
+- `identityFingerprint` — version đi theo **ngoại hình**, không theo `notes`,
+  `seed` hay negative chung.
+
+### Ảnh đã mua rồi thì resume KHÔNG mua lại
+
+Đổi mệnh đề khoá làm đổi chuỗi prompt, mà khoá idempotency của ảnh **băm chính
+chuỗi đó** — nên mọi cảnh đã xong bỗng trông như chưa mua. QĐ-065 cũng từng đổi
+prompt và cũng có đúng lỗ này; chưa ai resume sau đó nên chưa ai thấy.
+
+```
+generateSceneImage(id)                 -> RESUME: dùng lại
+generateSceneImage(id, { force: true }) -> TẠO LẠI có chủ ý: được mua
+```
+
+Điều kiện dùng lại là **tệp có thật + một ProviderJob ảnh đã hoàn tất**, không
+phải chuỗi prompt. 4 test hồi quy trong `tests/image-reuse.test.ts`.
+
+---
+
+## Nhập nhiều storyboard một lần — 2026-09-19 (đợt 2), $0
+
+Một lô là chỗ **duyệt tiền một lần**, không phải một đơn vị công việc. Trước đây
+một dòng sai ở video thứ ba từ chối cả lần nhập. Xem QĐ-073.
+
+```
+materialiseImport(..., { allowPartial: true })
+  -> nhập video sạch, BỎ QUA video lỗi, trả `skipped[]` có TÊN + LÝ DO
+```
+
+Mặc định **tắt**. Lỗi thuộc về **nguồn** (ZIP hỏng) vẫn chặn cả lô.
+
+Mỗi video có vòng đời riêng, **dẫn xuất chứ không thêm cột**, từ `Project.status`
+→ quyền chi → phán quyết dự toán:
+`IMPORTED · BLOCKED · READY · APPROVED · RUNNING · COMPLETED · FAILED`.
+
+### Dry-run 3 storyboard — `npm run import:dryrun`
+
+Chạy trên **DB riêng dựng từ migration**, vì `Character` không thuộc về lô đầu
+tiên nhắc tới nó. Fixture: `examples/batch-import-3/` (một video cố tình hỏng).
+
+```
+IMPORT -> VALIDATE -> CHARACTER RESOLVE -> ROUTING -> COST PREVIEW -> READY/BLOCKED
+
+video doc duoc 3 · loi 1 · canh bao 5
+BO QUA  Broken on purpose: khong co model video "runway/khong-co-model-nay"
+READY   Cold feet    4 canh / 17,0s · LOCAL 3 / AI 1 · anh 0 tao 4 dung lai · $0,246100
+READY   Two of them  6 canh / 25,0s · LOCAL 5 / AI 1 · anh 3 tao 3 dung lai · $0,274700
+BatchBo   READY                     1 anh 4 canh
+BatchBo2  READY                     1 anh 4 canh
+BatchMi   NEEDS_CHARACTER_REFERENCE 0 anh 2 canh  thieu: hair, face, outfit, body
+anh/clip/giong can tao 3 / 2 / 10 · dung lai 7 / 0 / 0 · tong $0,520800
+
+DAT  da chi khong doi · ProviderJob khong doi · quyen chi DRAFT
+DAT  tran da duyet = 0 · lo PLANNED · CREATE_ATTEMPT_TOKEN = 0
+```
+
+### Trang `/import` nói hết trước khi duyệt tiền, và không gọi API nào
+
+Từ vựng giữ **phân biệt**: `REUSE` (đã trả tiền — tiết kiệm thật) ≠ `LOCAL_FREE`
+($0 nhưng **chưa bao giờ** có gì để mua) ≠ `WILL_CREATE`. Kèm: tóm tắt từng video
+(tên · số cảnh · thời lượng · 9:16 · số nhân vật có/thiếu ảnh), bảng từng cảnh
+(nhân vật · camera · motion · keyframe · ảnh/clip/giọng BUY-REUSE-NONE · model ·
+giá), và khối tiền đầy đủ gồm **dòng RENDER $0 nói ra**, biên an toàn tách riêng,
+và **ví từng nhà cung cấp không cộng chung** (`null` hiện là *không rõ*).
+
+Sửa hồ sơ nhân vật ngay tại chỗ: tải ảnh lên, đặt ảnh chính, sửa tên (kéo theo
+các cảnh), 11 trường Bible — **không ép tuổi/tông da**, và **không có đường nào
+tới Image API**.
 
 ---

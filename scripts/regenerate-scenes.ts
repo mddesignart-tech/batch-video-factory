@@ -191,7 +191,7 @@ async function main(): Promise<void> {
       },
     });
     try {
-      const filePath = await generateSceneImage(job.sceneId);
+      const filePath = await generateSceneImage(job.sceneId, { force: true });
       drawn++;
       console.log(`  ${job.idiom} canh ${job.sceneNumber}: ${filePath}`);
     } catch (err) {

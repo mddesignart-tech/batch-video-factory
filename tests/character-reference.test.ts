@@ -10,7 +10,7 @@ import {
   buildScenePrompt,
   getCharacterSheet,
   getCharacterSheetsByName,
-  LOCKED_ATTRIBUTES,
+  lockedAttributesFor,
 } from "@/services/character-service";
 import {
   approveCharacterReference,
@@ -170,10 +170,39 @@ describe("prompt giữ nhân vật nhất quán", () => {
     expect(prompt.indexOf("Max panics on stage")).toBeLessThan(
       prompt.indexOf("RefMax:"),
     );
-    for (const attribute of LOCKED_ATTRIBUTES) {
+    // QĐ-072: câu khoá chỉ nêu thuộc tính nhân vật ĐÃ khai. RefMax khai tóc,
+    // mặt, trang phục, dáng; nên đúng bốn thứ đó xuất hiện - và "apparent age"
+    // với "skin tone" thì KHÔNG, vì không có giá trị nào đứng sau chúng.
+    for (const attribute of lockedAttributesFor({
+      id: "",
+      name: "RefMax",
+      version: 1,
+      visualPrompt: "",
+      negativePrompt: "",
+      hair: "short messy dark brown hair",
+      facialFeatures: "large round expressive eyes",
+      outfit: "bright yellow hoodie, blue jeans",
+      bodyProportions: "slightly oversized head",
+      accessories: "",
+      colorPalette: "yellow, blue, white",
+      seed: null,
+    })) {
       expect(prompt).toContain(attribute);
     }
+    expect(prompt).not.toContain("apparent age");
+    expect(prompt).not.toContain("skin tone");
     expect(prompt).toContain("must not change");
+    // Hai nhân vật này chưa có ảnh tham chiếu nào, nên KHÔNG có câu "giao phần
+    // còn lại cho ảnh" - không có ảnh để giao.
+    expect(prompt).not.toContain("must match the reference");
+    // Mỗi nhân vật một dòng: RefLeo không khai trang phục, nên không bị bảo
+    // giữ nguyên một bộ trang phục nào cả.
+    expect(prompt).toContain("Keep RefMax identical to the reference:");
+    const leoLine = prompt
+      .split("\n")
+      .find((l) => l.startsWith("Keep RefLeo identical to the reference:"));
+    expect(leoLine).toBeDefined();
+    expect(leoLine).not.toContain("signature outfit");
     // Khung 2:3 rộng hơn 9:16 nên bị cắt hai bên, không phải trên dưới.
     expect(prompt).toContain("Vertical portrait composition");
     expect(prompt).toContain("left and right edges");
@@ -186,7 +215,9 @@ describe("prompt giữ nhân vật nhất quán", () => {
       characters: sheets,
       stylePrompt: "y",
     });
-    expect(prompt).toContain("Keep RefMax and RefLeo identical");
+    // QĐ-072: một dòng cho mỗi nhân vật, vì hai người không khai cùng một thứ.
+    expect(prompt).toContain("Keep RefMax identical");
+    expect(prompt).toContain("Keep RefLeo identical");
   });
 
   it("không sinh câu khoá khi cảnh không có nhân vật nào", () => {

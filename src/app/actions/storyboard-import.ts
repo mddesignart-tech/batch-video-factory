@@ -17,6 +17,16 @@ import {
   validateImport,
 } from "@/services/storyboard-import";
 import { preflightImportedBatch, type ImportPreflight } from "@/services/import-preflight";
+import {
+  findCharacterByName,
+  getCharacterSheet,
+  identityFingerprint,
+} from "@/services/character-service";
+import {
+  approveCharacterReference,
+  uploadCharacterReference,
+} from "@/services/character-master";
+import { sceneCharacters } from "@/domain/scene-characters";
 
 /**
  * Server actions for the storyboard import screen.
@@ -113,6 +123,8 @@ export interface CreateImportResult {
   message: string;
   batchId?: string;
   preflight?: ImportPreflight;
+  /** Videos left out because they still had errors. Named, never silent. */
+  skipped?: { videoId: string; title: string; reasons: string[] }[];
 }
 
 /**
@@ -127,16 +139,18 @@ export async function createImportBatch(input: {
   name: string;
   maxCostPerVideo: number;
   maxCostForBatch: number;
+  /** Import the clean videos and skip the broken ones, naming each skip. */
+  allowPartial?: boolean;
 }): Promise<CreateImportResult> {
   try {
     const scan = scanImportSource(path.resolve(input.source.trim()));
     const validated = await validateImport(scan);
-    if (hasErrors(validated.issues)) {
+    if (hasErrors(validated.issues) && !input.allowPartial) {
       return {
         ok: false,
         message:
           `Còn ${validated.issues.filter((i) => i.level === "error").length} lỗi trong bản nhập. ` +
-          "Hãy sửa hết rồi nhập lại — không tạo lô từ dữ liệu sai.",
+          "Hãy sửa hết rồi nhập lại — hoặc bật “nhập phần chạy được” để bỏ qua video hỏng.",
       };
     }
     if (validated.videos.length === 0) {
@@ -153,6 +167,7 @@ export async function createImportBatch(input: {
       batchName: input.name.trim() || "Lô nhập storyboard",
       maxCostPerVideo: input.maxCostPerVideo,
       maxCostForBatch: input.maxCostForBatch,
+      allowPartial: input.allowPartial === true,
     });
     const preflight = await preflightImportedBatch(created.batchId);
 
@@ -162,9 +177,17 @@ export async function createImportBatch(input: {
       ok: true,
       batchId: created.batchId,
       preflight,
+      skipped: created.skipped,
       message:
-        `Đã tạo lô ${created.projects.length} video, chép ${created.copiedImages} ảnh có sẵn. ` +
-        "Quyền chi đang DRAFT — chưa tiêu được gì. Mở trang lô để duyệt.",
+        `Đã tạo lô ${created.projects.length} video, chép ${created.copiedImages} ảnh có sẵn` +
+        (created.reusedCharacterImages > 0
+          ? `, dùng lại ${created.reusedCharacterImages} ảnh nhân vật`
+          : "") +
+        (created.skipped.length > 0
+          ? `. BỎ QUA ${created.skipped.length} video còn lỗi: ` +
+            created.skipped.map((v) => `${v.title} (${v.reasons[0]})`).join("; ")
+          : "") +
+        ". Quyền chi đang DRAFT — chưa tiêu được gì. Mở trang lô để duyệt.",
     };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
@@ -403,4 +426,314 @@ export async function updateImportedScene(input: {
     ok: true,
     message: "Đã lưu. Bản dự toán cũ đã bị huỷ — hãy DỰ TOÁN LẠI trước khi duyệt.",
   };
+}
+
+// ------------------------------------------------- character bible, inline ---
+
+/** One character as the import screen shows and edits it. */
+export interface ImportCharacterRow {
+  characterId: string | null;
+  name: string;
+  readiness: string;
+  referenceCount: number;
+  missingFields: string[];
+  unlockedAttributes: string[];
+  lockedAttributes: string[];
+  warnings: string[];
+  presentation: string;
+  approximateAge: string;
+  skinTone: string;
+  hair: string;
+  facialFeatures: string;
+  distinguishingFeatures: string;
+  outfit: string;
+  bodyProportions: string;
+  accessories: string;
+  colorPalette: string;
+  negativeIdentity: string;
+  /** Every reference image, newest last, with which one is primary. */
+  references: { id: string; filePath: string; isPrimary: boolean; approved: boolean }[];
+}
+
+/**
+ * Load the cast of an imported batch, ready to edit.
+ *
+ * Reads the CHARACTER TABLE, keyed by the names the scenes actually carry -
+ * which is what the pipeline will resolve, and which a storyboard file stops
+ * being the authority on the moment somebody edits a scene.
+ */
+export async function importedCharacters(batchId: string): Promise<ImportCharacterRow[]> {
+  const projects = await prisma.project.findMany({
+    where: { batchId },
+    include: { scenes: { where: { skipped: false } } },
+  });
+
+  const names = new Set<string>();
+  for (const project of projects) {
+    for (const scene of project.scenes) {
+      for (const name of sceneCharacters(scene).present) names.add(name);
+    }
+  }
+
+  const rows: ImportCharacterRow[] = [];
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const row = await findCharacterByName(name);
+    if (!row) {
+      // A name no character row answers to. Shown rather than hidden: the image
+      // step refuses it outright, and finding that out here costs nothing.
+      rows.push({
+        characterId: null,
+        name,
+        readiness: "NEEDS_CHARACTER_REFERENCE",
+        referenceCount: 0,
+        missingFields: [],
+        unlockedAttributes: [],
+        lockedAttributes: [],
+        warnings: [
+          `Chưa có nhân vật nào tên "${name}" trong bảng Nhân vật. ` +
+            "Bước tạo ảnh sẽ từ chối cảnh này chứ không vẽ đại một người.",
+        ],
+        presentation: "",
+        approximateAge: "",
+        skinTone: "",
+        hair: "",
+        facialFeatures: "",
+        distinguishingFeatures: "",
+        outfit: "",
+        bodyProportions: "",
+        accessories: "",
+        colorPalette: "",
+        negativeIdentity: "",
+        references: [],
+      });
+      continue;
+    }
+    const references = await prisma.characterReference.findMany({
+      where: { characterId: row.id },
+      orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+    });
+    const sheet = await getCharacterSheet(row.id);
+    rows.push({
+      characterId: row.id,
+      name: row.name,
+      readiness: sheet?.readiness ?? "NEEDS_CHARACTER_REFERENCE",
+      referenceCount: references.length,
+      missingFields: sheet?.missingFields ?? [],
+      unlockedAttributes: sheet?.unlockedAttributes ?? [],
+      lockedAttributes: sheet?.lockedAttributes ?? [],
+      warnings: sheet?.warnings ?? [],
+      presentation: row.presentation,
+      approximateAge: row.approximateAge,
+      skinTone: row.skinTone,
+      hair: row.hair,
+      facialFeatures: row.facialFeatures,
+      distinguishingFeatures: row.distinguishingFeatures,
+      outfit: row.outfit,
+      bodyProportions: row.bodyProportions,
+      accessories: row.accessories,
+      colorPalette: row.colorPalette,
+      negativeIdentity: row.negativeIdentity,
+      references: references.map((r) => ({
+        id: r.id,
+        filePath: r.filePath,
+        isPrimary: r.isPrimary,
+        approved: r.approved,
+      })),
+    });
+  }
+  return rows;
+}
+
+/**
+ * Edit one character's Bible from the import screen.
+ *
+ * NOTHING HERE IS REQUIRED, and `approximateAge` / `skinTone` least of all: an
+ * operator who does not know how old a character looks must be able to say so,
+ * or leave the box alone, without being stopped. An unstated attribute is
+ * simply not locked - see QĐ-072 - and the screen shows which ones those are.
+ *
+ * Free and offline. It writes a row and re-prices the batch; no provider is
+ * contacted, no media is made, and the batch's frozen estimate is discarded so
+ * the next approval is signed against the character that now exists.
+ */
+export async function updateImportedCharacter(input: {
+  characterId: string;
+  batchId: string;
+  name?: string;
+  presentation?: string;
+  approximateAge?: string;
+  skinTone?: string;
+  hair?: string;
+  facialFeatures?: string;
+  distinguishingFeatures?: string;
+  outfit?: string;
+  bodyProportions?: string;
+  accessories?: string;
+  colorPalette?: string;
+  negativeIdentity?: string;
+}): Promise<{ ok: boolean; message: string }> {
+  try {
+    const current = await prisma.character.findUnique({
+      where: { id: input.characterId },
+    });
+    if (!current) return { ok: false, message: "Không tìm thấy nhân vật." };
+
+    const data: Record<string, string> = {};
+    for (const key of [
+      "presentation",
+      "approximateAge",
+      "skinTone",
+      "hair",
+      "facialFeatures",
+      "distinguishingFeatures",
+      "outfit",
+      "bodyProportions",
+      "accessories",
+      "colorPalette",
+      "negativeIdentity",
+    ] as const) {
+      const value = input[key];
+      if (value !== undefined) data[key] = value.trim();
+    }
+
+    // Renaming has to carry the SCENES with it, or the scenes go on naming
+    // somebody who no longer exists and the image step refuses every one of
+    // them. Done in the same transaction as the rename for that reason.
+    const newName = input.name?.trim();
+    const renaming = newName !== undefined && newName.length > 0 && newName !== current.name;
+    if (renaming) {
+      const clash = await findCharacterByName(newName);
+      if (clash && clash.id !== current.id) {
+        return {
+          ok: false,
+          message:
+            `Đã có nhân vật tên "${clash.name}". Đổi sang tên đó sẽ trộn hai người ` +
+            "làm một — hãy chọn tên khác, hoặc sửa các cảnh để dùng thẳng nhân vật kia.",
+        };
+      }
+      data.name = newName;
+    }
+
+    const changed = identityFingerprint(current) !== identityFingerprint({ ...current, ...data });
+
+    await prisma.character.update({
+      where: { id: input.characterId },
+      data: {
+        ...data,
+        // The version follows the LOOK, not the paperwork. Editing a note must
+        // not make an approved reference image read as stale. QĐ-072.
+        version: changed ? current.version + 1 : current.version,
+      },
+    });
+
+    if (renaming) {
+      const scenes = await prisma.scene.findMany({
+        where: { project: { batchId: input.batchId } },
+      });
+      for (const scene of scenes) {
+        const swap = (json: string) =>
+          JSON.stringify(
+            (JSON.parse(json) as string[]).map((n) =>
+              n.trim().toLowerCase() === current.name.trim().toLowerCase() ? newName! : n,
+            ),
+          );
+        const next = {
+          charactersPresentJson: swap(scene.charactersPresentJson),
+          speakingCharactersJson: swap(scene.speakingCharactersJson),
+          primaryCharactersJson: swap(scene.primaryCharactersJson),
+        };
+        if (
+          next.charactersPresentJson !== scene.charactersPresentJson ||
+          next.speakingCharactersJson !== scene.speakingCharactersJson ||
+          next.primaryCharactersJson !== scene.primaryCharactersJson
+        ) {
+          await prisma.scene.update({ where: { id: scene.id }, data: next });
+        }
+      }
+    }
+
+    // Same rule as editing a scene: the frozen plan describes the batch as it
+    // was, so it is thrown away rather than left beside the thing it no longer
+    // describes.
+    await prisma.batch.update({
+      where: { id: input.batchId },
+      data: { planJson: "{}", estimatedCost: 0 },
+    });
+
+    revalidatePath("/import");
+    revalidatePath("/characters");
+    revalidatePath(`/batches/${input.batchId}`);
+    return {
+      ok: true,
+      message: changed
+        ? `Đã lưu. Ngoại hình đổi nên phiên bản lên v${current.version + 1}; ` +
+          "ảnh tham chiếu cũ vẫn giữ nguyên. Hãy DỰ TOÁN LẠI."
+        : "Đã lưu (ngoại hình không đổi, giữ nguyên phiên bản).",
+    };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Attach a reference image to a character from the import screen.
+ *
+ * An UPLOAD, never a generation. The system has no path from here to an image
+ * model on purpose: making a character's master costs money and is a decision
+ * for a person to take deliberately on the Nhân vật page, not a side effect of
+ * tidying up an import.
+ */
+export async function uploadImportedCharacterReference(
+  formData: FormData,
+): Promise<{ ok: boolean; message: string }> {
+  const characterId = String(formData.get("characterId") ?? "");
+  const batchId = String(formData.get("batchId") ?? "");
+  const file = formData.get("file");
+
+  if (!characterId) return { ok: false, message: "Thiếu nhân vật." };
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, message: "Chưa chọn tệp ảnh." };
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    return {
+      ok: false,
+      message: `Tệp ${(file.size / 1024 / 1024).toFixed(1)} MB vượt giới hạn 10 MB.`,
+    };
+  }
+
+  try {
+    const bytes = Buffer.from(await file.arrayBuffer());
+    await uploadCharacterReference({
+      characterId,
+      fileName: file.name,
+      bytes,
+      notes: "Tải lên từ trang Nhập storyboard",
+    });
+    revalidatePath("/import");
+    revalidatePath("/characters");
+    if (batchId) revalidatePath(`/batches/${batchId}`);
+    return {
+      ok: true,
+      message:
+        "Đã tải ảnh lên. Bấm “Đặt làm ảnh chính” nếu muốn dùng ảnh này làm mốc nhất quán.",
+    };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Promote one reference image to the character's master, from the import screen. */
+export async function setImportedCharacterPrimary(
+  referenceId: string,
+  batchId: string,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    await approveCharacterReference(referenceId);
+    revalidatePath("/import");
+    revalidatePath("/characters");
+    if (batchId) revalidatePath(`/batches/${batchId}`);
+    return { ok: true, message: "Đã đặt làm ảnh chính. Mọi cảnh sau sẽ khớp theo ảnh này." };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
 }

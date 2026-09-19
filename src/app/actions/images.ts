@@ -136,7 +136,9 @@ export async function regenerateSceneImageNow(
       });
     }
 
-    const filePath = await generateSceneImage(sceneId);
+    // A person pressed the button, so this is a REGENERATE: buy a new image
+    // even though one is on disk. QĐ-072.
+    const filePath = await generateSceneImage(sceneId, { force: true });
     const scene = await prisma.scene.findUnique({ where: { id: sceneId } });
     revalidatePath(`/projects/${scene?.projectId ?? ""}`);
 

@@ -66,3 +66,15 @@ export function maskSecret(plain: string): string {
 export function sha256(input: string): string {
   return crypto.createHash("sha256").update(input, "utf8").digest("hex");
 }
+
+/**
+ * Hash raw bytes, for deciding whether two files are the same file.
+ *
+ * Separate from `sha256` rather than an overload because the question is
+ * different: that one fingerprints a string we composed, this one identifies
+ * content we were handed. A filename is not an identity - the same reference
+ * image arrives under a different name every time a storyboard is re-zipped.
+ */
+export function sha256Bytes(input: Buffer | Uint8Array): string {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}

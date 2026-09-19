@@ -1,0 +1,102 @@
+{
+  "video_id": "two-cast",
+  "video_title": "Two of them",
+  "characters": [
+    {
+      "character_id": "bo2",
+      "character_name": "BatchBo2",
+      "character_reference_image": "characters/bo2.png",
+      "character_hair": "neat black hair with a side part",
+      "character_face": "oval face, calm narrow eyes",
+      "character_outfit": "teal button-up shirt, dark jeans",
+      "character_body": "slim, upright, taller than BatchMi"
+    },
+    {
+      "character_id": "mi",
+      "character_name": "BatchMi"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "AUTO",
+      "priority": "LOW",
+      "character_id": "bo2",
+      "character_name": "BatchBo2",
+      "visual_description": "BatchBo2 and BatchMi share a plain room, beat 1.",
+      "character_action": "They react to each other, one small movement each.",
+      "dialogue": "BatchBo2: \"Line 1.\"",
+      "subtitle": "Line 1.",
+      "image_file": "images/01.png"
+    },
+    {
+      "scene_number": 2,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "AUTO",
+      "priority": "LOW",
+      "character_id": "bo2",
+      "character_name": "BatchBo2",
+      "visual_description": "BatchBo2 and BatchMi share a plain room, beat 2.",
+      "character_action": "They react to each other, one small movement each.",
+      "dialogue": "BatchBo2: \"Line 2.\"",
+      "subtitle": "Line 2."
+    },
+    {
+      "scene_number": 3,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "AUTO",
+      "priority": "LOW",
+      "character_id": "mi",
+      "character_name": "BatchMi",
+      "visual_description": "BatchBo2 and BatchMi share a plain room, beat 3.",
+      "character_action": "They react to each other, one small movement each.",
+      "dialogue": "BatchMi: \"Line 3.\"",
+      "subtitle": "Line 3.",
+      "image_file": "images/03.png"
+    },
+    {
+      "scene_number": 4,
+      "duration": 5,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "VIDEO_AI",
+      "priority": "HIGH",
+      "character_id": "bo2",
+      "character_name": "BatchBo2",
+      "visual_description": "BatchBo2 and BatchMi share a plain room, beat 4.",
+      "character_action": "They react to each other, one small movement each.",
+      "dialogue": "BatchBo2: \"Line 4.\"",
+      "subtitle": "Line 4."
+    },
+    {
+      "scene_number": 5,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "AUTO",
+      "priority": "LOW",
+      "character_id": "mi",
+      "character_name": "BatchMi",
+      "visual_description": "BatchBo2 and BatchMi share a plain room, beat 5.",
+      "character_action": "They react to each other, one small movement each.",
+      "dialogue": "BatchMi: \"Line 5.\"",
+      "subtitle": "Line 5.",
+      "image_file": "images/05.png"
+    },
+    {
+      "scene_number": 6,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "AUTO",
+      "priority": "LOW",
+      "character_id": "bo2",
+      "character_name": "BatchBo2",
+      "visual_description": "BatchBo2 and BatchMi share a plain room, beat 6.",
+      "character_action": "They react to each other, one small movement each.",
+      "dialogue": "BatchBo2: \"Line 6.\"",
+      "subtitle": "Line 6."
+    }
+  ]
+}

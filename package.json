@@ -46,7 +46,8 @@
     "lowauto:grant": "tsx scripts/grant-low-auto.ts",
     "lowauto:prove": "tsx scripts/prove-low-auto.ts",
     "runway:balance": "tsx scripts/refresh-runway-balance.ts",
-    "batch:close-stale": "tsx scripts/close-stale-batch.ts"
+    "batch:close-stale": "tsx scripts/close-stale-batch.ts",
+    "import:dryrun": "tsx scripts/import-batch-dryrun.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.1",

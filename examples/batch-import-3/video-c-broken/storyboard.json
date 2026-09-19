@@ -1,0 +1,46 @@
+{
+  "video_id": "broken",
+  "video_title": "Broken on purpose",
+  "characters": [
+    {
+      "character_id": "zed",
+      "character_name": "BatchZed",
+      "character_hair": "long silver hair",
+      "character_face": "narrow face",
+      "character_outfit": "grey coat",
+      "character_body": "tall and thin"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "zed",
+      "character_name": "BatchZed",
+      "visual_description": "BatchZed waits in a plain corridor.",
+      "character_action": "BatchZed shifts his weight once.",
+      "dialogue": "BatchZed: \"Still here.\"",
+      "subtitle": "Still here.",
+      "image_file": "scene-01.png"
+    },
+    {
+      "scene_number": 2,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "VIDEO_AI",
+      "priority": "LOW",
+      "character_id": "zed",
+      "character_name": "BatchZed",
+      "visual_description": "BatchZed turns towards the door.",
+      "character_action": "BatchZed turns his head.",
+      "dialogue": "BatchZed: \"Was that the door?\"",
+      "subtitle": "Was that the door?",
+      "image_file": "scene-02.png",
+      "video_provider": "runway",
+      "video_model": "khong-co-model-nay"
+    }
+  ]
+}

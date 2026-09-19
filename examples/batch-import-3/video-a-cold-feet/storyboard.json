@@ -1,0 +1,79 @@
+{
+  "video_id": "cold-feet",
+  "video_title": "Cold feet",
+  "characters": [
+    {
+      "character_id": "bo",
+      "character_name": "BatchBo",
+      "character_reference_image": "characters/bo.png",
+      "character_presentation": "boy",
+      "character_age": "around eight",
+      "character_skin_tone": "light warm beige",
+      "character_hair": "short messy dark brown hair, slightly spiky",
+      "character_face": "round face, large round eyes",
+      "character_distinguishing_features": "a small scar above the left eyebrow",
+      "character_outfit": "bright yellow hoodie with a white chest stripe, blue jeans",
+      "character_body": "slightly oversized head, short and stocky",
+      "character_color_palette": "yellow, denim blue, white",
+      "character_negative_identity": "never add glasses, never remove the scar"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "bo",
+      "character_name": "BatchBo",
+      "visual_description": "BatchBo stands at the end of a high diving board.",
+      "character_action": "BatchBo holds still and looks ahead.",
+      "dialogue": "BatchBo: \"I am definitely doing this.\"",
+      "subtitle": "I am definitely doing this.",
+      "image_file": "scene-01.png"
+    },
+    {
+      "scene_number": 2,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "bo",
+      "character_name": "BatchBo",
+      "visual_description": "Both of BatchBo's feet sealed inside one slab of cartoon ice.",
+      "character_action": "The feet stay exactly where they are.",
+      "dialogue": "BatchBo: \"...my feet have other plans.\"",
+      "subtitle": "...my feet have other plans.",
+      "image_file": "scene-02.png"
+    },
+    {
+      "scene_number": 3,
+      "duration": 5,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "VIDEO_AI",
+      "priority": "HIGH",
+      "character_id": "bo",
+      "character_name": "BatchBo",
+      "visual_description": "BatchBo alone against a plain light grey background.",
+      "character_action": "BatchBo blinks once and tilts his head very slightly.",
+      "dialogue": "BatchBo: \"It is very cold up here.\"",
+      "subtitle": "It is very cold up here.",
+      "image_file": "scene-03.png"
+    },
+    {
+      "scene_number": 4,
+      "duration": 4,
+      "camera": "Locked static medium shot, no camera movement.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "bo",
+      "character_name": "BatchBo",
+      "visual_description": "BatchBo on a plain background, a little calmer.",
+      "character_action": "BatchBo stands still.",
+      "dialogue": "BatchBo: \"Tomorrow is also a day.\"",
+      "subtitle": "Tomorrow is also a day.",
+      "image_file": "scene-04.png"
+    }
+  ]
+}

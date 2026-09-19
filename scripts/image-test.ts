@@ -151,7 +151,7 @@ async function main(): Promise<void> {
       });
 
       try {
-        const filePath = await generateSceneImage(scene.id);
+        const filePath = await generateSceneImage(scene.id, { force: true });
         if (!filePath) {
           console.log(`    Canh ${scene.sceneNumber}: bo qua (che do tiet kiem)`);
           continue;

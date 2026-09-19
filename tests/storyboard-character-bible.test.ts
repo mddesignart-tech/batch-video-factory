@@ -201,12 +201,14 @@ describe("validate: đánh dấu NEEDS_CHARACTER_REFERENCE, không tự tạo �
     const validated = await validateImport(scanImportSource(root));
 
     const cast = validated.videos[0]!.characters.find((c) => c.name === "ThinOne")!;
+    // Có ảnh, nhưng không một chữ nào mô tả ngoại hình.
     expect(cast.readiness).toBe("NEEDS_IDENTITY_FIELDS");
     const thin = validated.issues.find((i) => i.code === "character_identity_thin");
     expect(thin).toBeDefined();
     expect(thin!.level).toBe("warning");
-    // Names the fields, so the operator knows what to type.
-    expect(thin!.message).toContain("hair");
+    // Nói rõ phải điền ít nhất một thứ gì, chứ không đòi cả bảng.
+    expect(thin!.message).toContain("ít nhất một");
+    expect(thin!.message).toContain("tóc");
   });
 
   it("storyboard kèm ảnh VÀ hồ sơ đủ -> READY, không cảnh báo nhân vật nào", async () => {

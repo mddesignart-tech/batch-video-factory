@@ -7,6 +7,15 @@ import { spendStatus } from "./spend-guard";
 import { providerSpendBreakdown } from "./provider-budget";
 import { productionProviderNames, availableProviderNames } from "./provider-health";
 import { previewProjectCost } from "./project-service";
+import {
+  characterReadiness,
+  findCharacterByName,
+  hasAnyDescriptiveField,
+  missingBibleFields,
+  unlockedAttributes,
+  type CharacterReadiness,
+} from "./character-service";
+import { sceneCharacters } from "@/domain/scene-characters";
 import type { BatchPlan, BatchCosting, PlannedVideo, PlannedSceneRow } from "./batch-planner";
 
 /**
@@ -39,6 +48,10 @@ export interface ImportSceneLine {
   complexity: string;
   motionSource: string;
   motionMode: string;
+  /** Who is in this shot, by the names the pipeline will resolve. */
+  characters: string[];
+  /** The scene's own camera direction, so a reader can see what was asked for. */
+  camera: string;
   /** Null for a LOCAL_MOTION scene: there is no model, because there is no purchase. */
   videoModel: string | null;
   keyframe: "supplied" | "will-generate";
@@ -132,8 +145,58 @@ export interface ImportVideoPreview {
   counts: AssetCounts;
   estimatedCost: number;
   status: "OK" | "OVER_VIDEO_BUDGET" | "NEEDS_PROVIDER";
+  /**
+   * Where this ONE video is in its own life, independent of its neighbours.
+   *
+   * A batch is a convenience for approving money once; it is not a unit of
+   * work. One video that cannot be priced must not make the other two
+   * unreadable, and one that has already been rendered must not look pending
+   * because a sibling is still running. See QĐ-073.
+   */
+  lifecycle: ImportVideoLifecycle;
+  /** Why it is BLOCKED, in one sentence. Null unless it is. */
+  blockedReason: string | null;
   warnings: string[];
+  /** Cast of this video, resolved against the character table. */
+  characters: ImportVideoCharacter[];
   scenes: ImportSceneLine[];
+}
+
+/**
+ * The per-video states the operator sees on the import screen.
+ *
+ *   IMPORTED   rows exist, nothing priced yet
+ *   BLOCKED    priced, and something stops it running. Names the reason.
+ *   READY      priced, nothing in the way, waiting for money to be approved
+ *   APPROVED   an approval covers it; work has not started
+ *   RUNNING    media or render in progress
+ *   COMPLETED  final MP4 exists
+ *   FAILED     gave up; the project row says why
+ */
+export const IMPORT_VIDEO_LIFECYCLE = [
+  "IMPORTED",
+  "BLOCKED",
+  "READY",
+  "APPROVED",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+] as const;
+export type ImportVideoLifecycle = (typeof IMPORT_VIDEO_LIFECYCLE)[number];
+
+export interface ImportVideoCharacter {
+  name: string;
+  readiness: CharacterReadiness;
+  /** Reference images this character has right now. */
+  referenceCount: number;
+  /** Core descriptive fields not stated, as labels. */
+  missingFields: string[];
+  /** Lockable attributes with no value - the prompt will not claim to lock them. */
+  unlockedAttributes: string[];
+  /** Row id, so the import screen can edit the Bible without a second lookup. */
+  characterId: string | null;
+  /** How many scenes of this video name them. */
+  sceneCount: number;
 }
 
 export interface ImportPreflight {
@@ -145,6 +208,10 @@ export interface ImportPreflight {
   totalMissingImages: number;
   totalLocalMotion: number;
   totalVideoAi: number;
+  /** Every distinct character in the batch, de-duplicated by name. */
+  characters: ImportVideoCharacter[];
+  /** How many videos sit in each lifecycle state. */
+  lifecycleCounts: Record<ImportVideoLifecycle, number>;
   estimatedTotal: number;
   /** Sum including videos that cannot run, so nothing is hidden. */
   estimatedTotalIncludingBlocked: number;
@@ -211,12 +278,14 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     throw new Error("Lô nhập chưa có video nào. Hãy nhập storyboard trước.");
   }
 
-  const [cap, wallets, production, available] = await Promise.all([
+  const [cap, wallets, production, available, authorization] = await Promise.all([
     spendStatus(),
     providerSpendBreakdown(),
     productionProviderNames(),
     availableProviderNames(),
+    prisma.batchAuthorization.findUnique({ where: { batchId } }),
   ]);
+  const moneyApproved = authorization?.status === "APPROVED";
 
   const videos: ImportVideoPreview[] = [];
   const planned: PlannedVideo[] = [];
@@ -245,6 +314,8 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         complexity: scene?.complexity ?? "LOW",
         motionSource: row.motionSource,
         motionMode: scene?.motionMode ?? "AUTO",
+        characters: scene ? sceneCharacters(scene).present : [],
+        camera: scene?.camera ?? "",
         videoModel: row.video ? `${row.video.provider}/${row.video.modelId}` : null,
         keyframe: scene?.imageSource === "IMPORTED" ? "supplied" : "will-generate",
         estimatedCost: round(row.estimatedCost, 6),
@@ -301,7 +372,82 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       ),
     ].sort();
 
+    // THE CAST OF THIS VIDEO, resolved against the character table.
+    //
+    // Read from the scenes rather than from the storyboard file, because the
+    // scenes are what the pipeline will act on - a name edited after import is
+    // in one and not the other. Counted per video: the same character appearing
+    // in six scenes is one person with one reference, and a screen that said
+    // "6 characters" would be describing the wrong thing. QĐ-073.
+    const castCounts = new Map<string, number>();
+    for (const scene of project.scenes) {
+      for (const name of sceneCharacters(scene).present) {
+        castCounts.set(name, (castCounts.get(name) ?? 0) + 1);
+      }
+    }
+    const characters: ImportVideoCharacter[] = [];
+    for (const [name, sceneCount] of castCounts) {
+      const row = await findCharacterByName(name);
+      const referenceCount = row
+        ? await prisma.characterReference.count({ where: { characterId: row.id } })
+        : 0;
+      characters.push({
+        name,
+        // A name with no row at all is reported as needing a reference, which is
+        // true and is the first thing to fix. `requireCharacterSheetsByName`
+        // refuses it later with a sharper message; this screen only has to make
+        // the problem visible before anyone approves money for it.
+        readiness: row
+          ? characterReadiness({
+              hasReference: referenceCount > 0,
+              hasAnyDescriptiveField: hasAnyDescriptiveField(row),
+            })
+          : "NEEDS_CHARACTER_REFERENCE",
+        referenceCount,
+        missingFields: row ? missingBibleFields(row) : [],
+        unlockedAttributes: row ? unlockedAttributes(row) : [],
+        characterId: row?.id ?? null,
+        sceneCount,
+      });
+    }
+    characters.sort((a, b) => b.sceneCount - a.sceneCount || a.name.localeCompare(b.name));
+
+    // A video's own state, decided by its own row and its own price.
+    //
+    // The order is "what has already happened" before "what is in the way",
+    // because a finished video is finished regardless of what its estimate says
+    // now, and a failed one needs its failure read rather than its forecast.
+    let blockedReason: string | null = null;
+    let lifecycle: ImportVideoLifecycle;
+    if (project.status === "completed") {
+      lifecycle = "COMPLETED";
+    } else if (project.status === "failed" || project.status === "cancelled") {
+      lifecycle = "FAILED";
+      blockedReason = project.errorMessage ?? null;
+    } else if (
+      project.status === "media_generating" ||
+      project.status === "media_ready" ||
+      project.status === "rendering"
+    ) {
+      lifecycle = "RUNNING";
+    } else if (status !== "OK") {
+      lifecycle = "BLOCKED";
+      blockedReason =
+        status === "OVER_VIDEO_BUDGET"
+          ? `Dự toán $${total.toFixed(6)} vượt trần $${batch.maxCostPerVideo.toFixed(2)} cho một video.`
+          : (estimate.needsProvider[0] ??
+            estimate.errors[0] ??
+            "Có cảnh chưa định tuyến được model.");
+    } else if (moneyApproved) {
+      lifecycle = "APPROVED";
+    } else {
+      lifecycle = "READY";
+    }
+
     videos.push({
+      lifecycle,
+      blockedReason,
+      characters,
       projectId: project.id,
       title: project.title,
       sceneCount: project.scenes.length,
@@ -428,6 +574,29 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     totalMissingImages: videos.reduce((n, v) => n + v.missingImages, 0),
     totalLocalMotion: videos.reduce((n, v) => n + v.localMotionCount, 0),
     totalVideoAi: videos.reduce((n, v) => n + v.videoAiCount, 0),
+    // Characters are counted ACROSS the batch by identity, not by appearance.
+    // One Max shared by three videos is one character with one reference, and
+    // adding up the per-video lists would report him three times.
+    characters: (() => {
+      const byName = new Map<string, ImportVideoCharacter>();
+      for (const v of videos) {
+        for (const c of v.characters) {
+          const seen = byName.get(c.name);
+          if (seen) seen.sceneCount += c.sceneCount;
+          else byName.set(c.name, { ...c });
+        }
+      }
+      return [...byName.values()].sort(
+        (a, b) => b.sceneCount - a.sceneCount || a.name.localeCompare(b.name),
+      );
+    })(),
+    lifecycleCounts: IMPORT_VIDEO_LIFECYCLE.reduce(
+      (acc, state) => {
+        acc[state] = videos.filter((v) => v.lifecycle === state).length;
+        return acc;
+      },
+      {} as Record<ImportVideoLifecycle, number>,
+    ),
     estimatedTotal,
     estimatedTotalIncludingBlocked: estimatedAll,
     runnableCount: runnable.length,

@@ -1,3 +1,4 @@
+import { sha256 } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 import { toAbsolute } from "@/lib/paths";
 
@@ -11,7 +12,19 @@ import { toAbsolute } from "@/lib/paths";
  * the text model.
  */
 
-/** Attributes a scene must never be allowed to change on its own. */
+/**
+ * Attributes a scene must never be allowed to change on its own.
+ *
+ * THE FULL VOCABULARY, not the clause. Which of these actually reaches a prompt
+ * is decided per character by `lockedAttributesFor`, because a lock is only
+ * meaningful over a value somebody stated.
+ *
+ * This list was pasted verbatim into every prompt until QĐ-072, including
+ * "apparent age" and "skin tone" for characters whose rows said nothing about
+ * either. That is a FAKE LOCK: it reads as an instruction, and what it actually
+ * pins is whatever the model improvised on the first frame it drew - a
+ * different answer each run, defended with the authority of a rule.
+ */
 export const LOCKED_ATTRIBUTES = [
   "hair colour and hairstyle",
   "face shape and facial features",
@@ -22,6 +35,42 @@ export const LOCKED_ATTRIBUTES = [
   "signature outfit and its colours",
   "accessories",
 ] as const;
+
+/**
+ * Words an operator writes to mean "deliberately not specified".
+ *
+ * Distinct from an empty field only in TONE: both are unstated and neither may
+ * be locked. The sentinel says a person looked at the box and decided to leave
+ * it, so the interface stops nudging - which is the whole point of allowing it.
+ * Never written into a prompt: "apparent age: unknown" is worse than silence,
+ * because it hands the model a word to interpret.
+ */
+const NOT_SPECIFIED = new Set([
+  "unknown",
+  "not_specified",
+  "not specified",
+  "unspecified",
+  "n/a",
+  "na",
+  "none",
+  "-",
+  "chưa rõ",
+  "không rõ",
+  "không xác định",
+  "chưa xác định",
+]);
+
+/** Did somebody actually state a value here? */
+export function isStated(value: string | null | undefined): boolean {
+  const v = (value ?? "").trim();
+  return v.length > 0 && !NOT_SPECIFIED.has(v.toLowerCase());
+}
+
+/** Stated as "we are not saying", as opposed to simply left blank. */
+export function isDeliberatelyUnspecified(value: string | null | undefined): boolean {
+  const v = (value ?? "").trim();
+  return v.length > 0 && NOT_SPECIFIED.has(v.toLowerCase());
+}
 
 /**
  * How much of a 2:3 image survives the crop to 9:16.
@@ -93,10 +142,24 @@ export interface CharacterSheet {
   primaryReference: string | null;
   /** Relative paths of every approved reference, primary first. */
   references: string[];
-  /** Required Bible fields this character has not stated, as labels. */
+  /** Core descriptive fields not stated, as labels. Advice, not a blocker. */
   missingFields: string[];
+  /**
+   * Lockable attributes with no stated value, as labels.
+   *
+   * These are the attributes the prompt will NOT claim to protect. Surfaced so
+   * a person can see the consequence of leaving a box empty rather than
+   * discovering it in the fourth scene.
+   */
+  unlockedAttributes: string[];
+  /** The lock clause this character's prompts will actually carry. */
+  lockedAttributes: string[];
   /** READY / NEEDS_CHARACTER_REFERENCE / NEEDS_IDENTITY_FIELDS. */
   readiness: CharacterReadiness;
+  /** Plain-language notes about the identity. Never blocks anything. */
+  warnings: string[];
+  /** Hash over the appearance fields only. Moves when the look changes. */
+  fingerprint: string;
 }
 
 type CharacterRow = {
@@ -135,33 +198,56 @@ type CharacterRow = {
  * reads as empty words until the thing being locked has been stated.
  */
 export const BIBLE_FIELDS = [
-  { key: "presentation", label: "presentation" },
-  { key: "approximateAge", label: "apparent age" },
-  { key: "skinTone", label: "skin tone" },
-  { key: "hair", label: "hair" },
-  { key: "facialFeatures", label: "face" },
-  { key: "distinguishingFeatures", label: "distinguishing features" },
-  { key: "outfit", label: "outfit" },
-  { key: "bodyProportions", label: "body" },
-  { key: "accessories", label: "accessories" },
-  { key: "colorPalette", label: "colour palette" },
-] as const satisfies ReadonlyArray<{ key: keyof CharacterRow; label: string }>;
+  { key: "presentation", label: "presentation", lock: null },
+  { key: "approximateAge", label: "apparent age", lock: "apparent age" },
+  { key: "skinTone", label: "skin tone", lock: "skin tone" },
+  { key: "hair", label: "hair", lock: "hair colour and hairstyle" },
+  { key: "facialFeatures", label: "face", lock: "face shape and facial features" },
+  {
+    key: "distinguishingFeatures",
+    label: "distinguishing features",
+    lock: "distinguishing features",
+  },
+  { key: "outfit", label: "outfit", lock: "signature outfit and its colours" },
+  { key: "bodyProportions", label: "body", lock: "body proportions" },
+  { key: "accessories", label: "accessories", lock: "accessories" },
+  { key: "colorPalette", label: "colour palette", lock: null },
+] as const satisfies ReadonlyArray<{
+  key: keyof CharacterRow;
+  label: string;
+  /** Wording used in the lock clause, or null for a field that is not lockable. */
+  lock: string | null;
+}>;
 
 /**
- * Bible fields without which a name is not an identity.
+ * Written attributes that describe what a character LOOKS like.
  *
- * A storyboard that says "Max" and nothing else gives the model nothing to hold
- * steady, and it will draw a different Max in every scene - the exact failure
- * this whole subsystem exists to prevent. These five are the minimum: what he
- * looks like from the neck up, what he is wearing, and how big he is.
- *
- * `presentation` and `distinguishingFeatures` are deliberately NOT required:
- * plenty of characters legitimately have neither, and demanding a value would
- * push whoever fills the form into inventing one.
+ * The distinction that matters is against `presentation` and `colorPalette`,
+ * which are framing rather than features, and against age and skin tone, which
+ * are genuinely often unknown. One of these stated is enough for a prompt to
+ * have something to hold on to when the reference image cannot be sent.
  */
-export const REQUIRED_BIBLE_FIELDS = [
-  "approximateAge",
-  "skinTone",
+export const DESCRIPTIVE_BIBLE_FIELDS = [
+  "hair",
+  "facialFeatures",
+  "outfit",
+  "bodyProportions",
+  "distinguishingFeatures",
+] as const;
+
+/**
+ * Attributes worth nudging about, when a character has none of them.
+ *
+ * `approximateAge` and `skinTone` are deliberately ABSENT. They were required
+ * until QĐ-072, which made three fully-specified characters read as incomplete
+ * and - far worse - put both into the lock clause of every prompt with no value
+ * behind either. An attribute nobody has stated is not a fact being protected;
+ * it is a word the model gets to fill in, once, and then be held to.
+ *
+ * They remain in `BIBLE_FIELDS`: an operator who DOES know may still say so, and
+ * saying so is what turns them into a real lock.
+ */
+export const CORE_BIBLE_FIELDS = [
   "hair",
   "facialFeatures",
   "outfit",
@@ -188,47 +274,82 @@ export function buildCanonicalDescription(char: CharacterRow): string {
 
   for (const field of BIBLE_FIELDS) {
     const value = (char[field.key] ?? "").trim();
-    // Skip empties rather than emitting "hair: " - a dangling label invites the
-    // model to invent a value for it.
+    // Skip anything unstated rather than emitting "hair: " - a dangling label
+    // invites the model to invent a value for it, and "apparent age: unknown"
+    // is worse still, because that is a word the model will interpret.
     //
     // This is also what keeps QĐ-070 free: a row created before the four new
     // columns existed has "" in each of them, contributes nothing here, and so
     // produces the identical string - and the identical idempotency hash - it
     // produced before.
-    if (value.length > 0) parts.push(`${field.label}: ${value}`);
+    if (isStated(value)) parts.push(`${field.label}: ${value}`);
   }
 
   return parts.join(". ").replace(/\.\.+/g, ".").trim();
 }
 
+const LABEL_FOR = new Map(BIBLE_FIELDS.map((f) => [f.key as string, f.label]));
+
 /**
- * Which required Bible fields this character has not stated.
+ * Core descriptive fields this character has not stated, as labels.
  *
- * Returns the LABELS rather than the column names, because the only person who
- * acts on this is filling in a form that shows labels.
+ * "Missing" here means worth mentioning, NOT blocking. Age and skin tone are
+ * outside this list on purpose - see `CORE_BIBLE_FIELDS`.
  */
 export function missingBibleFields(char: CharacterRow): string[] {
-  const labelFor = new Map(BIBLE_FIELDS.map((f) => [f.key as string, f.label]));
-  return REQUIRED_BIBLE_FIELDS.filter(
-    (key) => ((char[key] ?? "") as string).trim().length === 0,
-  ).map((key) => labelFor.get(key) ?? key);
+  return CORE_BIBLE_FIELDS.filter((key) => !isStated(char[key])).map(
+    (key) => LABEL_FOR.get(key) ?? key,
+  );
+}
+
+/**
+ * Lockable attributes this character has NO value for, as labels.
+ *
+ * Reported rather than hidden, because their absence has a consequence a person
+ * should be able to see: those attributes are not being protected, and whatever
+ * the model draws for them the first time is what the reference image will make
+ * permanent.
+ */
+export function unlockedAttributes(char: CharacterRow): string[] {
+  return BIBLE_FIELDS.filter((f) => f.lock !== null && !isStated(char[f.key])).map(
+    (f) => f.label,
+  );
+}
+
+/**
+ * The lock clause for ONE character, built from what that character states.
+ *
+ * Only attributes with a real value are named. Anything unstated is handed to
+ * the reference image instead - which is the honest instruction, because the
+ * image is the only place that information exists.
+ *
+ * With no reference image and nothing stated there is nothing to say, and this
+ * returns an empty list rather than a sentence asserting a lock over nothing.
+ * See QĐ-072.
+ */
+export function lockedAttributesFor(char: CharacterRow): string[] {
+  return BIBLE_FIELDS.filter((f) => f.lock !== null && isStated(char[f.key])).map(
+    (f) => f.lock as string,
+  );
 }
 
 /**
  * How ready a character is to be drawn consistently.
  *
- * Three states, and the order of the checks is the order in which they hurt:
- *
- *   NEEDS_CHARACTER_REFERENCE  no approved master image. The model has only
- *                              words to go on. Nothing here generates one -
+ *   NEEDS_CHARACTER_REFERENCE  no reference image at all. Words alone drift,
+ *                              and nothing in this codebase generates one -
  *                              that is a paid call and it belongs to a person.
- *   NEEDS_IDENTITY_FIELDS      an image exists, but the written identity is too
- *                              thin to restate in a prompt, so any scene that
- *                              cannot send the image drifts.
- *   READY                      both halves present.
+ *   NEEDS_IDENTITY_FIELDS      there is a picture and not one descriptive word.
+ *                              A scene the picture cannot be attached to has
+ *                              nothing whatsoever to hold on to.
+ *   READY                      a reference image, plus at least one stated
+ *                              feature.
  *
- * A character can be BOTH, and the reference is reported first because it is
- * the one an operator has to supply rather than type.
+ * READY does NOT mean complete. A character with a reference image and only
+ * `hair` filled in is ready to produce consistent work, and `warnings` says
+ * what would make it sturdier. Requiring a full sheet before letting an import
+ * proceed was the wrong trade: it blocked work that would have come out fine,
+ * and pushed whoever was blocked into inventing values to get past the gate.
  */
 export type CharacterReadiness =
   | "READY"
@@ -236,12 +357,61 @@ export type CharacterReadiness =
   | "NEEDS_IDENTITY_FIELDS";
 
 export function characterReadiness(input: {
-  hasApprovedReference: boolean;
-  missingFields: string[];
+  hasReference: boolean;
+  /** Any stated descriptive feature at all - hair, face, outfit, body, marks. */
+  hasAnyDescriptiveField: boolean;
 }): CharacterReadiness {
-  if (!input.hasApprovedReference) return "NEEDS_CHARACTER_REFERENCE";
-  if (input.missingFields.length > 0) return "NEEDS_IDENTITY_FIELDS";
+  if (!input.hasReference) return "NEEDS_CHARACTER_REFERENCE";
+  if (!input.hasAnyDescriptiveField) return "NEEDS_IDENTITY_FIELDS";
   return "READY";
+}
+
+export function hasAnyDescriptiveField(char: CharacterRow): boolean {
+  return DESCRIPTIVE_BIBLE_FIELDS.some((key) => isStated(char[key]));
+}
+
+/**
+ * A hash over the IDENTITY of a character, and nothing else.
+ *
+ * `description`, `personality`, `notes` and every voice setting are excluded on
+ * purpose: none of them changes what the character looks like, so none of them
+ * should invalidate a reference image that was approved against the old row.
+ * Bumping the version for a typo fix in a note is how an approved master starts
+ * reading as stale.
+ *
+ * Built from `BIBLE_FIELDS` in list order plus the free-text visual prompt and
+ * the identity negatives, so it moves exactly when the appearance does.
+ */
+export function identityFingerprint(char: CharacterRow): string {
+  const parts = [
+    char.visualPrompt.trim(),
+    (char.negativeIdentity ?? "").trim(),
+    ...BIBLE_FIELDS.map((f) => `${f.key}=${(char[f.key] ?? "").trim()}`),
+  ];
+  return sha256(parts.join("\u0000")).slice(0, 16);
+}
+
+/**
+ * Find a character by name, ignoring case.
+ *
+ * `Character.name` is unique, and SQLite compares strings with a BINARY
+ * collation - so `findUnique({ name: "max" })` misses a stored "Max" and the
+ * caller happily creates a SECOND person with the same name in different
+ * capitals. Two rows, two faces, one character as far as the viewer is
+ * concerned. See QĐ-072.
+ *
+ * The exact match is tried first so the common path stays one indexed lookup;
+ * the scan only runs when that misses, and the table is small by construction.
+ */
+export async function findCharacterByName(name: string) {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return null;
+  const exact = await prisma.character.findUnique({ where: { name: trimmed } });
+  if (exact) return exact;
+  const folded = trimmed.toLowerCase();
+  const all = await prisma.character.findMany({ select: { id: true, name: true } });
+  const hit = all.find((c) => c.name.trim().toLowerCase() === folded);
+  return hit ? prisma.character.findUnique({ where: { id: hit.id } }) : null;
 }
 
 /** Load one character as a prompt-ready sheet. */
@@ -266,8 +436,12 @@ export async function getCharacterSheetsByName(
   names: string[],
 ): Promise<CharacterSheet[]> {
   if (names.length === 0) return [];
+  // Every character, then matched case-insensitively in memory. Filtering in
+  // SQL would use SQLite's BINARY collation, so a scene that says "max" would
+  // silently get no sheet for a character stored as "Max" - and a prompt with
+  // no identity block is exactly the failure this module exists to prevent.
+  // The table holds a handful of rows by construction. See QĐ-072.
   const rows = await prisma.character.findMany({
-    where: { name: { in: names } },
     include: {
       references: {
         where: { approved: true },
@@ -275,10 +449,15 @@ export async function getCharacterSheetsByName(
       },
     },
   });
-  const byName = new Map(rows.map((r) => [r.name, r]));
+  const byFoldedName = new Map(rows.map((r) => [r.name.trim().toLowerCase(), r]));
+  const seen = new Set<string>();
   return names
-    .map((n) => byName.get(n))
+    .map((n) => byFoldedName.get(n.trim().toLowerCase()))
     .filter((r): r is NonNullable<typeof r> => r !== undefined)
+    // Two spellings of one name in one scene must not produce two sheets - the
+    // prompt would then describe the same person twice and the reference cap
+    // would spend one of its slots on a duplicate.
+    .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
     .map(toSheet);
 }
 
@@ -291,6 +470,33 @@ function toSheet(
   // APPROVED primary - which is the only kind that counts as a master.
   const primary = char.references.find((r) => r.isPrimary);
   const missingFields = missingBibleFields(char);
+  const unlocked = unlockedAttributes(char);
+  // A reference image is a reference image. Requiring the PRIMARY flag as well
+  // made a character with a perfectly good approved picture read as having
+  // none, purely because nobody had pressed "đặt làm ảnh chính".
+  const hasReference = char.references.length > 0;
+
+  const warnings: string[] = [];
+  if (missingFields.length > 0) {
+    warnings.push(
+      `Hồ sơ nhận dạng chưa đầy đủ — chưa khai báo: ${missingFields.join(", ")}. ` +
+        `Vẫn chạy được (ảnh tham chiếu đang gánh phần này), nhưng cảnh nào không ` +
+        `gửi kèm được ảnh sẽ dựa vào ít chữ hơn.`,
+    );
+  }
+  if (unlocked.length > 0) {
+    warnings.push(
+      `Không khoá: ${unlocked.join(", ")} — chưa có giá trị nào để khoá, nên ` +
+        `prompt sẽ giao những thứ này cho ảnh tham chiếu thay vì tuyên bố suông.`,
+    );
+  }
+  if (hasReference && primary === undefined) {
+    warnings.push(
+      "Có ảnh tham chiếu nhưng chưa ảnh nào được đặt làm ảnh CHÍNH. " +
+        "Ảnh chính là ảnh được gửi kèm trước nhất khi nhà cung cấp giới hạn số ảnh.",
+    );
+  }
+
   return {
     id: char.id,
     name: char.name,
@@ -299,13 +505,17 @@ function toSheet(
     negative: char.negativePrompt.trim(),
     negativeIdentity: (char.negativeIdentity ?? "").trim(),
     seed: char.seed,
-    primaryReference: primary?.filePath ?? null,
+    primaryReference: primary?.filePath ?? char.references[0]?.filePath ?? null,
     references: char.references.map((r) => r.filePath),
     missingFields,
+    unlockedAttributes: unlocked,
+    lockedAttributes: lockedAttributesFor(char),
     readiness: characterReadiness({
-      hasApprovedReference: primary !== undefined,
-      missingFields,
+      hasReference,
+      hasAnyDescriptiveField: hasAnyDescriptiveField(char),
     }),
+    warnings,
+    fingerprint: identityFingerprint(char),
   };
 }
 
@@ -335,8 +545,10 @@ export async function requireCharacterSheetsByName(
   names: string[],
 ): Promise<CharacterSheet[]> {
   const sheets = await getCharacterSheetsByName(names);
-  const found = new Set(sheets.map((s) => s.name));
-  const missing = names.filter((n) => !found.has(n));
+  // Folded, to agree with the lookup. Comparing exact spellings here would
+  // report "max" as missing on the very call that just resolved it to "Max".
+  const found = new Set(sheets.map((s) => s.name.trim().toLowerCase()));
+  const missing = names.filter((n) => !found.has(n.trim().toLowerCase()));
   if (missing.length > 0) throw new UnknownCharacterError(missing);
   return sheets;
 }
@@ -406,11 +618,47 @@ export function buildScenePrompt(input: {
       lines.push(`- ${c.name}: ${c.canonical}.`);
     }
     lines.push("");
-    lines.push(
-      `Keep ${listNames(input.characters)} identical to the reference: ` +
-        `${LOCKED_ATTRIBUTES.join(", ")} must not change. ` +
-        "Only pose, expression and camera angle may differ.",
-    );
+    // THE LOCK CLAUSE NAMES ONLY WHAT SOMEBODY STATED.
+    //
+    // Until QĐ-072 this pasted the whole `LOCKED_ATTRIBUTES` vocabulary into
+    // every prompt, so a character whose row said nothing about apparent age
+    // was nonetheless told that its apparent age must not change. There was
+    // nothing for that to mean: the model picked an age, and the sentence then
+    // lent authority to the pick. Attributes with no value now go to the
+    // reference image, which is the only place that information exists.
+    // ONE LINE PER CHARACTER, because they do not state the same things.
+    //
+    // A union across the cast would put "signature outfit and its colours" in
+    // front of a character whose row says nothing about an outfit - the same
+    // fake lock, rebuilt at the level of the group. Two characters in a shot is
+    // the normal case here, so this stays short.
+    const anyReference = input.characters.some((c) => c.primaryReference);
+    let saidSomething = false;
+    for (const c of input.characters) {
+      const locked = c.lockedAttributes ?? [];
+      if (locked.length > 0) {
+        lines.push(
+          `Keep ${c.name} identical to the reference: ${locked.join(", ")} must not change.`,
+        );
+        saidSomething = true;
+      } else if (c.primaryReference) {
+        lines.push(
+          `Keep ${c.name} identical to the reference image in every respect.`,
+        );
+        saidSomething = true;
+      }
+    }
+    if (saidSomething) {
+      lines.push("Only pose, expression and camera angle may differ.");
+      // Everything the sheets do not pin down, pinned to the picture instead -
+      // which is the only place that information actually exists.
+      if (anyReference) {
+        lines.push(
+          "Every other aspect of their appearance must match the reference " +
+            "image exactly, whether or not it is described above.",
+        );
+      }
+    }
     if (input.expressionOverride) lines.push(input.expressionOverride);
   }
 
@@ -424,12 +672,6 @@ export function buildScenePrompt(input: {
   }
 
   return lines.join("\n");
-}
-
-function listNames(characters: CharacterSheet[]): string {
-  const names = characters.map((c) => c.name);
-  if (names.length <= 1) return names[0] ?? "the character";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 /** Merge each character's negative prompt with the shared image negatives. */
