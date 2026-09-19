@@ -309,6 +309,15 @@ export const VIDEO_PLAN_STATUSES = [
    * among the work being approved. The one plan status money cannot fix. QĐ-076.
    */
   "NEEDS_CHARACTER_REFERENCE",
+  /**
+   * A model this video would pay has not had its price confirmed by a person.
+   *
+   * The second money lock, and the one batch `a690a290` died on mid-run: the
+   * approval says how much may be spent, confirmation says a human has looked
+   * at THIS model's price and agreed. Nothing checked it at plan time, so the
+   * plan read OK until the first request was refused. See QĐ-078.
+   */
+  "NEEDS_PROVIDER_CONFIRMATION",
 ] as const;
 export type VideoPlanStatus = (typeof VIDEO_PLAN_STATUSES)[number];
 
@@ -404,6 +413,7 @@ export const VI_VIDEO_PLAN_STATUS: Record<VideoPlanStatus, string> = {
   OVER_VIDEO_BUDGET: "Vượt hạn mức/video",
   NEEDS_PROVIDER: "Thiếu provider được duyệt",
   NEEDS_CHARACTER_REFERENCE: "Thiếu nhận dạng nhân vật",
+  NEEDS_PROVIDER_CONFIRMATION: "Chưa xác nhận giá model",
 };
 
 export const VI_JOB_STATUS: Record<JobStatus, string> = {

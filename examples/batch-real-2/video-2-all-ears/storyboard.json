@@ -1,0 +1,77 @@
+{
+  "video_id": "all-ears",
+  "video_title": "All ears",
+  "characters": [
+    {
+      "character_id": "max",
+      "character_name": "Max"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 4,
+      "visual_description": "Max against a plain warm cream background, leaning very slightly towards the camera, ordinary ears.",
+      "character_action": "Max stays leaning and waits.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Go on, tell me the gossip.\"",
+      "subtitle": "Go on, tell me the gossip.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    },
+    {
+      "scene_number": 2,
+      "duration": 4,
+      "visual_description": "Max on the same plain background, now with enormous cartoon ears roughly the size of dinner plates.",
+      "character_action": "Max holds completely still, ears enormous.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"I am all ears.\"",
+      "subtitle": "I am all ears.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    },
+    {
+      "scene_number": 3,
+      "duration": 4,
+      "visual_description": "Close on the same plain background, Max unchanged with the huge ears, a flat unimpressed expression.",
+      "character_action": "Max holds the pose and does not move.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"This is not what that means, is it.\"",
+      "subtitle": "This is not what that means, is it.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    },
+    {
+      "scene_number": 4,
+      "duration": 4,
+      "visual_description": "Max on a plain warm cream background with ordinary ears again, relaxed.",
+      "character_action": "Max stands still.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"All ears just means listening carefully.\"",
+      "subtitle": "All ears = listening carefully.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    },
+    {
+      "scene_number": 5,
+      "duration": 4,
+      "visual_description": "Max on the same plain background, a small friendly expression.",
+      "character_action": "Max holds the pose.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Tell me everything, I am all ears.\"",
+      "subtitle": "Tell me everything, I am all ears.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    }
+  ]
+}

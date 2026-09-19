@@ -3,7 +3,7 @@ import { logger } from "@/lib/logger";
 import { round } from "@/lib/utils";
 import { basisForProviders, recommendAuthorization } from "@/domain/cost-basis";
 import type { QualityMode, VideoPlanStatus } from "@/domain/enums";
-import { spendStatus } from "./spend-guard";
+import { confirmedProviders, spendStatus } from "./spend-guard";
 import { providerSpendBreakdown } from "./provider-budget";
 import { productionProviderNames, availableProviderNames } from "./provider-health";
 import { previewProjectCost } from "./project-service";
@@ -145,6 +145,16 @@ export interface ImportVideoPreview {
   };
   counts: AssetCounts;
   estimatedCost: number;
+  /**
+   * What this video would cost with NO per-video ceiling in the way.
+   *
+   * Equal to `estimatedCost` for a video that fits. For one that does not, the
+   * estimator walks the budget down scene by scene and stops pricing when it
+   * runs out, so `estimatedCost` is the part that FITTED - a truncated figure
+   * that reads like a total. This is the real one, and the difference is how
+   * much the ceiling would have to rise. See QĐ-081.
+   */
+  uncappedCost: number;
   status: VideoPlanStatus;
   /**
    * Where this ONE video is in its own life, independent of its neighbours.
@@ -160,6 +170,16 @@ export interface ImportVideoPreview {
   warnings: string[];
   /** Cast of this video, resolved against the character table. */
   characters: ImportVideoCharacter[];
+  /**
+   * `provider/model` pairs this video would pay, and whether each is CONFIRMED.
+   *
+   * Confirmation is the second money lock: the batch approval answers "how much
+   * may be spent", this answers "has a person looked at THIS model's price and
+   * agreed to it". Batch `a690a290` passed the first and died on the second
+   * mid-run, and nothing checked it at plan time - so the plan said OK right up
+   * until the first request was refused. See QĐ-078.
+   */
+  paidModels: { key: string; confirmed: boolean }[];
   /**
    * Hash of the storyboard this video was imported from.
    *
@@ -210,6 +230,45 @@ export interface ImportVideoCharacter {
   sceneCount: number;
 }
 
+/**
+ * Every `provider/model` a plan would actually PAY, and whether each is confirmed.
+ *
+ * Confirmation is the second money lock. The batch approval answers "how much
+ * may be spent"; this answers "has a person looked at THIS model's price and
+ * agreed to it". Batch `a690a290` passed the first and died on the second
+ * mid-run, and nothing checked it at plan time - so the plan read OK right up
+ * until the first request was refused.
+ *
+ * Mock is exempt, and that is not a loophole: `assertCanSpend` returns early in
+ * mock mode because a mock call costs nothing, so demanding confirmation for it
+ * would block every test while protecting no money.
+ *
+ * Pure, and exported, so the rule can be checked without a database or a live
+ * provider - the gate only has meaning with mock mode off, which makes the
+ * whole-pipeline version of this test need an environment it should not need.
+ * See QĐ-078.
+ */
+export function paidModelsFor(
+  scenes: ReadonlyArray<{
+    image: { provider: string; modelId: string } | null;
+    video: { provider: string; modelId: string } | null;
+    voice: { provider: string; modelId: string } | null;
+  }>,
+  confirmed: readonly string[],
+): { key: string; confirmed: boolean }[] {
+  return [
+    ...new Set(
+      scenes
+        .flatMap((sc) => [sc.image, sc.video, sc.voice])
+        .filter((d): d is NonNullable<typeof d> => d !== null)
+        .filter((d) => d.provider !== "mock")
+        .map((d) => `${d.provider}/${d.modelId}`),
+    ),
+  ]
+    .sort()
+    .map((key) => ({ key, confirmed: confirmed.includes(key) }));
+}
+
 export interface ImportPreflight {
   batchId: string;
   batchName: string;
@@ -221,11 +280,15 @@ export interface ImportPreflight {
   totalVideoAi: number;
   /** Every distinct character in the batch, de-duplicated by name. */
   characters: ImportVideoCharacter[];
+  /** Every paid `provider/model` the batch would use, and its confirmation. */
+  paidModels: { key: string; confirmed: boolean }[];
   /** How many videos sit in each lifecycle state. */
   lifecycleCounts: Record<ImportVideoLifecycle, number>;
   estimatedTotal: number;
   /** Sum including videos that cannot run, so nothing is hidden. */
   estimatedTotalIncludingBlocked: number;
+  /** The same, but each video at its uncapped cost. What the batch really is. */
+  estimatedTotalUncapped: number;
   runnableCount: number;
   blockedCount: number;
   maxCostPerVideo: number;
@@ -289,12 +352,13 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     throw new Error("Lô nhập chưa có video nào. Hãy nhập storyboard trước.");
   }
 
-  const [cap, wallets, production, available, authorization] = await Promise.all([
+  const [cap, wallets, production, available, authorization, confirmed] = await Promise.all([
     spendStatus(),
     providerSpendBreakdown(),
     productionProviderNames(),
     availableProviderNames(),
     prisma.batchAuthorization.findUnique({ where: { batchId } }),
+    confirmedProviders(),
   ]);
   const moneyApproved = authorization?.status === "APPROVED";
 
@@ -398,6 +462,9 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       )
       .map((c) => c.name);
 
+    const paidModels = paidModelsFor(estimate.scenes, confirmed);
+    const unconfirmed = paidModels.filter((m) => !m.confirmed).map((m) => m.key);
+
     const videoWarnings: string[] = [...estimate.errors];
 
     // Budget verdict FIRST, exactly as `planBatch` orders it, and for the same
@@ -423,6 +490,13 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       videoWarnings.push(
         "Video này sẽ KHÔNG chạy; các video khác trong lô không bị ảnh hưởng.",
       );
+    } else if (unconfirmed.length > 0) {
+      status = "NEEDS_PROVIDER_CONFIRMATION";
+      videoWarnings.push(
+        `Chưa xác nhận giá cho: ${unconfirmed.join(", ")}. Mở trang "Nhà cung cấp AI", ` +
+          `xem giá và bấm xác nhận — nếu không, request trả phí ĐẦU TIÊN sẽ bị từ chối ` +
+          `giữa chừng, đúng như lô a690a290 đã dừng.`,
+      );
     } else if (ranOutOfBudget || overCeiling) {
       status = "OVER_VIDEO_BUDGET";
       videoWarnings.push(
@@ -447,6 +521,24 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       ),
     ].sort();
 
+    // A video already known to be over its ceiling gets priced a SECOND time
+    // with the ceiling lifted, because the first figure is the part that fitted
+    // rather than the cost. Pure computation - no provider is contacted, and
+    // only videos that are already blocked pay for the extra pass. QĐ-081.
+    // Keyed on TRUNCATION, not on which label won. The estimator stops pricing
+    // when the per-video budget runs out whatever the video is eventually
+    // called - "Bite the bullet" was labelled NEEDS_PROVIDER_CONFIRMATION and
+    // its figure was truncated all the same, so a check on the label reported
+    // the short number as the cost.
+    const truncated = ranOutOfBudget || overCeiling;
+    const uncappedCost = truncated
+      ? round(
+          (await previewProjectCost(project.id, { ignoreBudget: true })).current.breakdown
+            .total,
+          6,
+        )
+      : total;
+
     // A video's own state, decided by its own row and its own price.
     //
     // The order is "what has already happened" before "what is in the way",
@@ -468,12 +560,19 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     } else if (status !== "OK") {
       lifecycle = "BLOCKED";
       blockedReason =
-        status === "NEEDS_CHARACTER_REFERENCE"
+        status === "NEEDS_PROVIDER_CONFIRMATION"
+          ? `Chưa xác nhận giá cho: ${unconfirmed.join(", ")}. Quyền chi của lô trả lời ` +
+            `"được tiêu bao nhiêu"; danh sách xác nhận trả lời "đã nhìn giá model này ` +
+            `và đồng ý chưa". Phải có cả hai.`
+          : status === "NEEDS_CHARACTER_REFERENCE"
           ? `Không thể vẽ nhất quán: ${unusableCharacters.join(", ")} — chưa có ảnh ` +
             `tham chiếu VÀ chưa có một chữ nào mô tả ngoại hình. Tải ảnh lên hoặc ` +
             `điền hồ sơ nhân vật rồi dự toán lại.`
           : status === "OVER_VIDEO_BUDGET"
-            ? `Dự toán $${total.toFixed(6)} vượt trần $${batch.maxCostPerVideo.toFixed(2)} cho một video.`
+            ? `Video này thật ra tốn $${uncappedCost.toFixed(6)}, vượt trần ` +
+              `$${batch.maxCostPerVideo.toFixed(2)} cho một video ` +
+              `$${(uncappedCost - batch.maxCostPerVideo).toFixed(6)}. ` +
+              `(Con số $${total.toFixed(6)} bên trên chỉ là phần LỌT vào trần.)`
             : (estimate.needsProvider[0] ??
               estimate.errors[0] ??
               "Có cảnh chưa định tuyến được model.");
@@ -487,6 +586,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       lifecycle,
       blockedReason,
       characters,
+      paidModels,
       importFingerprint: project.importFingerprint,
       duplicateOf: project.importFingerprint
         ? (
@@ -520,6 +620,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       },
       counts,
       estimatedCost: total,
+      uncappedCost,
       status,
       warnings: videoWarnings,
       scenes: sceneLines,
@@ -642,6 +743,15 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         (a, b) => b.sceneCount - a.sceneCount || a.name.localeCompare(b.name),
       );
     })(),
+    paidModels: (() => {
+      const byKey = new Map<string, boolean>();
+      for (const v of videos) {
+        for (const m of v.paidModels) byKey.set(m.key, m.confirmed);
+      }
+      return [...byKey.entries()]
+        .map(([key, confirmed]) => ({ key, confirmed }))
+        .sort((a, b) => a.key.localeCompare(b.key));
+    })(),
     lifecycleCounts: IMPORT_VIDEO_LIFECYCLE.reduce(
       (acc, state) => {
         acc[state] = videos.filter((v) => v.lifecycle === state).length;
@@ -651,6 +761,13 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     ),
     estimatedTotal,
     estimatedTotalIncludingBlocked: estimatedAll,
+    // The honest "if everything ran" figure: each video at its UNCAPPED cost,
+    // so a blocked video contributes what it would really cost rather than the
+    // part that happened to fit before the estimator ran out.
+    estimatedTotalUncapped: round(
+      videos.reduce((n, v) => n + v.uncappedCost, 0),
+      6,
+    ),
     runnableCount: runnable.length,
     blockedCount: planned.length - runnable.length,
     maxCostPerVideo: batch.maxCostPerVideo,

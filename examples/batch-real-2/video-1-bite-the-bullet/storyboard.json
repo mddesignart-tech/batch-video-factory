@@ -1,0 +1,77 @@
+{
+  "video_id": "bite-the-bullet",
+  "video_title": "Bite the bullet",
+  "characters": [
+    {
+      "character_id": "max",
+      "character_name": "Max"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 4,
+      "visual_description": "Max stands against a plain pale blue background, holding a comically large dentist appointment card at chest height.",
+      "character_action": "Max holds the card still and stares at it.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"The dentist. Today.\"",
+      "subtitle": "The dentist. Today.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    },
+    {
+      "scene_number": 2,
+      "duration": 4,
+      "visual_description": "Max on the same plain background, an oversized cartoon bullet held between his teeth like a dog with a stick.",
+      "character_action": "Max keeps the bullet in his teeth and stays completely still.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"So I am biting the bullet.\"",
+      "subtitle": "So I am biting the bullet.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    },
+    {
+      "scene_number": 3,
+      "duration": 5,
+      "visual_description": "Max alone against a plain light grey background, the bullet gone, shoulders squared.",
+      "character_action": "Max closes his eyes for a moment, sets his jaw, then gives one small nod.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"...not literally. Obviously.\"",
+      "subtitle": "...not literally. Obviously.",
+      "motion_mode": "VIDEO_AI",
+      "priority": "HIGH",
+      "character_id": "max",
+      "character_name": "Max"
+    },
+    {
+      "scene_number": 4,
+      "duration": 4,
+      "visual_description": "Max on a plain light grey background, calm, arms relaxed at his sides.",
+      "character_action": "Max stands still and looks at the camera.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Bite the bullet means do the hard thing anyway.\"",
+      "subtitle": "Bite the bullet = do the hard thing anyway.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    },
+    {
+      "scene_number": 5,
+      "duration": 4,
+      "visual_description": "Max on the same plain background, a small steady expression.",
+      "character_action": "Max holds the pose.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"She bit the bullet and told her boss the truth.\"",
+      "subtitle": "She bit the bullet and told her boss the truth.",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW",
+      "character_id": "max",
+      "character_name": "Max"
+    }
+  ]
+}

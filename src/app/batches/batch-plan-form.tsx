@@ -52,6 +52,7 @@ const STATUS_TONE: Record<VideoPlanStatus, "ok" | "warn" | "danger"> = {
   OVER_VIDEO_BUDGET: "danger",
   NEEDS_PROVIDER: "warn",
   NEEDS_CHARACTER_REFERENCE: "danger",
+  NEEDS_PROVIDER_CONFIRMATION: "danger",
 };
 
 export function BatchPlanForm({

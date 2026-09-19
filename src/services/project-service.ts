@@ -313,6 +313,19 @@ export interface ProjectCostPreview {
 
 export async function previewProjectCost(
   projectId: string,
+  opts: {
+    /**
+     * Price the project as if the per-video ceiling were not there.
+     *
+     * The estimator walks the budget down scene by scene, so a project that
+     * runs out stops pricing and reports a TRUNCATED figure - which then reads
+     * as the video's cost. It is not: it is the part that fitted. For a video
+     * already known to be over its ceiling, the useful number is what it would
+     * really cost, because that is what the operator needs in order to decide
+     * how much to raise the ceiling by. See QĐ-081.
+     */
+    ignoreBudget?: boolean;
+  } = {},
 ): Promise<ProjectCostPreview> {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) throw new Error("Không tìm thấy dự án.");
@@ -327,7 +340,7 @@ export async function previewProjectCost(
   const base = {
     scenes,
     models,
-    maxBudget: project.maxBudget,
+    maxBudget: opts.ignoreBudget ? Number.MAX_SAFE_INTEGER : project.maxBudget,
     availableProviders,
     // Native 1080p is a QUALITY-mode demand, exactly as services/generation
     // decides it at generation time. Hardcoding `true` here made the PREVIEW
@@ -343,6 +356,10 @@ export async function previewProjectCost(
     // The environment half of the LOW_AUTO gate. Real wallets, so the preview
     // cannot promise a clip this account has no money for.
     providerBudgets: Object.fromEntries(wallets.map((w) => [w.provider, w.remainingUsd])),
+    // The script is already written - imported, or generated earlier and stored.
+    // Either way no text model will be called, so pricing one prices work that
+    // will not happen. QĐ-079.
+    hasScript: project.scriptJson !== null && project.scriptJson.trim().length > 0,
   };
 
   const current = estimateProject({

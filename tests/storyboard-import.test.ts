@@ -637,7 +637,17 @@ describe("tạo lô từ storyboard (mock mode, $0)", () => {
     expect(pre.blockedCount).toBe(1);
     // Tổng "chạy được" không được tính tiền của video bị chặn.
     expect(pre.estimatedTotal).toBeCloseTo(cheap.estimatedCost, 6);
-    expect(pre.estimatedTotalIncludingBlocked).toBeGreaterThan(pre.estimatedTotal);
+    expect(pre.estimatedTotalIncludingBlocked).toBeGreaterThanOrEqual(pre.estimatedTotal);
+
+    // QĐ-081. `estimatedCost` của một video vượt trần là phần LỌT VÀO trần, vì
+    // bộ dự toán đi dần theo từng cảnh rồi dừng khi hết tiền. Con số thật nằm ở
+    // `uncappedCost`, và chính nó mới nói được "phải nâng trần thêm bao nhiêu".
+    expect(pricey.uncappedCost).toBeGreaterThan(pricey.estimatedCost);
+    expect(pricey.uncappedCost).toBeGreaterThan(0.5);
+    expect(pricey.blockedReason).toContain("thật ra tốn");
+    // Video chạy được thì hai con số bằng nhau — không có gì bị cắt.
+    expect(cheap.uncappedCost).toBeCloseTo(cheap.estimatedCost, 6);
+    expect(pre.estimatedTotalUncapped).toBeGreaterThan(pre.estimatedTotalIncludingBlocked);
   });
 
   it("vượt trần cả lô thì cảnh báo, không tự nâng trần", async () => {

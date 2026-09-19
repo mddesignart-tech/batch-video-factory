@@ -2456,3 +2456,123 @@ thời điểm. Nhờ vậy:
 Và điều phải đúng bằng mọi giá: **nhập không tạo `ProviderJob` hay
 `CostReservation` nào**, quyền chi cả hai lô đều `DRAFT`, trần đã duyệt = 0. Có
 test khẳng định trực tiếp thay vì tin lời.
+
+---
+
+## QĐ-078 — Quyền chi trả lời "bao nhiêu", xác nhận trả lời "model này thì sao"
+
+Lô `a690a290` qua được ổ khoá thứ nhất và **chết ở ổ thứ hai**, giữa chừng, sau
+clip đầu tiên: `runway/h3_max:768x1280` không nằm trong `spend.confirmedProviders`
+(QĐ-062). Từ đó tới nay **không có gì kiểm điều này ở lúc lập kế hoạch** — bản dự
+toán vẫn báo OK cho tới đúng lúc request trả phí đầu tiên bị từ chối.
+
+Preflight nay gom mọi cặp `provider/model` mà lô **sẽ thật sự trả tiền**, đối
+chiếu với danh sách xác nhận, và đánh video đó `BLOCKED` với status mới
+`NEEDS_PROVIDER_CONFIRMATION`. Hệ quả kèm theo, nhờ QĐ-076: **tiền của video bị
+chặn ra khỏi `estimatedTotal`**, nên trần đề xuất không còn được dựng trên công
+việc sẽ không chạy.
+
+`mock` được miễn, và đó không phải lỗ hổng: `assertCanSpend` thoát sớm ở chế độ
+mock vì một lệnh gọi mock không tốn gì. Đòi xác nhận cho nó sẽ chặn mọi bài test
+mà chẳng bảo vệ đồng nào.
+
+Luật được tách thành `paidModelsFor` — thuần, xuất ra ngoài — và test ở đó thay
+vì qua cả đường ống, vì cổng này **chỉ có nghĩa khi tắt mock**, và một bài test
+cần provider thật để chứng minh một luật an toàn là một bài test sẽ bị bỏ qua.
+
+---
+
+## QĐ-079 — Đừng tính tiền viết một kịch bản đã viết rồi
+
+Storyboard nhập vào mang theo cảnh đã soạn. Dự án được tạo thẳng ở
+`script_ready` và **không bao giờ có lệnh gọi model text nào**. Bộ dự toán vẫn
+tính tiền cho một lần viết kịch bản — đúng cái sai QĐ-067 đã sửa cho keyframe có
+sẵn: **định giá công việc đường ống sẽ không làm**, và giấu mất khoản tiết kiệm
+vốn là lý do người ta nhập storyboard.
+
+`EstimateInput.hasScript` tắt cả ba lệnh gọi (viết, tự chấm, metadata).
+`previewProjectCost` truyền vào từ chính hàng dự án: `scriptJson` có nội dung
+nghĩa là kịch bản đã tồn tại, bất kể nó tới từ bản nhập hay từ một lần chạy
+trước.
+
+Không chỉ là con số đẹp hơn. Ngân sách được **đi dần theo từng cảnh**, bắt đầu
+từ tiền text — nên khoản text ma còn **ăn mất chỗ của cảnh cuối**. Trong lần
+preflight thật, cảnh 5 của *Bite the bullet* mất ảnh vì lý do đó.
+
+---
+
+## QĐ-080 — Preflight sản xuất: giá thật, DB riêng, và không có nút nào để tiêu
+
+`scripts/production-preflight.ts` trả lời đúng một câu — *"lô này có được duyệt
+không, và bao nhiêu"* — bằng giá thật, registry thật, ví thật, rồi **dừng**. Cố ý
+không có cờ nào khiến nó tiêu tiền.
+
+### Chạy trên DB riêng, nhưng chép SỰ THẬT sang
+
+Nhập tạo ra hàng: dự án, cảnh, và `Character` — vốn không thuộc về cái lô đầu
+tiên nhắc tới chúng. Một bản preflight làm bẩn bảng production để trả lời một
+câu hỏi về tiền thì không phải preflight.
+
+Nhưng một DB sạch cũng **không trả lời đúng được**. Nên bốn thứ được chép sang
+nguyên vẹn, vì câu trả lời phụ thuộc vào chúng:
+
+| Chép sang | Vì sao |
+|---|---|
+| `ModelRegistry` | giá, vòng đời và độ tin cậy — cả ba đều đổi câu trả lời |
+| `ProviderConfig` | quyết định **khả dụng**. Thiếu nó, mọi nhà cung cấp đọc ra "chưa sẵn sàng" và router từ chối mọi cảnh — trông y hệt một lỗi định tuyến, mà không phải |
+| `Character` + ảnh | chép **nguyên id**: id là thứ ảnh tham chiếu trỏ tới, và nhân vật có ảnh thuộc về hàng khác là nhân vật không có ảnh |
+| `StylePreset` | được dán vào mọi prompt ảnh, nên preset khác là đang định giá một bức ảnh khác |
+
+Hạn mức thì **không** chép thẳng: phần "đã chi" nằm ở `CostEntry` không chép
+sang, nên DB riêng sẽ đọc ra "chưa tiêu gì" và hứa một khoảng trống không có
+thật. Thay vào đó cap được hạ xuống đúng **phần còn lại thật**
+($8,00 − $6,801137 = $1,198863), khiến mọi phép kiểm ngân sách ở đây chặt đúng
+bằng lần chạy thật.
+
+### `AI_MOCK_MODE=false` nghĩa là gì và KHÔNG nghĩa là gì
+
+Nghĩa là dùng giá thật trong registry và `costBasis` đọc ra `PRODUCTION_ESTIMATE`
+thay vì `MOCK`. **Không** nghĩa là mua gì: mọi lệnh gọi ở đây đều là đọc, và lô
+được để lại `PLANNED` + quyền chi `DRAFT`, vốn không cho tiêu một đồng. GET miễn
+phí — số dư Runway — được phép và được ghi rõ là GET.
+
+Bảy phép kiểm cuối cùng chứng minh điều đó thay vì tuyên bố nó:
+`ProviderJob = 0`, `CostReservation = 0`, chi thật = 0, quyền chi DRAFT, trần đã
+duyệt = 0, lô PLANNED, `CREATE_ATTEMPT_TOKEN` = null.
+
+---
+
+## QĐ-081 — Một con số bị cắt cụt im lặng còn tệ hơn không có con số
+
+Bộ dự toán **đi dần theo ngân sách, cảnh này qua cảnh khác**. Cảnh nào không còn
+chỗ thì không được định giá — và tổng in ra là **phần LỌT VÀO trần**, chứ không
+phải chi phí của video. Nó đọc y hệt một cái tổng.
+
+Tôi tự vấp đúng cái đó trong lần preflight thật: *Bite the bullet* báo
+**$0,609900**, và cảnh 5 lặng lẽ mất ảnh vì ngân sách hết ở cảnh 4. Con số thật
+là **$0,659300**. Chênh $0,0494 — vừa đủ để chọn sai mức trần cần nâng.
+
+Video nào bị cắt cụt thì được định giá **lần thứ hai** với trần gỡ ra, và cả hai
+con số đều hiện:
+
+```
+TONG VIDEO NAY   $0.609900 (phan LOT vao tran) — that ra $0.659300
+BI CHAN VI       ... thật ra tốn $0,659300, vượt trần $0,60 một khoản $0,059300
+```
+
+Điều kiện kích hoạt là **BỊ CẮT CỤT**, không phải nhãn trạng thái. Bản sửa đầu
+tiên của tôi kiểm `status === "OVER_VIDEO_BUDGET"`, và *Bite the bullet* lại
+được gán nhãn `NEEDS_PROVIDER_CONFIRMATION` — cắt cụt y như cũ, mà kiểm theo
+nhãn thì vẫn báo con số ngắn. Cắt cụt xảy ra khi ngân sách cạn, bất kể video đó
+cuối cùng được gọi tên là gì.
+
+Lần định giá thứ hai là tính toán thuần, không gọi nhà cung cấp nào, và chỉ chạy
+cho video **đã biết là bị chặn**.
+
+### Một test cũ từng xanh nhờ một khoản tiền ma
+
+`estimatedTotalIncludingBlocked > estimatedTotal` từng đúng chỉ vì video bị chặn
+vẫn mang khoản **text ma** mà QĐ-079 vừa bỏ đi. Bỏ khoản đó xong, một video bị
+chặn vì ngân sách đóng góp gần **$0** — vì có gì được định tuyến đâu. Bài test
+không sai về ý; nó khẳng định một bất biến mà chỗ dựa là một con số lẽ ra không
+nên tồn tại. Nay nó khẳng định `uncappedCost`, tức là thứ nó vẫn luôn muốn nói.

@@ -13,7 +13,9 @@ giả** trong prompt ảnh, cho nhập nhiều storyboard một lần với mộ
 không kéo theo phần còn lại, và dựng trang `/import` đầy đủ — QĐ-072, QĐ-073.
 Đợt 3: **sàn chuyển động** cho h3_max, **đóng QĐ-065** sau khi audit tìm ra 4 lỗ,
 chặn nhân vật không thể vẽ nhất quán, và dấu vân tay cho lần nhập lại — QĐ-074
-đến QĐ-077.
+đến QĐ-077. Đợt 4: **preflight sản xuất giá thật** cho lô 2 video đầu tiên —
+QĐ-078 đến QĐ-080. Kết quả: **NOT READY**, chờ người vận hành xác nhận giá
+`h3_max` và quyết trần mỗi video.
 
 Lô `a690a290` "Cold feet": duyệt 2026-09-17 với trần $1,24, dừng giữa chừng ở
 cảnh 1, chạy tiếp và hoàn tất 2026-09-18 với **$1,047095** thật — 6 cảnh, 1080x1920.
@@ -1594,5 +1596,62 @@ Nhân vật lẫn ô sửa nhanh trên trang Nhập — trước đó mỗi nơi
 cơ hội để bất đồng về lúc nào tăng phiên bản.
 
 Max/Leo/Mia: **READY**, mỗi người 1 ảnh chuẩn đã duyệt.
+
+---
+
+---
+
+## Preflight sản xuất, giá THẬT — 2026-09-19 (đợt 4), $0
+
+`npm run preflight:production` — lần đầu tiên định giá một lô nhiều video bằng
+**giá thật**, registry thật, ví thật, nhân vật thật. Không POST, không chi.
+Xem QĐ-080.
+
+```
+READY    All ears          5 cảnh · 5 LOCAL_MOTION · 0 clip · $0,247300
+BLOCKED  Bite the bullet   5 cảnh · 4 LOCAL_MOTION · 1 clip · $0,659300
+                           BLOCKED vì runway/h3_max:768x1280 CHƯA XÁC NHẬN GIÁ
+
+TEXT $0 · IMAGE $0,432000 · VIDEO $0,400000 · VOICE $0,000200 · RENDER $0
+RETRY (dự phòng ~3%) $0,027100
+TỔNG nếu cả hai chạy  $0,906600      chỉ video chạy được  $0,247300
+  (video 1 in ra $0,609900 = phần lọt vào trần; thật ra $0,659300 — QĐ-081)
+ngân sách dự án còn   $1,198863      ví runway 551 credit = $5,51 (LIVE)
+```
+
+Fixture: `examples/batch-real-2/` — hai storyboard sạch, nhân vật **Max**
+(READY, 1 ảnh chuẩn đã duyệt), không kèm keyframe nên 9 ảnh phải mua mới. Ảnh
+là khoản lớn nhất: **48% tổng chi**.
+
+### Bốn thứ lần chạy này tự tìm ra
+
+**1. Preflight chưa bao giờ kiểm danh sách xác nhận (QĐ-078).** Lô `a690a290`
+qua ổ khoá thứ nhất và chết ở ổ thứ hai giữa chừng; từ đó tới nay **không có gì
+kiểm ở lúc lập kế hoạch**. Nay có status `NEEDS_PROVIDER_CONFIRMATION`, và nhờ
+QĐ-076, tiền của video bị chặn **ra khỏi** trần đề xuất.
+
+**2. Dự toán tính tiền viết kịch bản cho storyboard đã có sẵn (QĐ-079).** Đúng
+cái sai QĐ-067 đã sửa cho keyframe. Tệ hơn con số: ngân sách đi dần theo từng
+cảnh **bắt đầu từ tiền text**, nên khoản text ma ăn mất chỗ của cảnh cuối —
+cảnh 5 của *Bite the bullet* mất ảnh vì lý do đó.
+
+**3. Một con số bị cắt cụt im lặng (QĐ-081).** Bộ dự toán đi dần theo ngân sách
+cảnh này qua cảnh khác, nên video vượt trần in ra **phần lọt vào trần** chứ không
+phải chi phí. *Bite the bullet* báo $0,609900; thật ra **$0,659300**. Nay in cả
+hai, và điều kiện kích hoạt là **bị cắt cụt** chứ không phải nhãn trạng thái —
+bản sửa đầu của tôi kiểm theo nhãn và vẫn báo con số ngắn.
+
+**4. Một DB sạch không trả lời đúng được.** Phải chép sang `ModelRegistry`
+(giá/vòng đời/tin cậy), `ProviderConfig` (**khả dụng** — thiếu nó mọi nhà cung
+cấp đọc ra "chưa sẵn sàng" và router từ chối mọi cảnh, trông y hệt lỗi định
+tuyến), `Character` + ảnh **nguyên id**, và `StylePreset`. Hạn mức thì hạ xuống
+đúng phần còn lại thật, vì phần "đã chi" nằm ở `CostEntry` không chép sang.
+
+### Hai việc chỉ người vận hành làm được
+
+| | |
+|---|---|
+| Xác nhận giá `runway/h3_max:768x1280` | trang Nhà cung cấp AI. **Không tự cấp.** |
+| Trần/video $0,60 → $0,70 | video 1 giá thật $0,659300. Không tự cắt cảnh. |
 
 ---

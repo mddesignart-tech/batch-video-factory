@@ -100,7 +100,14 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
           {video.characters.filter((c) => c.referenceCount > 0).length} có ảnh,{" "}
           {video.characters.filter((c) => c.referenceCount === 0).length} thiếu ảnh)
         </span>
-        <span className="ml-auto font-medium">{formatUSD(video.estimatedCost)}</span>
+        <span className="ml-auto font-medium">
+          {formatUSD(video.estimatedCost)}
+          {video.uncappedCost > video.estimatedCost ? (
+            <span className="ml-1 text-warn-500">
+              (thật ra {formatUSD(video.uncappedCost)})
+            </span>
+          ) : null}
+        </span>
       </div>
 
       {video.blockedReason ? <Alert tone="danger">{video.blockedReason}</Alert> : null}
@@ -260,6 +267,10 @@ export function PreflightPanel({
               Kể cả video bị chặn: {formatUSD(preflight.estimatedTotalIncludingBlocked)}
             </div>
             <div>
+              Nếu mọi video đều chạy:{" "}
+              <strong>{formatUSD(preflight.estimatedTotalUncapped)}</strong>
+            </div>
+            <div>
               Biên an toàn: {formatUSD(preflight.safetyMargin)} (
               {preflight.safetyMarginPercent.toFixed(0)}%)
             </div>
@@ -273,6 +284,35 @@ export function PreflightPanel({
               Hạn mức tổng còn lại: <strong>{formatUSD(preflight.globalRemaining)}</strong>
             </div>
             <div>Cơ sở giá: {preflight.costBasis}</div>
+          </div>
+
+          <div className="mt-3">
+            <h5 className="mb-1 text-xs font-medium text-muted-foreground">
+              Model trả phí — đã xác nhận giá chưa
+            </h5>
+            <div className="grid gap-1 text-xs md:grid-cols-2">
+              {preflight.paidModels.length === 0 ? (
+                <div className="text-ink-500">Không có model trả phí nào.</div>
+              ) : (
+                preflight.paidModels.map((m) => (
+                  <div key={m.key}>
+                    <span className="font-mono">{m.key}</span>{" "}
+                    <Badge tone={m.confirmed ? "ok" : "danger"}>
+                      {m.confirmed ? "ĐÃ XÁC NHẬN" : "CHƯA XÁC NHẬN"}
+                    </Badge>
+                  </div>
+                ))
+              )}
+            </div>
+            {preflight.paidModels.some((m) => !m.confirmed) ? (
+              <Alert tone="danger" className="mt-2">
+                Quyền chi của lô trả lời <em>&ldquo;được tiêu bao nhiêu&rdquo;</em>; danh
+                sách xác nhận trả lời <em>&ldquo;đã nhìn giá model này và đồng ý
+                chưa&rdquo;</em>. Thiếu vế thứ hai thì request trả phí ĐẦU TIÊN bị từ chối
+                giữa chừng — đúng như lô <code className="font-mono">a690a290</code> đã dừng.
+                Mở trang <strong>Nhà cung cấp AI</strong> để xác nhận.
+              </Alert>
+            ) : null}
           </div>
 
           <div className="mt-3">

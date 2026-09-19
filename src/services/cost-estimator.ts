@@ -223,6 +223,16 @@ export interface EstimateInput {
   providerBudgets?: Record<string, number | null>;
   /** The batch approval's per-video ceiling, when one governs this estimate. */
   perVideoCapRemaining?: number | null;
+  /**
+   * The script ALREADY EXISTS, so no text model will be called.
+   *
+   * True for every imported storyboard: the operator wrote the scenes, the
+   * project is created at `script_ready`, and nothing ever asks for a script.
+   * Charging for one is the same mistake QĐ-067 fixed for supplied keyframes -
+   * pricing work the pipeline will not do - and it hides the saving that is the
+   * entire point of importing. See QĐ-079.
+   */
+  hasScript?: boolean;
 }
 
 /**
@@ -277,8 +287,11 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
   const needsProvider: string[] = [];
   const errorCodes: RoutingError["code"][] = [];
 
-  // One script generation + one self-scoring pass + one metadata pass.
-  const textModel = pickCheapestEnabled(models, "text", availableProviders);
+  // One script generation + one self-scoring pass + one metadata pass - unless
+  // the script came with the storyboard, in which case none of the three happen.
+  const textModel = input.hasScript === true
+    ? null
+    : pickCheapestEnabled(models, "text", availableProviders);
   if (textModel) {
     breakdown.text = round(
       costForModel(textModel, { tokens: 4500, jobs: 1 }) +
