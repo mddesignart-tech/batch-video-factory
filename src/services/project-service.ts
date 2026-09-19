@@ -3,7 +3,8 @@ import type { QualityMode, RouterStrategy } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
 import { sceneCharacters } from "@/domain/scene-characters";
 import { logger } from "@/lib/logger";
-import { ensureProjectDirs } from "@/lib/paths";
+import fs from "node:fs";
+import { ensureProjectDirs, toAbsolute } from "@/lib/paths";
 import { getSettings } from "@/lib/settings";
 import { round } from "@/lib/utils";
 import { ScriptSchema, type ScriptDoc } from "@/domain/script";
@@ -233,6 +234,23 @@ export async function persistScript(
 
 // -------------------------------------------------------------- estimating ---
 
+/**
+ * A stored path that still points at a real file.
+ *
+ * The column and the disk disagree more often than they should - a cleanup, a
+ * moved data directory, a half-finished run - and every caller here is deciding
+ * whether something has to be BOUGHT. `toAbsolute` throws on a path that escapes
+ * the data root, and a path we refuse to resolve is not an asset we have.
+ */
+function fileOnDisk(relative: string | null | undefined): boolean {
+  if (!relative) return false;
+  try {
+    return fs.existsSync(toAbsolute(relative));
+  } catch {
+    return false;
+  }
+}
+
 export async function buildPlannedScenes(
   projectId: string,
 ): Promise<PlannedSceneInput[]> {
@@ -241,6 +259,7 @@ export async function buildPlannedScenes(
   const scenes = await prisma.scene.findMany({
     where: { projectId, skipped: false },
     orderBy: { sceneNumber: "asc" },
+    include: { dialogueLines: true },
   });
   return scenes.map((scene) => ({
     sceneNumber: scene.sceneNumber,
@@ -251,13 +270,30 @@ export async function buildPlannedScenes(
     speechText: speechTextFor(scene),
     manualImageProvider: scene.imageProvider,
     manualImageModel: scene.imageModel,
-    manualVideoProvider: scene.videoProvider,
-    manualVideoModel: scene.videoModel,
+    // Only an OPERATOR's pin, never the router's write-back. The estimate has
+    // to ask the same question the pipeline will ask, and since QĐ-069 the
+    // pipeline reads `videoModelPinned`. Passing the pair alone made the
+    // forecast re-quote whatever the last run happened to use, and skip the
+    // LOW_AUTO gate while doing it.
+    manualVideoProvider: scene.videoModelPinned ? scene.videoProvider : null,
+    manualVideoModel: scene.videoModelPinned ? scene.videoModel : null,
     manualVoiceProvider: scene.voiceProvider,
     manualVoiceModel: scene.voiceModel,
     // An imported keyframe is already on disk and already paid for - by the
     // operator, before this app ever saw it.
     hasSuppliedKeyframe: scene.imageSource === "IMPORTED" && Boolean(scene.imagePath),
+    // Assets a RESUME will hand back rather than buy. Both are checked on disk:
+    // a column naming a file that has since been deleted is not an asset, and
+    // treating it as one would forecast $0 for a clip the run really does buy -
+    // the one direction an estimate must never be wrong in. QĐ-071.
+    hasExistingVideo: fileOnDisk(scene.videoPath),
+    hasExistingVoice:
+      scene.dialogueLines.length > 0 &&
+      // EVERY line, not any: a scene with two lines and one file still buys the
+      // second, and calling that "reused" under-states the bill.
+      scene.dialogueLines.every(
+        (line) => line.status === "completed" && fileOnDisk(line.outputPath),
+      ),
     // The same derivation `generateSceneVideo` runs. The preview is what the
     // real-run script checks its plan against before spending, so a preview
     // that refuses a scene the generator would route stops a batch that was

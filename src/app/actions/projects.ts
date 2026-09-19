@@ -190,12 +190,19 @@ export async function updateScene(
   if (data.videoProvider === "") data.videoProvider = undefined;
   if (data.videoModel === "") data.videoModel = undefined;
 
+  // Naming both halves here IS the pin, and clearing them retracts it. The flag
+  // has to be written alongside, because `generateSceneVideo` later writes the
+  // model it used into the same two columns - after which nothing else in the
+  // row can tell an instruction from a record. See QĐ-069.
+  const videoModelPinned = Boolean(data.videoProvider && data.videoModel);
+
   const scene = await prisma.scene.update({
     where: { id: sceneId },
     data: {
       ...data,
       videoProvider: data.videoProvider ?? null,
       videoModel: data.videoModel ?? null,
+      videoModelPinned,
     },
   });
   revalidatePath(`/projects/${scene.projectId}`);

@@ -71,6 +71,35 @@ model Character {
   /// Dominant colours, so a scene cannot silently recolour the character.
   colorPalette    String @default("")
 
+  // ---- the attributes the LOCK CLAUSE names but the row could not state ----
+  //
+  // `LOCKED_ATTRIBUTES` has always told the model that apparent age and skin
+  // tone "must not change", and there was nowhere to write down what they ARE.
+  // Locking a value nobody stated locks whatever the model invented on the
+  // first frame it drew, which is a different answer every project. These four
+  // close that gap. See QĐ-070.
+
+  /// How the character presents visually, when the source material says.
+  ///
+  /// Distinct from `voiceGender`, which is a casting decision about the voice.
+  /// Left empty when the storyboard does not say - an invented value here would
+  /// be a guess pasted into every prompt forever.
+  presentation          String @default("")
+  /// Apparent age as DRAWN, e.g. "around 8" or "late twenties". Not a birthday.
+  approximateAge        String @default("")
+  /// Named explicitly so a scene's lighting cannot be read as a skin tone.
+  skinTone              String @default("")
+  /// A scar, freckles, a gap tooth, a birthmark. NOT accessories: an accessory
+  /// can be taken off between scenes and one of these cannot, so a model that
+  /// drops it has drawn a different person.
+  distinguishingFeatures String @default("")
+  /// Negatives about THIS character's identity, e.g. "never add glasses".
+  ///
+  /// Kept apart from `negativePrompt`, which carries generic image hygiene
+  /// ("blurry, extra limbs"). Merging them made an identity rule compete for
+  /// space with boilerplate, and the boilerplate always won on length.
+  negativeIdentity      String @default("")
+
   /// Bumped whenever the canonical description changes, so images generated
   /// against an older description can be told apart from current ones.
   version Int @default(1)
@@ -477,6 +506,27 @@ model Scene {
   imageModel        String?
   videoProvider     String?
   videoModel        String?
+
+  /// Did a PERSON name `videoProvider`/`videoModel`, or did the router?
+  ///
+  /// Those two columns serve double duty. Before a run they carry an operator's
+  /// pin; after one, `generateSceneVideo` writes back the model that was
+  /// actually used. Nothing distinguished the two readings, so the router's own
+  /// choice came back on the NEXT run wearing an operator's instruction - and a
+  /// pin short-circuits routing. The consequences were not cosmetic:
+  ///
+  ///   - `lowAutoRouteBlock` was skipped, so a clip the router had chosen under
+  ///     a LOW_AUTO grant stopped being re-checked against the grant;
+  ///   - `lowAutoRouted` was reported false, so `assertBatchAuthorized` gate 2b
+  ///     let an approval that says "named clips only" pay for a router-chosen
+  ///     clip;
+  ///   - `effectiveMotionSource` saw a manual pin, so the "free wins" rule
+  ///     stopped applying to exactly the scenes that had already cost money.
+  ///
+  /// This is the same split the pair `motionMode` / `motionSource` already
+  /// makes, for the same reason: an instruction and a decision must not be
+  /// stored in one place. See QĐ-069.
+  videoModelPinned  Boolean @default(false)
   voiceProvider     String?
   voiceModel        String?
   estimatedCost     Float   @default(0)

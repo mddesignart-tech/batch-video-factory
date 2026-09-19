@@ -43,6 +43,64 @@ export interface ImportSceneLine {
   videoModel: string | null;
   keyframe: "supplied" | "will-generate";
   estimatedCost: number;
+  /** Per asset: BUY (this run pays), REUSE (already owned), NONE (not needed). */
+  plan: {
+    image: AssetPlan;
+    video: AssetPlan;
+    voice: AssetPlan;
+  };
+}
+
+/**
+ * What will happen to one asset of one scene.
+ *
+ * Three states, not two. "Not needed" and "already owned" both cost $0 and mean
+ * completely different things: a LOCAL_MOTION scene never wanted a clip, while
+ * a resumed scene wanted one and already has it. Collapsing them would let a
+ * preview claim savings on purchases that were never on the table. QĐ-071.
+ */
+export type AssetPlan = "BUY" | "REUSE" | "NONE";
+
+/** How many of each asset a run will buy, and how many it already owns. */
+export interface AssetCounts {
+  imageBuy: number;
+  imageReuse: number;
+  videoBuy: number;
+  videoReuse: number;
+  voiceBuy: number;
+  voiceReuse: number;
+}
+
+function emptyCounts(): AssetCounts {
+  return {
+    imageBuy: 0,
+    imageReuse: 0,
+    videoBuy: 0,
+    videoReuse: 0,
+    voiceBuy: 0,
+    voiceReuse: 0,
+  };
+}
+
+/**
+ * BUY / REUSE / NONE, from the two facts the estimator reports.
+ *
+ * `needs` and `reuse` are mutually exclusive by construction - the estimator
+ * does not route an asset it is reusing - so a scene can never be both. Neither
+ * means the stage does not apply to this scene at all.
+ */
+function assetPlan(needs: boolean, reuse: boolean): AssetPlan {
+  if (needs) return "BUY";
+  return reuse ? "REUSE" : "NONE";
+}
+
+function addCounts(into: AssetCounts, line: ImportSceneLine["plan"]): void {
+  if (line.image === "BUY") into.imageBuy += 1;
+  if (line.image === "REUSE") into.imageReuse += 1;
+  if (line.video === "BUY") into.videoBuy += 1;
+  if (line.video === "REUSE") into.videoReuse += 1;
+  if (line.voice === "BUY") into.voiceBuy += 1;
+  if (line.voice === "REUSE") into.voiceReuse += 1;
 }
 
 export interface ImportVideoPreview {
@@ -61,7 +119,17 @@ export interface ImportVideoPreview {
     voice: number;
     quality: number;
     retries: number;
+    /**
+     * Always 0, and stated anyway.
+     *
+     * The render is FFmpeg on this machine and costs nothing. A reader who does
+     * not see a render line cannot tell "free" from "forgotten", and the
+     * difference between those two matters when the number they are about to
+     * approve is a ceiling. QĐ-071.
+     */
+    render: number;
   };
+  counts: AssetCounts;
   estimatedCost: number;
   status: "OK" | "OVER_VIDEO_BUDGET" | "NEEDS_PROVIDER";
   warnings: string[];
@@ -85,9 +153,35 @@ export interface ImportPreflight {
   maxCostPerVideo: number;
   maxCostForBatch: number;
   suggestedAuthorizedMaxSpend: number;
+  /**
+   * The headroom between the forecast and the ceiling being suggested, named.
+   *
+   * `suggestedAuthorizedMaxSpend` already contained this, folded in. An operator
+   * approving a ceiling is entitled to see how much of it is the estimate and
+   * how much is slack - those are different things to agree to, and one number
+   * covering both invites reading the slack as forecast. QĐ-071.
+   */
+  safetyMargin: number;
+  safetyMarginPercent: number;
   /** True when the plan as priced already exceeds the ceiling the operator set. */
   overBatchCeiling: boolean;
   globalRemaining: number;
+  /** How many of each asset the whole batch will buy vs. already owns. */
+  counts: AssetCounts;
+  /**
+   * Each vendor's own wallet, as it stands right now.
+   *
+   * `remainingUsd` is null when the vendor meters itself and we hold no wallet
+   * for it - which is NOT the same as a wallet holding zero, and the preview
+   * must not render it as $0.00. Wallets are never summed together: the money
+   * in one vendor's account cannot pay another's bill.
+   */
+  providerWallets: Array<{
+    provider: string;
+    spentUsd: number;
+    remainingUsd: number | null;
+    live: boolean;
+  }>;
   costBasis: string;
   warnings: string[];
 }
@@ -135,8 +229,16 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     const sceneLines: ImportSceneLine[] = [];
     const plannedScenes: PlannedSceneRow[] = [];
 
+    const counts = emptyCounts();
+
     for (const row of estimate.scenes) {
       const scene = project.scenes.find((s) => s.sceneNumber === row.sceneNumber);
+      const plan = {
+        image: assetPlan(row.needs.image, row.reuse.image),
+        video: assetPlan(row.needs.video, row.reuse.video),
+        voice: assetPlan(row.needs.voice, row.reuse.voice),
+      };
+      addCounts(counts, plan);
       sceneLines.push({
         sceneNumber: row.sceneNumber,
         duration: scene?.duration ?? 0,
@@ -146,6 +248,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         videoModel: row.video ? `${row.video.provider}/${row.video.modelId}` : null,
         keyframe: scene?.imageSource === "IMPORTED" ? "supplied" : "will-generate",
         estimatedCost: round(row.estimatedCost, 6),
+        plan,
       });
       plannedScenes.push({
         sceneNumber: row.sceneNumber,
@@ -214,7 +317,10 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         voice: round(estimate.breakdown.voice, 6),
         quality: round(estimate.breakdown.quality, 6),
         retries: round(estimate.breakdown.retries, 6),
+        // FFmpeg, on this machine. Zero, said out loud.
+        render: 0,
       },
+      counts,
       estimatedCost: total,
       status,
       warnings: videoWarnings,
@@ -329,8 +435,38 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     maxCostPerVideo: batch.maxCostPerVideo,
     maxCostForBatch: batch.maxBudget,
     suggestedAuthorizedMaxSpend: recommendation.recommended,
+    // The slack inside the recommendation, pulled back out. Never negative: a
+    // recommendation clamped by the global cap can sit BELOW the estimate, and
+    // reporting that as a negative margin would read as a discount rather than
+    // as the refusal it is - `clampedByGlobalCap` already warns about it.
+    safetyMargin: round(Math.max(0, recommendation.recommended - estimatedTotal), 6),
+    safetyMarginPercent:
+      estimatedTotal > 0
+        ? round(
+            (Math.max(0, recommendation.recommended - estimatedTotal) / estimatedTotal) * 100,
+            2,
+          )
+        : 0,
     overBatchCeiling: estimatedTotal > batch.maxBudget,
     globalRemaining: cap.remaining,
+    counts: videos.reduce((into, v) => {
+      into.imageBuy += v.counts.imageBuy;
+      into.imageReuse += v.counts.imageReuse;
+      into.videoBuy += v.counts.videoBuy;
+      into.videoReuse += v.counts.videoReuse;
+      into.voiceBuy += v.counts.voiceBuy;
+      into.voiceReuse += v.counts.voiceReuse;
+      return into;
+    }, emptyCounts()),
+    // Listed per vendor, never summed. `remainingUsd: null` means "we hold no
+    // wallet for this vendor", which a renderer must show as "không rõ" rather
+    // than as $0.00.
+    providerWallets: wallets.map((w) => ({
+      provider: w.provider,
+      spentUsd: w.spentUsd,
+      remainingUsd: w.remainingUsd,
+      live: w.budget?.liveBalanceAvailable === true,
+    })),
     costBasis: costing.costBasis,
     warnings,
   };

@@ -114,6 +114,17 @@ export interface RouteCandidate {
   estimatedCost: number;
   quality: number;
   value: number;
+  /**
+   * Is THIS candidate a model the router is choosing under a LOW_AUTO grant?
+   *
+   * Carried per candidate, not just on the winner, because a fallback is bought
+   * with the same money as the first choice. `withFallback` used to clone the
+   * decision with `...decision`, so a fallback onto a LOW_AUTO model inherited
+   * `lowAutoRouted: false` from a first choice that was not one - and batch
+   * authorisation gate 2b, which exists to stop an approval of NAMED clips
+   * funding a clip the router picked, had nothing to fire on. See QĐ-069.
+   */
+  lowAuto: boolean;
 }
 
 export interface RouteDecision {
@@ -328,6 +339,7 @@ function toCandidate(model: ModelRegistry, ctx: RouteContext): RouteCandidate {
     estimatedCost,
     quality: qualityIndex(model),
     value: valueIndex(model, estimatedCost),
+    lowAuto: model.lifecycle === "LOW_AUTO",
   };
 }
 
@@ -645,15 +657,17 @@ export function routeScene(
     )
     .slice(0, 3);
 
-  const chosenModel = automatic.find(
-    (m) => m.provider === chosen.provider && m.modelId === chosen.modelId,
-  );
   return {
     ...chosen,
     reason: explain(ctx, strategy, floor, chosen, { downgraded, relaxedFloor }),
     fallbacks,
     downgraded,
-    lowAutoRouted: chosenModel?.lifecycle === "LOW_AUTO",
+    // Read off the candidate rather than looked up again. The lookup it replaces
+    // searched `automatic` for the chosen provider/model and silently answered
+    // false when it found nothing, which made a missing row indistinguishable
+    // from an operator's choice - on the flag that decides whether a batch
+    // approval covers this clip.
+    lowAutoRouted: chosen.lowAuto,
   };
 }
 

@@ -103,8 +103,9 @@ const MAX_COMPLEXITY: Record<string, Complexity> = {
   // scene 5; that is a fact about gen4_turbo and about nothing else.
   "runway/gen4_turbo": "LOW",
 
-  // h3_max has four paid samples. Every one of them was scored LOW, and the
-  // largest cast among them was two. Nothing has been measured above that, so
+  // h3_max has SEVEN scored paid samples as of 2026-09-19, three of them from
+  // ordinary production runs. Every one was scored LOW, and the largest cast
+  // among them is still two. Nothing has been measured above that, so
   // nothing above that is permitted - and this table is where the limit belongs
   // rather than in the lifecycle, because it must survive being wrong about the
   // lifecycle. The LOW_AUTO grant, the low-auto gate and this ceiling are three
@@ -125,8 +126,9 @@ const MAX_CHARACTERS: Record<string, number> = {
   // Two characters standing together is the case gen4_turbo failed twice.
   "runway/gen4_turbo": 2,
 
-  // The h3_max samples were one, one, two and one character. Two is therefore
-  // the largest cast with evidence behind it, and the three-character scenes
+  // Across all seven h3_max samples the casts were one or two characters - six
+  // solo, one pair. Two is therefore the largest cast with evidence behind it,
+  // and adding production samples has not moved it: the three-character scenes
   // this project is full of have none. Stated here as well as in the low-auto
   // gate on purpose: the gate governs AUTOMATIC routing, and a limit that only
   // existed there would still let a hand-typed pin send a cast of three to a

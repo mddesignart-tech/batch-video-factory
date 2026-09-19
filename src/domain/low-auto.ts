@@ -4,11 +4,14 @@ import type { CameraMode } from "./camera-intent";
 /**
  * May the router buy a paid clip for this scene on its own?
  *
- * A NARROW gate, deliberately. `h3_max` has four benchmark samples and three of
- * them scored 8.9 or better - but all three were one or two characters on a
- * plain background with a locked camera. That is the shape of scene this gate
- * describes, and nothing wider. Reading a 9.07 average as a licence to route
- * anything LOW would be extrapolating from evidence that does not exist.
+ * A NARROW gate, deliberately. `h3_max` has seven scored samples as of
+ * 2026-09-19 and six of them scored 8.69 or better - but every one was one or
+ * two characters on a plain background with a locked camera, and the seventh
+ * failed on camera under a prompt written before the guardrail existed. That is
+ * the shape of scene this gate describes, and nothing wider. Reading the
+ * average as a licence to route anything LOW would be extrapolating from
+ * evidence that does not exist: three more production samples have made the
+ * evidence DEEPER, not WIDER.
  *
  * THE RULE THAT MATTERS MOST
  * --------------------------

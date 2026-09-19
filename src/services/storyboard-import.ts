@@ -15,6 +15,11 @@ import {
   type StoryboardVideo,
 } from "@/domain/storyboard";
 import { classifyScene, assignSpendPriority } from "./complexity";
+import {
+  characterReadiness,
+  missingBibleFields,
+  type CharacterReadiness,
+} from "./character-service";
 import type { Complexity } from "@/domain/enums";
 
 /**
@@ -314,6 +319,20 @@ export interface ResolvedScene {
 export interface ResolvedCharacter extends StoryboardCharacter {
   /** The reference image, once found in the folder or archive. */
   asset: AssetSource | null;
+  /**
+   * Identity readiness AFTER this import would land, not before it.
+   *
+   * The question an operator needs answered is "will this person be drawable
+   * consistently once I press go", and the storyboard's own reference image
+   * counts towards that. Reporting the character table's state alone would say
+   * NEEDS_CHARACTER_REFERENCE about a character whose reference is sitting in
+   * the folder being imported. See QĐ-070.
+   */
+  readiness: CharacterReadiness;
+  /** Required Bible fields still unstated, as labels. Empty when complete. */
+  missingFields: string[];
+  /** True when this name already existed in the character table. */
+  existing: boolean;
 }
 
 export interface ResolvedVideo {
@@ -356,28 +375,99 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
     let supplied = 0;
     let missing = 0;
 
-    const cast: ResolvedCharacter[] = video.characters.map((character) => {
-      if (character.referenceImage === null) return { ...character, asset: null };
-      const key = character.referenceImage.toLowerCase();
-      const asset = assets.get(key) ?? assets.get(path.posix.basename(key)) ?? null;
-      if (asset === null) {
+    const cast: ResolvedCharacter[] = [];
+    for (const character of video.characters) {
+      let asset: AssetSource | null = null;
+      if (character.referenceImage !== null) {
+        const key = character.referenceImage.toLowerCase();
+        asset = assets.get(key) ?? assets.get(path.posix.basename(key)) ?? null;
+        if (asset === null) {
+          issues.push(
+            issue(
+              "error",
+              "character_reference_missing",
+              `Không tìm thấy ảnh tham chiếu "${character.referenceImage}" của nhân vật ` +
+                `"${character.name}".`,
+              { videoId: video.videoId, sourceFile: video.sourceFile },
+            ),
+          );
+        }
+      }
+
+      // A name is not an identity. `Character` rows are matched by name and
+      // reused, so this reports the row that will actually be used - including
+      // one a previous import created with nothing but a name in it.
+      const existing = await prisma.character.findUnique({
+        where: { name: character.name },
+      });
+      const approvedPrimary = existing
+        ? await prisma.characterReference.findFirst({
+            where: { characterId: existing.id, isPrimary: true, approved: true },
+          })
+        : null;
+      // For a character that does not exist yet, the row that WILL exist is the
+      // one built from the storyboard's Bible below - so that is what gets
+      // checked. Judging a new character against an empty row would report
+      // every field missing on a storyboard that in fact stated them all.
+      const missingFields = missingBibleFields(
+        existing ?? {
+          id: "",
+          name: character.name,
+          version: 1,
+          visualPrompt: "",
+          negativePrompt: "",
+          seed: null,
+          presentation: character.bible.presentation,
+          approximateAge: character.bible.approximateAge,
+          skinTone: character.bible.skinTone,
+          hair: character.bible.hair,
+          facialFeatures: character.bible.face,
+          distinguishingFeatures: character.bible.distinguishingFeatures,
+          outfit: character.bible.outfit,
+          bodyProportions: character.bible.bodyProportions,
+          accessories: character.bible.accessories,
+          colorPalette: character.bible.colorPalette,
+          negativeIdentity: character.bible.negativeIdentity,
+        },
+      );
+      const readiness = characterReadiness({
+        // The storyboard's own image counts: after `materialiseImport` it
+        // becomes the approved primary for a character that had none.
+        hasApprovedReference: approvedPrimary !== null || asset !== null,
+        missingFields,
+      });
+
+      if (readiness === "NEEDS_CHARACTER_REFERENCE") {
         issues.push(
           issue(
-            "error",
-            "character_reference_missing",
-            `Không tìm thấy ảnh tham chiếu "${character.referenceImage}" của nhân vật ` +
-              `"${character.name}".`,
+            "warning",
+            "character_needs_reference",
+            `Nhân vật "${character.name}" chưa có ảnh tham chiếu đã duyệt và ` +
+              `storyboard cũng không kèm ảnh. Hệ thống KHÔNG tự tạo ảnh nhân vật: ` +
+              `hãy tải ảnh lên ở trang Nhân vật, hoặc thêm character_reference_image ` +
+              `vào storyboard. Thiếu ảnh thì mỗi cảnh sẽ vẽ một người khác nhau.`,
+            { videoId: video.videoId, sourceFile: video.sourceFile },
+          ),
+        );
+      } else if (readiness === "NEEDS_IDENTITY_FIELDS") {
+        issues.push(
+          issue(
+            "warning",
+            "character_identity_thin",
+            `Nhân vật "${character.name}" có ảnh tham chiếu nhưng hồ sơ nhận dạng ` +
+              `còn thiếu: ${missingFields.join(", ")}. Cảnh nào không gửi kèm được ` +
+              `ảnh sẽ chỉ còn mấy chữ này để giữ cho nhân vật không đổi.`,
             { videoId: video.videoId, sourceFile: video.sourceFile },
           ),
         );
       }
-      return { ...character, asset };
-    });
+
+      cast.push({ ...character, asset, readiness, missingFields, existing: existing !== null });
+    }
     // A scene may name a character the video never declared at the top. That is
     // an IMPLICIT declaration, not an error: `collectCharacters` has already
     // folded those ids into the cast, so the same id in six scenes is still one
     // character with one reference - which is the only property that matters.
-    void cast;
 
     for (const scene of video.scenes) {
       const at = {
@@ -640,6 +730,23 @@ export async function materialiseImport(
             // Minimal but never empty: an empty visualPrompt would put a blank
             // where every image prompt expects the canonical description.
             visualPrompt: `${character.name}, consistent character design across every scene`,
+            // The Bible, exactly as the storyboard stated it - and no further.
+            // Anything the file left blank stays blank rather than being filled
+            // with a plausible guess: a guess here is pasted into every prompt
+            // for the rest of this character's life, and nobody would know it
+            // was invented. The blanks are what `character_identity_thin`
+            // reports. See QĐ-070.
+            presentation: character.bible.presentation,
+            approximateAge: character.bible.approximateAge,
+            skinTone: character.bible.skinTone,
+            hair: character.bible.hair,
+            facialFeatures: character.bible.face,
+            distinguishingFeatures: character.bible.distinguishingFeatures,
+            outfit: character.bible.outfit,
+            bodyProportions: character.bible.bodyProportions,
+            accessories: character.bible.accessories,
+            colorPalette: character.bible.colorPalette,
+            negativeIdentity: character.bible.negativeIdentity,
             notes: `Nhập từ ${video.sourceFile}`,
             enabled: true,
           },
@@ -747,6 +854,11 @@ export async function materialiseImport(
           motionSource: scene.motionMode === "LOCAL_MOTION" ? "LOCAL_MOTION" : "AI_VIDEO",
           videoProvider: scene.videoProvider,
           videoModel: scene.videoModel,
+          // A model named in the storyboard file is a person's instruction, and
+          // the importer is the only moment it can be recorded as one: after the
+          // first clip, these two columns hold whatever the router used. See
+          // QĐ-069.
+          videoModelPinned: Boolean(scene.videoProvider && scene.videoModel),
           imagePath,
           imageSource: imagePath ? "IMPORTED" : "GENERATED",
           status: imagePath ? "image_ready" : "pending",

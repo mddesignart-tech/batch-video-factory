@@ -1,6 +1,104 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-17
+**Cập nhật:** 2026-09-19
+
+---
+
+## ⏸ CHỜ BẠN QUYẾT — không làm gì cho tới khi có trả lời
+
+### 1. Sàn chuyển động: h3_max có đáng $0,40 cho một cái chớp mắt không?
+
+Clip `h3_max` của lần nhập storyboard đo được `scdet` trung bình **0,00047**,
+lớn nhất **0,0020** — chỉ ~40% cảnh 1 và ~20% cảnh 4 của lô trước. Nội dung thật
+sự chuyển động trong 5,18 giây là: ba cái chớp mắt và một cái nghiêng đầu vài
+pixel. Camera 10/10, nhận dạng 10/10, và gần như không có gì nhúc nhích.
+
+Đề xuất: thêm một **sàn chuyển động** vào cổng LOW_AUTO — nếu thứ cảnh yêu cầu
+chỉ là chớp mắt / nghiêng đầu / đứng yên thì câu trả lời đúng là LOCAL_MOTION và
+$0,40 không nên rời đi. Đây là một **luật định tuyến mới**, không phải sửa lỗi,
+nên chưa làm.
+
+Cần bạn chốt: ngưỡng lấy từ đâu (từ chữ trong `characterAction`, hay đo clip sau
+khi mua rồi ghi lại để lần sau biết), và nó **chặn** hay chỉ **cảnh báo**.
+
+### 2. Vòng đời `h3_max` — đề xuất GIỮ NGUYÊN `LOW_AUTO`
+
+7 mẫu đã chấm, 3 trong đó là sản xuất thật (9,09 · 8,91 · 8,69). Mẫu hỏng duy
+nhất (4,33) là **prompt cũ chưa có guardrail**, và A/B trên đúng cảnh đó với
+guardrail cho 9,20 — lỗi thuộc về prompt, và bộ guardrail đó nay nằm trong code.
+
+Nhưng **cả 7 mẫu đều LOW, ≤2 nhân vật, camera khoá, có keyframe**. Đó đúng bằng
+hình dạng cổng đang cho qua. Kết luận: **B — PASS_WITH_GUARDRAIL**, tức là đúng
+cấu hình hiện tại. Không nới, không rút. Chưa đụng gì tới registry.
+
+### 3. Ba nhân vật hiện có thiếu `approximateAge` và `skinTone`
+
+Max/Leo/Mia đều `NEEDS_IDENTITY_FIELDS`. Chúng vẫn ra ảnh đúng vì `visualPrompt`
+viết tay đã có "young adult male/female" — nhưng mệnh đề khoá đang khoá một giá
+trị chưa ai phát biểu. **Không tự điền**: một giá trị bịa ra sẽ nằm trong mọi
+prompt của nhân vật đó mãi mãi. Vào trang Nhân vật điền hai ô, hoặc bảo tôi điền
+theo đúng chữ bạn đọc được trong ảnh master.
+
+### 4. Ảnh cảnh 1, 4, 5 của `f2b68443` đã lệch khoá vì QĐ-065 đổi prompt
+
+Ảnh cũ vẫn trên đĩa và vẫn đang nằm trong MP4. Chỉ khi tạo lại media cho ba cảnh
+đó thì mới là ảnh mua mới (~$0,0412/ảnh). Muốn thấy bản vá ra ảnh thế nào thì
+phải tạo lại cảnh 4 — **một lần chi tiền**.
+
+---
+
+## Blocker còn lại của IMPORT STORYBOARD / BATCH FROM SCENES
+
+### Đã đóng 2026-09-19
+
+- [x] **Character consistency** (QĐ-070). Bible 11 trường, readiness ba mức,
+      `NEEDS_CHARACTER_REFERENCE`, storyboard khai báo được hồ sơ, nhân vật cũ
+      không bị ghi đè, tên lạ **ném lỗi** thay vì bị bỏ qua im lặng.
+- [x] **Ghim tay tách khỏi bản ghi router** (QĐ-069) — ảnh hưởng cả hai luồng.
+- [x] **Dự toán nói được "dùng lại"** (QĐ-071), kèm dòng render, safety margin
+      tách riêng, và ví từng nhà cung cấp.
+
+### Còn lại
+
+- [ ] **Chưa có UI cho 5 trường Bible mới.** Cột đã có, importer đã ghi, prompt
+      đã đọc — trang Nhân vật chưa có ô để gõ. Việc này miễn phí.
+- [ ] **Bản xem trước chưa hiển thị `counts` / `providerWallets` / `safetyMargin`
+      trên trang `/import`.** Dữ liệu đã có trong `preflightImportedBatch`, chỗ
+      còn thiếu là phần render. Cũng miễn phí.
+- [ ] **Guard mâu thuẫn prompt ảnh (QĐ-065) vẫn chưa ai đọc kết quả trên văn
+      phong storyboard nhập tay.** Nó có chạy; chưa có người nhìn.
+- [ ] **Nhiều video một lượt vẫn chưa chạy thật.** Lần chạy thật vừa rồi là
+      **một** video. ZIP, thư mục nhiều video, hỏng một video không đổ cả lô —
+      tất cả đã có test mock, chưa có lần chạy trả tiền nào.
+
+---
+
+## Kiến trúc Batch From Storyboards — soát 2026-09-19
+
+| Yêu cầu | Trạng thái |
+|---|---|
+| một thư mục nhiều video | CÓ — `groupByStoryboard`, thư mục sâu nhất chứa tệp là chủ của ảnh |
+| storyboard JSON hoặc CSV | CÓ, cùng bộ mã lỗi + số dòng |
+| mỗi video một thư mục asset riêng | CÓ |
+| import ZIP | CÓ, entry không an toàn bị từ chối khi vẫn còn là một cái tên |
+| mỗi cảnh chọn LOCAL_MOTION / VIDEO_AI | CÓ — `motion_mode`, và VIDEO_AI là **chỉ thị** |
+| cảnh có media sẵn thì dùng lại | CÓ — ảnh từ QĐ-067; clip/giọng từ QĐ-071 |
+| cảnh thiếu media mới tạo | CÓ |
+| resume idempotent | CÓ — khoá tính từ hàng Scene, retry có chủ đích sinh khoá khác |
+| không mua lại image/video/voice đã có | CÓ, và **nay bản dự toán cũng nói đúng như vậy** |
+| một video lỗi không hỏng cả lô | CÓ — `OVER_VIDEO_BUDGET` / `NEEDS_PROVIDER` chặn riêng từng video |
+
+Đường ống mong muốn, đối chiếu:
+
+```
+IMPORT -> VALIDATE -> CHARACTER RESOLVE -> SCENE ROUTING -> COST PREVIEW
+       -> USER APPROVAL -> IMAGE/KEYFRAME -> VIDEO/LOCAL_MOTION -> VOICE
+       -> SUBTITLE -> FFMPEG RENDER -> FINAL MP4
+```
+
+Tất cả các bước đều có và đã chạy end-to-end (mock 2026-09-18, thật 1 video
+2026-09-18). **CHARACTER RESOLVE** trước đây là bước yếu nhất — chỉ có cái tên —
+và đó là cái QĐ-070 vừa đóng.
 
 ---
 
@@ -20,8 +118,8 @@ chép ảnh có sẵn thành keyframe (`imageSource=IMPORTED`, **không gọi Im
 preflight dự toán từng video + cả lô · trang `/import` · `batch-report.json` ·
 39 test.
 
-**Chưa chạy thật lần nào.** Trước khi thử một storyboard thật, xem mục
-"Còn thiếu" bên dưới.
+**Đã chạy thật 2026-09-18**: 1 video, $0,400122, MP4 25,000s. Xem QĐ-068 và
+mục "Blocker còn lại" ở đầu tài liệu.
 
 ### Cách dùng (miễn phí, chưa chi gì)
 
@@ -58,18 +156,16 @@ MP4: **26,000s · 1080x1920 · 30fps · h264 + aac 48kHz mono**, 2 clip Video AI
 - [x] **Lời dẫn không còn bị nuốt** (QĐ-067 mục 3).
 - [x] **Retry cảnh hỏng làm sống lại bước render** (QĐ-067 mục 4).
 
-### Blocker còn lại trước STORYBOARD THẬT
+### Blocker của bản mock này — đã đóng
 
-- [ ] **Chưa chạy với provider thật lần nào.** Mọi bằng chứng trên là mock: clip
-      do mock provider sinh, voice do mock sinh. Đường ống đã thông, nhưng
-      "thông" và "ra video xem được" là hai chuyện khác nhau.
-- [ ] **Bảng nhân vật nhập là tối thiểu.** `visualPrompt` của nhân vật tạo từ
-      import chỉ là `"<tên>, consistent character design across every scene"` —
-      đủ để không đổi người giữa các cảnh, **chưa** đủ để khoá diện mạo như
-      Max/Leo/Mia (vốn có hair/face/outfit/bodyProportions viết tay). Nhập xong
-      nên vào trang Nhân vật điền nốt.
-- [ ] **Guard mâu thuẫn prompt ảnh (QĐ-065) chưa được kiểm trên văn phong
-      storyboard nhập tay** — nó có chạy, chưa ai đọc kết quả trên dữ liệu nhập.
+- [x] **Chạy với provider thật** — 2026-09-18, 1 video, $0,400122. QĐ-068.
+- [x] **Bảng nhân vật nhập là tối thiểu** — đóng bằng Character Bible, QĐ-070.
+      `visualPrompt` mặc định vẫn là `"<tên>, consistent character design..."`,
+      nhưng nay có 11 trường riêng để khoá diện mạo, storyboard khai báo được
+      chúng, và cái còn trống được **báo ra** (`character_identity_thin`) thay vì
+      im lặng.
+
+Danh sách blocker **hiện hành** nằm ở đầu tài liệu.
 
 ---
 

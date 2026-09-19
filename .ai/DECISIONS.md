@@ -1936,3 +1936,170 @@ giu cho            7 COMMITTED, treo $0,000000
 chay lai 6 canh    ProviderJob 7 -> 7, DELTA $0,000000
 xac nhan h3_max    bat trong try, thu hoi trong finally — danh sach ve nguyen 6 muc
 ```
+
+---
+
+## QĐ-069 — Một cái ghim là việc **người** làm; cột model không nói được điều đó
+
+`Scene.videoProvider` / `Scene.videoModel` mang **hai nghĩa cùng lúc**: trước khi
+chạy là chỉ định của người vận hành, sau khi chạy là bản ghi
+`generateSceneVideo` viết lại về model đã dùng. Không có gì phân biệt hai nghĩa
+đó, nên **từ lần chạy thứ hai trở đi, mọi cảnh từng mua clip đều trông như đã
+được ghim tay** — và ghim tay thì short-circuit toàn bộ định tuyến.
+
+Đây chính là cái bẫy mà chú thích của `motionMode` đã viết ra từ trước, đọc
+ngược lại: *một quyết định mà lần sau đọc lại thành mệnh lệnh thì không còn là
+quyết định*.
+
+### Ba hệ quả, không cái nào nhìn thấy được lúc xảy ra
+
+| Ở đâu | Điều bị tắt |
+|---|---|
+| `routeScene` nhánh ghim | `lowAutoRouteBlock()` **không chạy** — các điều kiện mà quyền LOW_AUTO được cấp kèm theo thôi được kiểm lại |
+| `assertBatchAuthorized` cổng 2b | `lowAutoRouted` trả về `false`, nên một quyền chi ghi rõ "chỉ các clip đã nêu tên" **trả tiền được cho clip router tự chọn** |
+| `effectiveMotionSource` | thấy có "chỉ định", nên luật **miễn phí thắng** ngừng áp dụng đúng vào những cảnh **đã tốn tiền** |
+
+Cái thứ ba là nặng nhất và ngược đời nhất: cảnh càng đắt thì càng khó quay về
+$0.
+
+### Lỗ thứ tư, cùng gốc: `routingMode` là một cờ cho ba quyết định
+
+`regenerateSceneImageNow` ghim một model **ẢNH** bằng cách đặt
+`routingMode = "MANUAL"` — cờ dùng chung cho cả ảnh, video và giọng. Ghim ảnh vì
+thế cũng nói với router **video** rằng đã có người chọn model của nó.
+
+### Lỗ thứ năm: phương án dự phòng mang cờ của người khác
+
+`withFallback` nhân bản quyết định bằng `...decision`, nên một lần rơi xuống
+model LOW_AUTO **thừa hưởng `lowAutoRouted: false`** của lựa chọn đầu vốn không
+phải LOW_AUTO. Cổng 2b không có gì để bắn. Mỗi ứng viên nay tự mang câu trả lời
+của chính nó (`RouteCandidate.lowAuto`).
+
+### Cách sửa
+
+Cột mới `Scene.videoModelPinned`, đúng một nguồn sự thật cho câu "có người chọn
+không". Backfill dựng lại từ bằng chứng đã có trong hàng, **không bịa và không
+mất cái ghim nào**:
+
+```
+routingMode = 'MANUAL'    -> ghim (4 cảnh Spill the beans)
+motionMode  = 'VIDEO_AI'  -> ghim (cảnh 3 của lô nhập)
+còn lại                   -> ghi lại của router, false
+```
+
+Kết quả trên DB thật: **5 ghim / 16 hàng có videoModel**. Hai cảnh `h3_max` của
+lô `a690a290` — đúng hai cảnh router tự chọn — ở lại `false`, và đó là sự thật
+về cách chúng được quyết định. Sổ chi không đổi: `CostEntry` 150 dòng
+$6,801137, `ProviderJob` 123, `CostReservation` 24.
+
+Kèm theo: `motionResolutionFor` (bước ẢNH) **thôi tự dẫn xuất** và gọi thẳng
+`deriveSceneVideoFacts`. Nó là bản chép tay **thứ tư** mà QĐ-060 bỏ sót, và nó
+sai thêm một thứ nữa — nó không biết `motionMode` là gì, nên một cảnh nhập ghi
+`VIDEO_AI` là AI_VIDEO với bước video và LOCAL_MOTION với bước ảnh, **trong cùng
+một lần chạy**.
+
+Và nhánh LOCAL_MOTION thôi ghi đè `ffmpeg/local-motion` lên một cảnh đã ghim:
+`effectiveMotionSource` vẫn đưa cảnh đã ghim vào nhánh miễn phí khi kế hoạch đã
+duyệt là LOCAL_MOTION, và ghi dấu lên đó sẽ **xoá mất model người dùng chọn** mà
+không còn đường khôi phục.
+
+---
+
+## QĐ-070 — Character Bible: cho mệnh đề khoá một giá trị để mà khoá
+
+`LOCKED_ATTRIBUTES` nói với mọi prompt ảnh rằng **"apparent age"** và
+**"skin tone"** không được đổi — từ ngày hệ thống nhân vật ra đời. Hàng
+`Character` **chưa bao giờ có cột nào để nói hai thứ đó LÀ GÌ**.
+
+Khoá một giá trị không ai phát biểu nghĩa là khoá đúng cái mà model đã ngẫu hứng
+ở khung hình đầu tiên nó vẽ — mỗi dự án một kiểu. Với Max/Leo/Mia nó **vô tình**
+chạy được, vì `visualPrompt` viết tay có sẵn "young adult male"; với một nhân
+vật nhập từ storyboard, `visualPrompt` chỉ là
+`"<tên>, consistent character design across every scene"`, và không còn gì cả.
+
+Năm cột mới: `presentation`, `approximateAge`, `skinTone`,
+`distinguishingFeatures`, `negativeIdentity`.
+
+- `distinguishingFeatures` **tách khỏi** `accessories`: một cái kính có thể tháo
+  ra giữa hai cảnh, một cái sẹo thì không — model bỏ mất cái thứ hai là đã vẽ
+  người khác.
+- `negativeIdentity` **tách khỏi** `negativePrompt`: gộp lại thì một luật nhận
+  dạng ("đừng thêm kính") phải tranh chỗ với văn mẫu vệ sinh ảnh ("blurry, extra
+  limbs"), và văn mẫu luôn thắng vì nó dài hơn. Nay identity đi **trước** trong
+  danh sách, để nhà cung cấp nào cắt bớt thì cắt vào văn mẫu.
+
+**Không một hàng nào đổi chuỗi canonical.** Tất cả mặc định `""`, và
+`buildCanonicalDescription` bỏ qua trường rỗng — quan trọng vì chuỗi đó được
+**băm vào khoá idempotency của ảnh master**. Một byte lệch là mua lại toàn bộ
+ảnh nhân vật. Có test khoá đúng chuỗi cũ, từng byte.
+
+### `promptIdentityBlock` là **dẫn xuất**, không lưu
+
+Lưu nó ra một cột thứ hai tạo ra một bản sao có thể bất đồng với chính các cột
+sinh ra nó — và bản sao mới là cái tới tay model.
+
+### NEEDS_CHARACTER_REFERENCE, và hệ thống **không** tự vẽ
+
+`characterReadiness()`: `NEEDS_CHARACTER_REFERENCE` → `NEEDS_IDENTITY_FIELDS` →
+`READY`. Thiếu ảnh được báo **trước**, vì đó là thứ người vận hành phải **đưa
+vào** chứ không gõ ra được. Import phát `character_needs_reference` mức **cảnh
+báo**, và câu cảnh báo **nói thẳng rằng hệ thống sẽ không tự tạo ảnh** — không
+nói thì người ta ngồi đợi một tấm ảnh không bao giờ tới.
+
+Storyboard nay khai báo được cả Bible (11 trường, vài cách viết tên cột). Những
+gì file **không nói thì để trống**: một giá trị bịa ra ở đây sẽ được dán vào mọi
+prompt của nhân vật đó mãi mãi, và không ai biết nó là bịa. Nhân vật **đã tồn
+tại thì không bị ghi đè** — import viết lại Max là redraw Max trong mọi video cũ
+được dựng lại sau đó.
+
+### Lỗi thật: "âm thầm tạo nhân vật mới ở từng cảnh"
+
+`getCharacterSheetsByName` **bỏ qua** cái tên nó không tìm thấy. Đúng cho một
+bản báo cáo, sai hoàn toàn ngay trước khi mua ảnh: tên biến mất khỏi danh sách,
+prompt được dựng **không có khối nhận dạng nào** cho người đó, và model tự bịa
+ra một người — bịa mới trong **từng cảnh**. Mọi bước đều báo thành công.
+
+`requireCharacterSheetsByName` ném `UnknownCharacterError` và **nêu đích danh**
+tên thiếu. Đường ảnh dùng bản này.
+
+---
+
+## QĐ-071 — "Cần tạo" khác "dùng lại", và bản dự toán phải nói được cả hai
+
+`generateSceneVideo` kiểm khoá idempotency **trước** router (QĐ-068), nên chạy
+lại một dự án đã xong thì trả về clip cũ, $0. Bộ dự toán không biết điều đó, nên
+**báo giá lại clip đã mua**.
+
+Phóng đại là hướng an toàn cho một cái **trần**, và là câu trả lời sai cho câu
+hỏi đang được hỏi — *"lần chạy này tốn tôi bao nhiêu"*. Nó cũng làm khoản tiết
+kiệm **tàng hình**: cả lý do để nhập storyboard kèm sẵn asset là không trả tiền
+hai lần, mà bản xem trước lại không nói được.
+
+### Ba trạng thái, không phải hai
+
+`BUY` / `REUSE` / `NONE`. Một cảnh LOCAL_MOTION tốn $0 tiền video và **không dùng
+lại gì cả** — chưa bao giờ có gì để mua cho nó. Gộp hai thứ lại thì bản xem
+trước sẽ khoe "6 clip dùng lại" cho một lô chưa từng gọi model video.
+
+`hasExistingVideo` và `hasExistingVoice` đều kiểm **trên đĩa**, không tin cột:
+một cột trỏ tới tệp đã bị xoá không phải là một asset, và coi nó là asset sẽ báo
+$0 cho một clip thật sự sẽ được mua — đúng hướng mà một bản dự toán không bao
+giờ được sai. Giọng phải đủ **MỌI** dòng thoại: hai dòng mà mới có một tệp thì
+vẫn phải mua dòng còn lại.
+
+### Những gì bản xem trước còn thiếu, nay có
+
+- **dòng RENDER = $0**, nói ra. Không thấy dòng render thì không phân biệt được
+  "miễn phí" với "quên mất", và khác biệt đó quan trọng khi con số sắp được ký
+  là một cái trần.
+- **safetyMargin** tách khỏi `suggestedAuthorizedMaxSpend`. Người duyệt có
+  quyền biết bao nhiêu là dự toán và bao nhiêu là phần đệm — hai thứ khác nhau
+  để đồng ý.
+- **providerWallets**, liệt kê **từng nhà cung cấp, không cộng chung**.
+  `remainingUsd: null` nghĩa là "không giữ ví cho hãng này", phải hiện là
+  *không rõ* chứ không phải $0,00.
+- **counts**: image/video/voice, mua bao nhiêu và dùng lại bao nhiêu.
+
+Và `buildPlannedScenes` thôi truyền cặp provider/model như một cái ghim: nó
+truyền ghim **chỉ khi** `videoModelPinned` (QĐ-069). Bản dự toán phải hỏi đúng
+câu mà pipeline sẽ hỏi.

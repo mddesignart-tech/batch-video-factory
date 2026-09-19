@@ -110,6 +110,7 @@ describe("motion: cùng một luật với đường chạy thật", () => {
       spendPriority: "LOW",
       videoProvider: "runway",
       videoModel: "h3_max:768x1280",
+      videoModelPinned: true,
     });
     const d = deriveSceneVideoFacts(pinned, {
       qualityMode: "ECONOMY",
@@ -118,11 +119,41 @@ describe("motion: cùng một luật với đường chạy thật", () => {
     expect(d.facts.motionSource).toBe("AI_VIDEO");
   });
 
+  // QĐ-069. `generateSceneVideo` writes the model it used back onto the scene,
+  // so after one paid clip every scene carries a provider/model pair. Reading
+  // that pair as an instruction kept "free wins" switched off on exactly the
+  // scenes that had already cost money - the most expensive possible place to
+  // be wrong. Without `videoModelPinned` the pair is a RECORD, not a pin.
+  it("cặp provider/model do router ghi lại KHÔNG phải ghim tay", () => {
+    const writtenBack = scene({
+      spendPriority: "LOW",
+      videoProvider: "runway",
+      videoModel: "h3_max:768x1280",
+      videoModelPinned: false,
+    });
+    const d = deriveSceneVideoFacts(writtenBack, {
+      qualityMode: "ECONOMY",
+      keyframeExists: onDisk(true),
+    });
+    expect(d.facts.motionSource).toBe("LOCAL_MOTION");
+  });
+
+  // The importer's instruction is written as `motionMode`, not as a model name,
+  // and it must keep its weight on its own.
+  it("motionMode = VIDEO_AI vẫn là chỉ định, dù không ghim model nào", () => {
+    const d = deriveSceneVideoFacts(
+      scene({ spendPriority: "LOW", motionMode: "VIDEO_AI" }),
+      { qualityMode: "ECONOMY", keyframeExists: onDisk(true) },
+    );
+    expect(d.facts.motionSource).toBe("AI_VIDEO");
+  });
+
   it("ignoreManualPin CHỈ bỏ ghim khi quyết định motion, không sửa cảnh", () => {
     const pinned = scene({
       spendPriority: "LOW",
       videoProvider: "runway",
       videoModel: "h3_max:768x1280",
+      videoModelPinned: true,
     });
     const d = deriveSceneVideoFacts(pinned, {
       qualityMode: "ECONOMY",

@@ -61,6 +61,15 @@ export interface SceneFactsInput {
   imagePath: string | null;
   videoProvider: string | null;
   videoModel: string | null;
+  /**
+   * Did a PERSON name that provider/model pair?
+   *
+   * Optional so every existing fixture keeps working: a row without it has no
+   * instruction to honour, which is the safe reading. It must NOT be inferred
+   * from the two columns above, because `generateSceneVideo` writes the
+   * router's own choice into them when a clip succeeds.
+   */
+  videoModelPinned?: boolean;
   charactersPresentJson: string;
   speakingCharactersJson: string;
   primaryCharactersJson: string;
@@ -134,10 +143,19 @@ export function deriveSceneVideoFacts(
   // Without this, "free wins" would silently downgrade a scene the operator
   // explicitly asked to send to a video model, which is the mirror image of
   // the silent override that rule exists to prevent.
+  //
+  // What does NOT count is a provider/model pair on its own. `generateSceneVideo`
+  // writes the model it used back onto the scene, so on a re-plan every scene
+  // that had ever bought a clip looked pinned - and `effectiveMotionSource`
+  // keeps a pinned scene on AI_VIDEO even when the current rules say
+  // LOCAL_MOTION. "Free wins" was therefore switched off on precisely the
+  // scenes that had already cost money. `videoModelPinned` is what a person
+  // sets; the pair alone is only a record. See QĐ-069.
   const pinned =
     opts.ignoreManualPin === true
       ? false
-      : Boolean(scene.videoProvider && scene.videoModel) ||
+      : (scene.videoModelPinned === true &&
+          Boolean(scene.videoProvider && scene.videoModel)) ||
         scene.motionMode === "VIDEO_AI";
   const motion = effectiveMotionSource(
     scene.motionSource,

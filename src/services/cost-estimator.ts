@@ -56,6 +56,31 @@ export interface PlannedSceneInput {
   hasSuppliedKeyframe?: boolean;
 
   /**
+   * The clip for this scene already exists and was already paid for.
+   *
+   * The resume case. `generateSceneVideo` hands back a settled clip without
+   * routing at all - it checks the idempotency key before the router, precisely
+   * so a project with no budget left can still finish work it has already
+   * bought. The estimate did not know that, so resuming a finished video quoted
+   * the clip again: over-stating, which is the safe direction for a ceiling and
+   * the wrong direction for the question the operator is actually asking, which
+   * is "what will THIS run cost me".
+   *
+   * Priced at zero and counted as reuse, so the preview can say "2 clip dùng
+   * lại" instead of quietly inflating the total. See QĐ-071.
+   */
+  hasExistingVideo?: boolean;
+
+  /**
+   * Every spoken line of this scene already has audio on disk.
+   *
+   * Same rule, same reason. Partial is NOT reuse: a scene with two lines and
+   * one file still has to buy the second, and calling that "reused" would
+   * under-state - the one direction an estimate must never move in.
+   */
+  hasExistingVoice?: boolean;
+
+  /**
    * The scene half of the LOW_AUTO gate, from `deriveSceneVideoFacts`.
    *
    * Optional, and its ABSENCE is not neutral: a LOW_AUTO model asked to price a
@@ -118,6 +143,17 @@ export interface ScenePlan {
   errorCode?: RoutingError["code"];
   estimatedCost: number;
   error?: string;
+  /**
+   * Assets this scene already owns and will NOT buy again.
+   *
+   * Kept apart from `needs` rather than derived as its negation, because the
+   * two are not complements: a LOCAL_MOTION scene neither needs a clip nor
+   * reuses one. A cost preview that reported "not needed" as "reused" would
+   * claim savings on purchases that were never on the table. QĐ-071.
+   */
+  reuse: { image: boolean; video: boolean; voice: boolean };
+  /** Assets this run really will buy. */
+  needs: { image: boolean; video: boolean; voice: boolean };
 }
 
 export interface CostBreakdown {
@@ -487,7 +523,7 @@ export function planScene(opts: {
   // video provider" further down and reported as the wrong problem.
   const errorBeforeVideo = error;
   const video =
-    motion.source === "AI_VIDEO"
+    motion.source === "AI_VIDEO" && scene.hasExistingVideo !== true
       ? routeOrNull(
           "video",
           true,
@@ -526,7 +562,7 @@ export function planScene(opts: {
   const speechChars = scene.speechText.trim().length;
   const voice = routeOrNull(
     "voice",
-    speechChars > 0,
+    speechChars > 0 && scene.hasExistingVoice !== true,
     { characters: speechChars, jobs: 1 },
     scene.manualVoiceProvider,
     scene.manualVoiceModel,
@@ -571,6 +607,20 @@ export function planScene(opts: {
     errorCode,
     estimatedCost,
     error,
+    reuse: {
+      // Counted separately from "costs nothing". A LOCAL_MOTION scene also
+      // contributes $0 of video, and it is not reuse - nothing was ever bought
+      // for it. Merging the two would let a preview report six reused clips for
+      // a batch that has never called a video model. QĐ-071.
+      image: scene.hasSuppliedKeyframe === true,
+      video: motion.source === "AI_VIDEO" && scene.hasExistingVideo === true,
+      voice: speechChars > 0 && scene.hasExistingVoice === true,
+    },
+    needs: {
+      image: image !== null,
+      video: video !== null,
+      voice: voice !== null,
+    },
   };
 }
 

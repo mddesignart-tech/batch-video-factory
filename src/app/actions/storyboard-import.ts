@@ -329,10 +329,21 @@ export async function updateImportedScene(input: {
     if (input.motionMode === "LOCAL_MOTION") {
       data.videoProvider = null;
       data.videoModel = null;
+      data.videoModelPinned = false;
     }
   }
   if (input.videoProvider !== undefined) data.videoProvider = input.videoProvider || null;
   if (input.videoModel !== undefined) data.videoModel = input.videoModel || null;
+
+  // Whoever edited this form is a person, so whatever they left in the two model
+  // fields is an instruction - including leaving them empty, which retracts the
+  // pin. Recomputed from the values that will actually be stored, not from the
+  // input alone, since `motionMode = LOCAL_MOTION` clears them above. QĐ-069.
+  if (data.videoProvider !== undefined || data.videoModel !== undefined) {
+    const provider = (data.videoProvider as string | null) ?? scene.videoProvider;
+    const model = (data.videoModel as string | null) ?? scene.videoModel;
+    data.videoModelPinned = Boolean(provider && model);
+  }
 
   // The prompt is DERIVED, so it has to be re-derived whenever one of the three
   // fields it is derived from moves. Leaving the old one would send a video

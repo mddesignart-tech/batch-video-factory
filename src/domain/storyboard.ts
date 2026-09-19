@@ -79,6 +79,90 @@ export interface StoryboardCharacter {
   name: string;
   /** Relative path to a reference image, same safety rules as a keyframe. */
   referenceImage: string | null;
+  /**
+   * The Character Bible, as far as the storyboard chose to state it.
+   *
+   * Every field optional and empty when unstated - a storyboard that says only
+   * "Max" is still valid input, it just produces a character the importer will
+   * flag as NEEDS_IDENTITY_FIELDS rather than one it quietly invents an
+   * appearance for. These are used ONLY when creating a new character: an
+   * existing "Max" is reused untouched, because an import that rewrote his
+   * canonical description would redraw him in every older video. See QĐ-070.
+   */
+  bible: StoryboardCharacterBible;
+}
+
+export interface StoryboardCharacterBible {
+  presentation: string;
+  approximateAge: string;
+  skinTone: string;
+  hair: string;
+  face: string;
+  distinguishingFeatures: string;
+  outfit: string;
+  bodyProportions: string;
+  accessories: string;
+  colorPalette: string;
+  negativeIdentity: string;
+}
+
+/**
+ * Column/key names accepted for each Bible field.
+ *
+ * Several spellings each, because this file is filled in by hand: a storyboard
+ * rejected over `skin_tone` versus `skintone` teaches nothing and costs an
+ * afternoon. The FIRST match wins, so the canonical name is listed first.
+ */
+const BIBLE_KEYS: Record<keyof StoryboardCharacterBible, string[]> = {
+  presentation: ["character_presentation", "presentation", "gender"],
+  approximateAge: ["character_age", "approximate_age", "age"],
+  skinTone: ["character_skin_tone", "skin_tone", "skintone"],
+  hair: ["character_hair", "hair"],
+  face: ["character_face", "face", "facial_features"],
+  distinguishingFeatures: [
+    "character_distinguishing_features",
+    "distinguishing_features",
+    "distinguishing",
+  ],
+  outfit: ["character_outfit", "outfit", "clothing"],
+  bodyProportions: ["character_body", "body_proportions", "body"],
+  accessories: ["character_accessories", "accessories"],
+  colorPalette: ["character_color_palette", "color_palette", "colour_palette"],
+  negativeIdentity: [
+    "character_negative_identity",
+    "negative_identity",
+    "character_negative",
+  ],
+};
+
+export function emptyCharacterBible(): StoryboardCharacterBible {
+  return {
+    presentation: "",
+    approximateAge: "",
+    skinTone: "",
+    hair: "",
+    face: "",
+    distinguishingFeatures: "",
+    outfit: "",
+    bodyProportions: "",
+    accessories: "",
+    colorPalette: "",
+    negativeIdentity: "",
+  };
+}
+
+function readCharacterBible(row: Record<string, unknown>): StoryboardCharacterBible {
+  const bible = emptyCharacterBible();
+  for (const [field, keys] of Object.entries(BIBLE_KEYS)) {
+    for (const key of keys) {
+      const value = text(row[key]);
+      if (value.length > 0) {
+        bible[field as keyof StoryboardCharacterBible] = value;
+        break;
+      }
+    }
+  }
+  return bible;
 }
 
 export interface StoryboardVideo {
@@ -537,7 +621,12 @@ function collectCharacters(
   const issues: ImportIssue[] = [];
   const byId = new Map<string, StoryboardCharacter>();
 
-  const add = (id: string, name: string, image: string) => {
+  const add = (
+    id: string,
+    name: string,
+    image: string,
+    bible: StoryboardCharacterBible,
+  ) => {
     if (id.length === 0) return;
     const existing = byId.get(id);
     if (existing) {
@@ -557,12 +646,34 @@ function collectCharacters(
       if (existing.referenceImage === null && image.length > 0) {
         existing.referenceImage = image;
       }
+      // FIRST statement of an attribute wins, and a later row may only fill a
+      // gap. One character declared twice with two different hair colours is a
+      // contradiction, and quietly taking the last one would resolve it in
+      // whichever direction the file happened to be ordered.
+      for (const key of Object.keys(bible) as (keyof StoryboardCharacterBible)[]) {
+        const incoming = bible[key].trim();
+        if (incoming.length === 0) continue;
+        if (existing.bible[key].trim().length > 0) {
+          if (existing.bible[key].trim() !== incoming) {
+            issues.push(
+              warn(
+                "character_attribute_conflict",
+                `Nhân vật "${existing.name}" được khai báo hai giá trị khác nhau cho ` +
+                  `"${key}": giữ "${existing.bible[key].trim()}", bỏ "${incoming}".`,
+              ),
+            );
+          }
+          continue;
+        }
+        existing.bible[key] = incoming;
+      }
       return;
     }
     byId.set(id, {
       characterId: id,
       name: name.length > 0 ? name : id,
       referenceImage: image.length > 0 ? image : null,
+      bible,
     });
   };
 
@@ -573,6 +684,7 @@ function collectCharacters(
         text(row.character_id) || text(row.id),
         text(row.character_name) || text(row.name),
         text(row.character_reference_image) || text(row.reference_image),
+        readCharacterBible(row),
       );
     }
   }
@@ -581,6 +693,7 @@ function collectCharacters(
       text(row.character_id),
       text(row.character_name),
       text(row.character_reference_image),
+      readCharacterBible(row as unknown as Record<string, unknown>),
     );
   }
 

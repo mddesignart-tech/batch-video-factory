@@ -1,9 +1,14 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-18
-**Cột mốc hiện tại:** **Batch Video Factory V1 đã chạy hết một lô bằng API
-trả phí và xuất ra MP4.** Milestone 2 xong trước đó (Text + Image + Video + Voice
+**Cập nhật:** 2026-09-19
+**Cột mốc hiện tại:** **Hai luồng nhập đều đã chạy thật và ra MP4.** Batch V1
+(lô `a690a290`, $1,047095) xong 2026-09-18; Import Storyboard chạy thật lần đầu
+cùng ngày ($0,400122). Milestone 2 xong trước đó (Text + Image + Video + Voice
 đã chạy thật).
+
+Ngày 2026-09-19, **$0 chi thêm**: chấm clip `h3_max` của lần nhập storyboard
+(8,69/10, mẫu sản xuất thật thứ **ba**), rồi sửa ba nhóm lỗi tìm ra khi soi lại
+định tuyến và nhân vật — xem QĐ-069, QĐ-070, QĐ-071.
 
 Lô `a690a290` "Cold feet": duyệt 2026-09-17 với trần $1,24, dừng giữa chừng ở
 cảnh 1, chạy tiếp và hoàn tất 2026-09-18 với **$1,047095** thật — 6 cảnh, 1080x1920.
@@ -17,6 +22,41 @@ QĐ-063 và QĐ-064.
 
 Tài liệu này ghi tình trạng **thực tế**. Tính năng chỉ được đánh dấu hoạt động
 khi đã chạy thật và được kiểm chứng, không phải khi đã viết xong mã.
+
+---
+
+## h3_max — 7 mẫu đã chấm, 3 mẫu sản xuất thật
+
+| Ngày | Cảnh | Dự án | Điểm | Ghi chú |
+|---|---|---|---|---|
+| 09-15 | #1 | f2b68443 | **9,10** | mẫu mua có chủ đích |
+| 09-15 | #5 | 40d52adb | **4,33** | HỎNG camera — prompt CŨ, chưa có guardrail |
+| 09-15 | #6 | 40d52adb | **8,92** | 2 nhân vật |
+| 09-15 | #5 | 40d52adb | **9,20** | A/B chỉ đổi prompt, cùng cảnh 4,33 |
+| 09-18 | #1 | f2b68443 | **9,09** | sản xuất thật, lô a690a290 |
+| 09-18 | #4 | f2b68443 | **8,91** | sản xuất thật, lô a690a290 |
+| 09-19 | #3 | 1ef61e94 | **8,69** | sản xuất thật, **nhập storyboard**, keyframe do người đưa |
+
+Mẫu 09-19 (`npx tsx scripts/record-import-benchmark.ts`) đo bằng FFmpeg, không
+bằng cảm nhận:
+
+```
+hop bao nhan vat  y=34..293 / 320 tai CA 21 diem lay mau trong 5,18s -> khong zoom, khong troi
+lech bien dau/cuoi trai 0,95  phai 0,88  tren 1,01  YMAX 6/255  -> khoa may chat nhat trong 7 mau
+scdet             TB 0,00047  max 0,0020  -> chi ~40% canh 1 va ~20% canh 4
+mau               vang ao 247/193/38 -> 246/189/21; nen 213 -> 209 trong 5s
+chop mat          3 lan (t~1,25 / 2,0 / 3,75) — prompt xin MOT
+```
+
+**Camera 10/10.** Điểm đáng chú ý là **Motion 6/10**: clip gần như một tấm ảnh
+tĩnh có thở. Model làm đúng thứ được yêu cầu; câu hỏi là có đáng $0,40 cho một
+cái chớp mắt không, khi LOCAL_MOTION làm việc đó miễn phí. Xem mục
+"Sàn chuyển động" trong `.ai/NEXT_TASKS.md`.
+
+Cả 7 mẫu đều **LOW, ≤2 nhân vật, camera khoá, có keyframe** — đúng bằng hình
+dạng mà cổng LOW_AUTO đang cho qua. Bằng chứng **không mở rộng** ra ngoài đó.
+
+---
 
 ---
 
@@ -1222,3 +1262,115 @@ npm run lowauto:prove      # chứng minh + 9 negative control, $0
 npm run runway:balance     # đọc lại số dư live
 npm run batch:close-stale  # thử khô; cần --apply mới ghi
 ```
+
+---
+
+## Ghim tay tách khỏi bản ghi của router — 2026-09-19, $0
+
+`Scene.videoModelPinned` là cột mới, và là **nguồn sự thật duy nhất** cho câu
+"có người chọn model này không". Trước đó `videoProvider`/`videoModel` mang cả
+hai nghĩa — chỉ định trước khi chạy, bản ghi sau khi chạy — nên **từ lần chạy
+thứ hai, mọi cảnh từng mua clip đều trông như đã ghim tay**, và ghim tay thì bỏ
+qua toàn bộ định tuyến. Xem QĐ-069.
+
+Ba thứ bị tắt vì điều đó, tất cả đều về tiền:
+
+| Bị tắt | Nghĩa là |
+|---|---|
+| `lowAutoRouteBlock()` | điều kiện của quyền LOW_AUTO thôi được kiểm lại từ lần chạy thứ hai |
+| `assertBatchAuthorized` cổng 2b | quyền chi "chỉ clip đã nêu tên" trả được tiền cho clip router tự chọn |
+| luật *miễn phí thắng* | ngừng áp dụng đúng vào những cảnh **đã tốn tiền** |
+
+Backfill dựng lại từ bằng chứng có sẵn trong hàng — `routingMode = MANUAL` hoặc
+`motionMode = VIDEO_AI`:
+
+```
+5 ghim / 16 hàng có videoModel
+  PIN  d9c9b991 gen4.5     PIN  5fd45846 gen4_turbo
+  PIN  4dd22035 h3_max     PIN  8453fa52 h3_max     (4 cảnh Spill the beans)
+  PIN  25ca9c6e h3_max                              (cảnh 3 lô nhập)
+       26de7d41 h3_max          bf8bf64d h3_max     (router tự chọn — KHÔNG ghim)
+sổ chi giữ nguyên: CostEntry 150 dòng $6,801137 · ProviderJob 123 · Reservation 24
+```
+
+Kèm theo, cùng gốc:
+
+- `motionResolutionFor` (bước ẢNH) thôi tự dẫn xuất, gọi `deriveSceneVideoFacts`.
+  Nó là bản chép tay **thứ tư** QĐ-060 bỏ sót, và nó không biết `motionMode` —
+  nên một cảnh nhập `VIDEO_AI` là AI_VIDEO với bước video và LOCAL_MOTION với
+  bước ảnh, **trong cùng một lần chạy**.
+- `RouteCandidate.lowAuto`: mỗi phương án dự phòng mang cờ của **chính nó**.
+  `withFallback` nhân bản bằng `...decision`, nên rơi xuống một model LOW_AUTO
+  thừa hưởng `lowAutoRouted: false` và cổng 2b không có gì để bắn.
+- Nhánh LOCAL_MOTION thôi ghi đè `ffmpeg/local-motion` lên một cảnh **đã ghim**.
+
+### LOW_AUTO — soát lại toàn bộ, sau khi sửa
+
+| Nguyên tắc | Trạng thái |
+|---|---|
+| LOCAL_MOTION miễn phí không tự sang trả phí | ĐẠT — `local_motion` là điều kiện thứ hai của cổng, và `effectiveMotionSource` từ chối hướng đắt |
+| ghim tay luôn thắng auto-route | ĐẠT — short-circuit, `lowAutoRouted: false`; và **nay chỉ ghim thật mới tính** |
+| LOW_AUTO chỉ cho LOW | ĐẠT — `isAutoRoutable` + `not_low`; không biết độ khó thì `false` |
+| không dùng khi thiếu keyframe | ĐẠT — `needs_keyframe` ở giai đoạn VIDEO, kiểm **trên đĩa** |
+| không vượt số nhân vật đã đo | ĐẠT — `too_many_characters` (≤2) + trần cứng `MAX_CHARACTERS` kể cả ghim tay |
+| DIRECTED_CAMERA không bị ép LOCKED | ĐẠT — bộ guardrail riêng, **không** có FINAL_FRAME/SCALE; cổng chỉ **không auto-route** nó |
+| không fallback sang DEGRADED/DEPRECATED | ĐẠT — `fallbacks` lấy từ danh sách **đã lọc**; `lowAutoFallback` không bao giờ trỏ sang model trả phí khác |
+| không paid POST khi chưa cấp phép | ĐẠT — đúng một trong hai cơ chế, và cổng 2b **nay thật sự bắn được** |
+
+---
+
+## Character Bible — 2026-09-19, $0
+
+`LOCKED_ATTRIBUTES` đã nói với mọi prompt ảnh rằng **apparent age** và
+**skin tone** không được đổi, từ ngày hệ thống nhân vật ra đời — mà hàng
+`Character` **chưa từng có cột nào để nói hai thứ đó là gì**. Khoá một giá trị
+không ai phát biểu là khoá đúng cái model ngẫu hứng ở khung đầu tiên. Xem QĐ-070.
+
+Năm cột mới, tất cả mặc định `""`: `presentation`, `approximateAge`, `skinTone`,
+`distinguishingFeatures`, `negativeIdentity`. **Không hàng nào đổi chuỗi
+canonical** — trường rỗng bị bỏ qua, và chuỗi đó được băm vào khoá idempotency
+của ảnh master, nên một byte lệch là mua lại toàn bộ ảnh nhân vật. Có test khoá
+đúng chuỗi cũ từng byte.
+
+```
+Max   refs=1 approvedPrimary=1   thiếu: apparent age, skin tone
+Leo   refs=1 approvedPrimary=1   thiếu: apparent age, skin tone
+Mia   refs=1 approvedPrimary=1   thiếu: apparent age, skin tone
+```
+
+Ba nhân vật hiện có đều `NEEDS_IDENTITY_FIELDS`. Chúng **vô tình** vẫn đúng, vì
+`visualPrompt` viết tay có sẵn "young adult male/female"; chỗ trống chỉ là chỗ
+trống, **không tự điền** — một giá trị bịa ra ở đây sẽ nằm trong mọi prompt của
+nhân vật đó mãi mãi và không ai biết nó là bịa.
+
+- `characterReadiness()` → `NEEDS_CHARACTER_REFERENCE` / `NEEDS_IDENTITY_FIELDS`
+  / `READY`. Thiếu ảnh báo **trước**, vì đó là thứ phải **đưa vào** chứ không gõ
+  ra được.
+- Import phát `character_needs_reference` (cảnh báo) và câu cảnh báo **nói thẳng
+  là hệ thống sẽ không tự tạo ảnh**. Không có đường nào từ import tới Image API.
+- Storyboard khai báo được cả Bible (11 trường, vài cách viết tên cột). Nhân vật
+  **đã tồn tại thì không bị ghi đè**.
+- `requireCharacterSheetsByName` — tên lạ nay **ném lỗi có nêu tên**. Trước đó
+  `getCharacterSheetsByName` im lặng bỏ qua, prompt được dựng **không có khối
+  nhận dạng nào** cho người đó, và model bịa ra một người **mới trong từng
+  cảnh**. Mọi bước đều báo thành công.
+
+---
+
+## Dự toán: "cần tạo" tách khỏi "dùng lại" — 2026-09-19, $0
+
+Ba trạng thái cho mỗi asset: `BUY` / `REUSE` / `NONE`. Một cảnh LOCAL_MOTION tốn
+$0 tiền video và **không dùng lại gì** — gộp hai thứ lại thì bản xem trước khoe
+"6 clip dùng lại" cho một lô chưa từng gọi model video. Xem QĐ-071.
+
+`hasExistingVideo` / `hasExistingVoice` kiểm **trên đĩa**, không tin cột. Giọng
+phải đủ **MỌI** dòng thoại mới tính là dùng lại.
+
+Bản xem trước nhập storyboard nay có đủ: số video · số cảnh/video · LOCAL_MOTION
+· VIDEO_AI · image BUY/REUSE · video BUY/REUSE · voice BUY/REUSE · chi phí
+text/image/video/voice/quality/retries/**render ($0, nói ra)** · tổng mỗi video ·
+tổng lô · **safetyMargin tách riêng** · trần đã duyệt · hạn mức tổng còn lại ·
+**ví từng nhà cung cấp, không cộng chung** (`null` = *không rõ*, không phải
+$0,00) · `costBasis`.
+
+---

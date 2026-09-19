@@ -379,6 +379,26 @@ describe("LOW_AUTO: router phải tự gọi cổng", () => {
     expect(d.lowAutoRouted).toBe(true);
   });
 
+  // QĐ-069. A fallback is bought with the same money as the first choice, so it
+  // has to face the same question at the batch gate. `withFallback` cloned the
+  // decision, so a fallback ONTO a LOW_AUTO model inherited `lowAutoRouted:
+  // false` from a first choice that was not one - and gate 2b, whose whole job
+  // is to stop an approval of named clips funding a clip the router picked, had
+  // nothing to fire on. Each candidate now carries its own answer.
+  it("mỗi phương án dự phòng mang cờ LOW_AUTO của CHÍNH nó", () => {
+    // MID is the better value at quality 7 for $0.10 vs 6 for $0.08, so the
+    // LOW_AUTO model lands in the fallback list rather than winning.
+    const d = routeScene([MID, LOW_AUTO_MODEL], lowAutoCtx());
+    expect(d.modelId).toBe("mid");
+    expect(d.lowAutoRouted).toBe(false);
+
+    const granted = d.fallbacks.find((f) => f.modelId === "granted");
+    expect(granted).toBeDefined();
+    expect(granted!.lowAuto).toBe(true);
+    // ...and the ordinary model beside it still says no.
+    expect(d.fallbacks.every((f) => f.modelId === "granted" || f.lowAuto === false)).toBe(true);
+  });
+
   it("cảnh MEDIUM/HIGH -> KHÔNG chọn, dù model là ứng viên duy nhất", () => {
     for (const complexity of ["MEDIUM", "HIGH"] as const) {
       expect(() => routeScene([LOW_AUTO_MODEL], lowAutoCtx({ complexity }))).toThrow(RoutingError);

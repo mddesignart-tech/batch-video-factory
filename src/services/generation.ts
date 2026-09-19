@@ -43,12 +43,7 @@ import {
   batchApprovalFor,
 } from "./batch-authorization";
 import { commit as commitReservation, release as releaseReservation } from "./cost-reservation";
-import {
-  decideMotion,
-  effectiveMotionSource,
-  keyframeRequired,
-  type MotionResolution,
-} from "@/domain/local-motion";
+import { keyframeRequired, type MotionResolution } from "@/domain/local-motion";
 import { parseDialogueLines } from "@/domain/dialogue-lines";
 import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
@@ -66,7 +61,7 @@ import { targetForAspect } from "@/media/render";
 import {
   buildNegativePrompt,
   buildScenePrompt,
-  getCharacterSheetsByName,
+  requireCharacterSheetsByName,
   referenceAbsolutePath,
   type CharacterSheet,
 } from "./character-service";
@@ -177,13 +172,24 @@ function routeFor(
   usage: { seconds?: number; images?: number; characters?: number; jobs?: number },
   manual: { provider?: string | null; model?: string | null },
   lowAuto?: LowAutoSceneFacts,
+  /**
+   * The strategy for THIS model choice, when the scene's own column cannot
+   * answer it.
+   *
+   * `routingMode` is one flag for three different decisions - image, video and
+   * voice - so pinning an image model (which sets `routingMode = "MANUAL"`)
+   * also told the VIDEO router that a person had chosen its model. The video
+   * path therefore states its own answer, from `videoModelPinned`, instead of
+   * reading a flag that is about something else. See QĐ-069.
+   */
+  strategyOverride?: RouterStrategy,
 ): RouteDecision {
   const { scene, project } = ctx;
   const characterCount = sceneCharacters(scene).present.length || 1;
   return routeScene(ctx.models, {
     type,
     qualityMode: project.qualityMode as QualityMode,
-    strategy: scene.routingMode as RouterStrategy,
+    strategy: strategyOverride ?? (scene.routingMode as RouterStrategy),
     complexity: scene.complexity as "LOW" | "MEDIUM" | "HIGH",
     spendPriority: scene.spendPriority as "LOW" | "NORMAL" | "HIGH",
     durationSeconds: scene.duration,
@@ -763,6 +769,10 @@ async function withFallback<T>(
       quality: f.quality,
       reason: `Dự phòng sau khi ${decision.provider}/${decision.modelId} thất bại`,
       fallbacks: [],
+      // The fallback's OWN answer, not the first choice's. A fallback is bought
+      // with the same money and has to face the same question at the batch
+      // gate: did anyone approve the router choosing this? See QĐ-069.
+      lowAutoRouted: f.lowAuto,
     })),
   ];
 
@@ -1049,7 +1059,12 @@ export async function buildSceneImageRequest(
   // the count: the focus of the shot first, then whoever speaks, then the rest.
   const ordered = referencePriority(lists);
   const [characters, stylePrompt] = await Promise.all([
-    getCharacterSheetsByName(ordered),
+    // REQUIRE, not look up. A name with no row used to vanish here, and the
+    // prompt was then composed with no identity block for that person - so the
+    // model invented one, freshly, in every scene that named them. Refusing
+    // costs nothing; finding out afterwards costs an image per scene and the
+    // consistency the whole character system exists for. See QĐ-070.
+    requireCharacterSheetsByName(ordered),
     resolveStylePrompt(stylePresetId),
   ]);
 
@@ -1273,20 +1288,51 @@ async function resolveStylePrompt(stylePresetId: string | null): Promise<string>
  * rather than written back, so the disagreement stays visible in the audit
  * trail instead of being tidied away by the process that noticed it.
  */
+/**
+ * Did a PERSON choose this scene's video model?
+ *
+ * A PIN IS SOMETHING SOMEBODY DID, and `videoModelPinned` is the only column
+ * that says so. Reading it off `videoProvider`/`videoModel` instead was wrong in
+ * a way that only appeared on the SECOND run of a scene: `generateSceneVideo`
+ * writes those two columns back with the model the router picked, so the next
+ * call found them populated and took the manual short-circuit. Three things
+ * followed, none of them visible at the time:
+ *
+ *   - `lowAutoRouteBlock` was skipped, so the conditions the LOW_AUTO grant was
+ *     given under stopped being re-checked;
+ *   - `lowAutoRouted` came back false, so `assertBatchAuthorized` gate 2b let an
+ *     approval covering NAMED clips pay for a clip the router had chosen;
+ *   - `effectiveMotionSource` saw an instruction, so "free wins" stopped
+ *     applying to exactly the scenes that had already cost money.
+ *
+ * Both halves of the pair are still required: a provider with no model does not
+ * name the thing being bought. Exported so the rule is testable without a
+ * database - it decides whether money may move. See QĐ-069.
+ */
+export function isOperatorVideoPin(scene: {
+  videoModelPinned: boolean;
+  videoProvider: string | null;
+  videoModel: string | null;
+}): boolean {
+  return scene.videoModelPinned && Boolean(scene.videoProvider && scene.videoModel);
+}
+
 function motionResolutionFor(ctx: SceneContext): MotionResolution {
-  return effectiveMotionSource(
-    ctx.scene.motionSource,
-    decideMotion({
-      qualityMode: ctx.project.qualityMode as QualityMode,
-      complexity: ctx.scene.complexity as "LOW" | "MEDIUM" | "HIGH",
-      spendPriority: ctx.scene.spendPriority as "LOW" | "NORMAL" | "HIGH",
-      characterCount: sceneCharacters(ctx.scene).present.length || 1,
-    }),
-    // Both halves, not either: a provider with no model is not a choice of
-    // model, and the pin has to name the thing being bought to count as an
-    // instruction to buy it.
-    { manuallyPinned: Boolean(ctx.scene.videoProvider && ctx.scene.videoModel) },
-  );
+  // Delegated rather than re-derived. This function used to build the same
+  // resolution by hand and got two things wrong that `deriveSceneVideoFacts`
+  // has right: it read a pin off the provider/model pair, which after the first
+  // clip is the router's own write-back, and it ignored `motionMode` entirely -
+  // so an imported scene marked VIDEO_AI was AI_VIDEO to the video step and
+  // LOCAL_MOTION to the image step, in the same run. QĐ-060 replaced three
+  // hand-written copies of this derivation; this was the fourth. See QĐ-069.
+  //
+  // PLANNING, because the only caller is the IMAGE step: at that point a
+  // keyframe legitimately does not exist yet, and the stage field is what keeps
+  // that from reading as a defect.
+  return deriveSceneVideoFacts(ctx.scene, {
+    qualityMode: ctx.project.qualityMode,
+    stage: "PLANNING",
+  }).motion;
 }
 
 /**
@@ -1341,12 +1387,19 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
         false,
       );
     }
+    // The marker records that FFmpeg animated this scene and no vendor was
+    // called. It must not overwrite a PIN, though: on a scene whose stored plan
+    // is LOCAL_MOTION, `effectiveMotionSource` lands here regardless of any
+    // instruction, and writing the marker into the same two columns would erase
+    // the operator's chosen model with no way to recover it. `videoPath: null`
+    // and `motionSource` already say that nothing was bought. QĐ-069.
     await prisma.scene.update({
       where: { id: scene.id },
       data: {
         videoPath: null,
-        videoProvider: "ffmpeg",
-        videoModel: "local-motion",
+        ...(scene.videoModelPinned
+          ? {}
+          : { videoProvider: "ffmpeg", videoModel: "local-motion" }),
         status: "video_ready",
         errorMessage: null,
       },
@@ -1451,11 +1504,14 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
     }
   }
 
+  const videoPinned = isOperatorVideoPin(scene);
   const decision = routeFor(
     ctx,
     "video",
     { seconds: scene.duration, jobs: 1 },
-    { provider: scene.videoProvider, model: scene.videoModel },
+    videoPinned
+      ? { provider: scene.videoProvider, model: scene.videoModel }
+      : { provider: null, model: null },
     // The scene facts a LOW_AUTO candidate is judged against. VIDEO stage: this
     // is the call that spends, so a keyframe that is merely expected later is a
     // keyframe that does not exist.
@@ -1467,6 +1523,7 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
       providerBudgets: await providerWalletsUsd(),
       perVideoCapRemaining: await perVideoCapFor(ctx.batchId),
     },
+    videoPinned ? "MANUAL" : "AUTO",
   );
   const target = targetForAspect(project.aspectRatio);
   const outputPath = path.join(
