@@ -23,6 +23,13 @@ Chạy lại chính lô đó: **ProviderJob +0, chi thật +$0, POST +0**. Giả
 xong / video B hỏng rồi resume: A không đổi (dự án, MP4, 11 ProviderJob), chỉ B
 được render lại bằng FFmpeg, $0.
 
+## Final QA — PASS (2026-09-25, $0)
+
+UI thật + hai MP4 mở trực tiếp: đúng cảnh, cắt cảnh sạch, 0 khung đen, audio có,
+giọng không bị cắt, subtitle khớp, clip Runway đúng cảnh 3, 21s / 20s. Xem MP4 /
+MỞ OUTPUT / Mở dự án đều chạy. Sửa thêm một lỗi: trần/video của lô nhập không tới
+được quyền chi mà gateway đọc (QĐ-089).
+
 ## Chức năng V1
 
 - **Nhập storyboard** JSON / CSV / thư mục / ZIP → kiểm tra (mã lỗi + số dòng) →
@@ -134,6 +141,9 @@ công tắc an toàn chỉ sửa được trong `.env`.
 - Nhịp cảnh: giọng ngắn hơn cảnh 0,7–2,4s, nên có khoảng lặng giữa các câu (thẩm mỹ, không phải lỗi pipeline).
 - `veo3.1_fast`, `wan3`, `h3_max:480x854` chưa benchmark — chỉ dùng khi ghim tay.
 - MAX PER VIDEO / MAX BATCH đặt theo từng lô, chưa có ô sửa mặc định trong Cài đặt.
+- Màu nền có thể nhảy giữa các cảnh dù storyboard ghi "same plain background" (Image AI, thẩm mỹ).
+- Tên hiển thị của `h3_max:768x1280` trong DB vẫn ghi "(chưa benchmark)".
+- Bản ghi quyền chi của lô `4d18d1a9` ghi trần/video $2,50 — đúng trần gateway đã áp lúc chạy (QĐ-089).
 
 ## Cách chạy
 

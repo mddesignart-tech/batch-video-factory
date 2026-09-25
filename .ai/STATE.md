@@ -42,6 +42,34 @@ Mở dự án, Thử lại chỉ hiện khi video lỗi. Cài đặt có "API đ
 (không lộ key) và mặc định lô. Trang Mô hình AI có nhãn lifecycle + reliability.
 `npm run smoke` = import → dự toán → chạy → resume → batch queue → output, mock, $0.
 
+### V1 FINAL QA PASS — 2026-09-25, $0
+
+UI thật (bản build production, cổng 3100, mock, worker tắt) và hai MP4 mở trực tiếp:
+
+```
+Trang lô        2 video Hoàn thành · Ảnh 5/5 · Video AI 1/1 · Giọng 5/5 · Render XONG
+Xem MP4         ĐẠT — trình duyệt phát 21s và 20s, 1080x1920, không lỗi
+MỞ OUTPUT       ĐẠT — Explorer mở đúng data/projects/<id>/final
+Mở dự án        ĐẠT — trang dự án, trình phát, storyboard
+Cài đặt         ĐẠT — OpenAI/Runway/Groq CÓ, không lộ key
+Mô hình AI      ĐẠT — DEPRECATED / DEGRADED / PIN_ONLY / LOW_AUTO có nhãn
+MP4 (khung hình từng cảnh + sát mỗi điểm cắt, ffprobe, blackdetect, silencedetect)
+  đúng cảnh · cắt cảnh sạch · 0 khung đen (ngưỡng 0,1s) · audio -18 dB
+  giọng cuối kết thúc 20,28s / 18,93s trước hết video · subtitle khớp từng cảnh
+  clip Runway = cảnh 3 video 1 (nền xám, không đạn, nhắm mắt) đúng storyboard
+```
+
+**Một lỗi logic tìm ra, đã sửa (QĐ-089):** lô nhập storyboard tạo quyền chi
+không có `maxCostPerVideo` → gateway áp **$2,50/video** (mặc định schema) thay vì
+$0,70 người vận hành đặt; phạm vi nhà cung cấp rỗng; dự toán từng video $0.
+Lô `4d18d1a9` **không bị vượt** — script chạy lô tự kiểm $0,70 trước mỗi bước, video
+1 dừng ở $0,6059 — nhưng qua UI thì lô nhập mất trần/video. Bản ghi quyền chi đã
+COMPLETED của lô đó giữ nguyên $2,50 (đó là trần gateway thật sự đã áp).
+
+**Ghi nhận thẩm mỹ, không sửa:** màu nền nhảy giữa các cảnh dù storyboard ghi
+"same plain background" (V1 xanh→xám, V2 kem↔xám); tên hiển thị h3_max 768p vẫn ghi
+"(chưa benchmark)"; số dư Runway trên trang Cài đặt là CACHE 551 (đúng thiết kế).
+
 ---
 
 ## Lịch sử trước V1.0.0

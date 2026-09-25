@@ -549,6 +549,43 @@ describe("tạo lô từ storyboard (mock mode, $0)", () => {
     expect(costs).toBe(0);
   });
 
+  // Found by the V1 final QA on the real two-video batch: the operator set
+  // $0.70/video at import, the batch row said $0.70, and the authorisation the
+  // gateway enforces said $2.50 - the schema default. Scope was empty too.
+  it("trần/video của lô nhập đi tới đúng quyền chi mà gateway đọc", async () => {
+    const root = folder("db-cap");
+    writeVideo(root, "dbcap", [
+      SCENE(1, { image_file: "k.png", motion_mode: "VIDEO_AI", duration: 5, priority: "HIGH" }),
+      SCENE(2, { motion_mode: "LOCAL_MOTION" }),
+    ]);
+    const created = await materialiseImport(await validateImport(scanImportSource(root)), {
+      batchName: "db-cap",
+      maxCostPerVideo: 0.7,
+      maxCostForBatch: 1,
+    });
+    const draft = await prisma.batchAuthorization.findUniqueOrThrow({
+      where: { batchId: created.batchId },
+    });
+    expect(draft.maxCostPerVideo).toBe(0.7);
+    expect(draft.videoCount).toBe(1);
+
+    const pre = await preflightImportedBatch(created.batchId);
+    const costed = await prisma.batchAuthorization.findUniqueOrThrow({
+      where: { batchId: created.batchId },
+    });
+    expect(costed.maxCostPerVideo).toBe(0.7);
+    const plan = JSON.parse(
+      (await prisma.batch.findUniqueOrThrow({ where: { id: created.batchId } })).planJson,
+    ) as { providerScope: string[] };
+    expect(plan.providerScope.length).toBeGreaterThan(0);
+    expect(JSON.parse(costed.providerScopeJson)).toEqual(plan.providerScope);
+
+    const project = await prisma.project.findUniqueOrThrow({
+      where: { id: created.projects[0]!.projectId },
+    });
+    expect(project.estimatedCost).toBe(pre.videos[0]!.estimatedCost);
+  });
+
   it("LOCAL_MOTION không bao giờ chạm tới model video; VIDEO_AI thì có", async () => {
     const root = folder("db-3");
     writeVideo(root, "db3", [

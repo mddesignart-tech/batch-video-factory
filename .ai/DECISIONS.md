@@ -2684,3 +2684,15 @@ V1 phát hành với đúng những gì đã chạy thật. Mọi thứ sau đâ
 được kéo ngược vào V1: đổi tên trạng thái lô sang DRAFT/READY/BLOCKED, ô sửa MAX
 PER VIDEO/MAX BATCH mặc định, benchmark model PIN_ONLY, provider mới, chạy lô thật
 qua hàng đợi thay vì script.
+
+## QĐ-089 — Trần/video của lô nhập phải tới được cái gateway đọc
+
+Final QA trên trang lô thật: ô "Hạn mức / video" hiện **$2,50** cho lô được duyệt
+$0,70. `materialiseImport` tạo quyền chi DRAFT chỉ với `status`/`authorizedMaxSpend`/
+`estimatedCost`, nên `maxCostPerVideo` lấy mặc định schema ($2,50) — và đó là con số
+`assertBatchAuthorized` so sánh. Preflight chỉ cập nhật `estimatedCost`. Phạm vi nhà cung
+cấp rỗng (nghĩa là không giới hạn) và dự toán từng dự án $0.
+
+Nay lúc nhập ghi đúng trần/video + số video; preflight cập nhật trần/video, phạm vi
+nhà cung cấp (đúng danh sách người vận hành nhìn thấy) và dự toán từng dự án. Lô đã
+chạy không bị sửa hồi tố: bản ghi của nó nói đúng điều gateway đã áp lúc đó.

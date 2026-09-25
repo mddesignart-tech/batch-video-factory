@@ -706,10 +706,29 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     where: { id: batchId },
     data: { planJson: JSON.stringify(plan), estimatedCost: estimatedTotal },
   });
+  // The draft carries the figures the operator is about to approve - including
+  // the per-video ceiling the gateway enforces. It used to receive only the
+  // estimate, so an imported batch reached approval with the schema default
+  // ($2.50/video) and an empty provider scope, while the page and the batch
+  // row both said $0.70. Found by the V1 final QA.
   await prisma.batchAuthorization.updateMany({
     where: { batchId, status: "DRAFT" },
-    data: { estimatedCost: estimatedTotal },
+    data: {
+      estimatedCost: estimatedTotal,
+      maxCostPerVideo: batch.maxCostPerVideo,
+      providerScopeJson: JSON.stringify(providerScope),
+      videoCount: planned.length,
+    },
   });
+  // Each video's own forecast, so the batch table has an estimate beside its
+  // actual cost instead of $0.
+  for (const video of planned) {
+    if (!video.projectId) continue;
+    await prisma.project.update({
+      where: { id: video.projectId },
+      data: { estimatedCost: video.estimatedCost },
+    });
+  }
 
   await logger.info({
     event: "import.preflight",

@@ -1045,6 +1045,10 @@ export async function materialiseImport(
       status: "DRAFT",
       authorizedMaxSpend: 0,
       estimatedCost: 0,
+      // The ceiling the operator typed at import. Left out, the schema default
+      // ($2.50) became the per-video limit the gateway enforced.
+      maxCostPerVideo: opts.maxCostPerVideo,
+      videoCount: projects.length,
     },
   });
 
