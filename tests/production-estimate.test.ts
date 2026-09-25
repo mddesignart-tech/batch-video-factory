@@ -176,8 +176,8 @@ beforeAll(async () => {
     where: { name: { in: ["openai", "groq"] } },
     data: { enabled: true, status: "connected" },
   });
-  process.env.OPENAI_API_KEY ??= "sk-test-not-a-real-key";
-  process.env.GROQ_API_KEY ??= "gsk-test-not-a-real-key";
+  process.env.OPENAI_API_KEY ??= "fake-api-key-for-test-only";
+  process.env.GROQ_API_KEY ??= "fake-api-key-for-test-only";
   resetEnvCache();
 
   await setSpendCap(50);

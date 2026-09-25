@@ -4,10 +4,11 @@
 
 ---
 
-## ✅ BATCH VIDEO FACTORY V1 = RELEASED — 2026-09-25
+## ✅ BATCH VIDEO FACTORY V1 = RELEASED + GITHUB RELEASE PUBLISHED — 2026-09-25
 
-Đã push: `origin/main` = `e5c8b73`, tag `batch-video-factory-v1.0.0` —
-https://github.com/mddesignart-tech/batch-video-factory
+Release: https://github.com/mddesignart-tech/batch-video-factory/releases/tag/batch-video-factory-v1.0.0
+Tag `batch-video-factory-v1.0.0` -> `e5c8b73` (không di chuyển). Branch ở máy là `main`,
+track `origin/main`: `git push` / `git pull` trơn.
 
 Lô thật 2 video `4d18d1a9`: **COMPLETED**, $0,811789 / dự toán $0,906600 / trần
 $1,00. Resume $0, 0 POST. Xem `RELEASE_NOTES_V1.md` và `.ai/STATE.md`.

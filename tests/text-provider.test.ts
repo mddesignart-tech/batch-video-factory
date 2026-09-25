@@ -115,7 +115,7 @@ function config(over: Partial<OpenAICompatibleConfig> = {}): OpenAICompatibleCon
   return {
     providerName: "stub",
     model: "stub-model",
-    apiKey: "sk-test-not-a-real-key",
+    apiKey: "fake-api-key-for-test-only",
     baseUrl,
     requiresKey: true,
     // Deliberately non-round so a maths error is obvious rather than plausible.

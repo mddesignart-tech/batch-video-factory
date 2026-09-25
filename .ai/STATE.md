@@ -1,18 +1,22 @@
 # Trạng thái dự án
 
 **Cập nhật:** 2026-09-25
-**Cột mốc hiện tại:** **BATCH VIDEO FACTORY V1 = RELEASED.** Tag
+**Cột mốc hiện tại:** **BATCH VIDEO FACTORY V1 = RELEASED + GITHUB RELEASE PUBLISHED.** Tag
 `batch-video-factory-v1.0.0`. Xem `RELEASE_NOTES_V1.md`.
 
 ```
-REMOTE:      origin = https://github.com/mddesignart-tech/batch-video-factory (public)
-BRANCH:      main trên remote (local vẫn là master, track origin/main)
-COMMIT:      e5c8b73 — fix(import,qa) + V1 final QA pass
-TAG:         batch-video-factory-v1.0.0 -> e5c8b73 (tag object e4d1be1)
-PUSH STATUS: OK, 2026-09-25 — push thường, không force, không viết lại lịch sử
+REMOTE:             origin = https://github.com/mddesignart-tech/batch-video-factory (public)
+DEFAULT BRANCH:     main
+LOCAL BRANCH:       main -> origin/main (đổi tên từ master 2026-09-25; git push / git pull trơn)
+RELEASE URL:        https://github.com/mddesignart-tech/batch-video-factory/releases/tag/batch-video-factory-v1.0.0
+TAG:                batch-video-factory-v1.0.0 (tag object e4d1be1, không di chuyển)
+TAG COMMIT:         e5c8b73 — fix(import,qa) + V1 final QA pass
+SECRET SCAN STATUS: SẠCH — key thật trong .env không có trong mã nguồn lẫn lịch sử;
+                    fixture giả đổi sang fake-api-key-for-test-only (QĐ-091)
+PUSH STATUS:        OK — không force, không viết lại lịch sử
 ```
 
-Tài liệu cập nhật sau tag nằm ở commit sau `e5c8b73` trên `main`; tag không đổi.
+Commit sau tag (tài liệu, fixture giả) nằm trên `main` sau `e5c8b73`; tag không đổi.
 
 ## V1.0.0 — lô thật 2 video đầu tiên, 2026-09-25
 

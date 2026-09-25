@@ -2722,3 +2722,18 @@ hãng nào. Regex `/sk-live|Bearer /` trong `pipeline.e2e` là bộ dò rò rỉ
 
 Các chuỗi giả cũ còn trong lịch sử Git; không viết lại lịch sử để xoá chúng vì chúng
 chưa bao giờ là secret. Commit housekeeping sau V1 — tag V1 không di chuyển.
+
+## QĐ-092 — Branch ở máy đổi thành `main`; GitHub Release gắn vào tag có sẵn
+
+`master` ở máy đổi tên thành `main` và track `origin/main`, sau khi kiểm working tree
+sạch và `master` chỉ đi TRƯỚC `origin/main` (1/0), không đi sau. Đổi tên branch không
+đụng lịch sử. Từ nay `git push` / `git pull` trơn, không cần `master:main`.
+
+GitHub Release "Batch Video Factory V1.0.0" tạo qua giao diện web bằng phiên đã
+đăng nhập của người dùng (máy không có `gh`, và không lấy token từ credential
+manager). Trang báo "Existing tag", nên release gắn vào tag đã public — tag object
+`e4d1be1` -> `e5c8b73` đọc lại sau khi publish, không đổi.
+
+Quét lần cuối: key thật trong `.env` không xuất hiện trong mã nguồn lẫn lịch sử.
+Các fixture `sk-test-not-a-real-key` / `gsk-test-…` cũng đổi sang
+`fake-api-key-for-test-only` cho nhất quán với QĐ-091.

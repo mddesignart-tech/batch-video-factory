@@ -1,13 +1,17 @@
 # Batch Video Factory — V1.0.0
 
-**Ngày phát hành:** 2026-09-25 · **Tag:** `batch-video-factory-v1.0.0` · **BATCH VIDEO FACTORY V1 = RELEASED**
+**Ngày phát hành:** 2026-09-25 · **Tag:** `batch-video-factory-v1.0.0` · **BATCH VIDEO FACTORY V1 = RELEASED + GITHUB RELEASE PUBLISHED**
 
 ```
-REMOTE:      origin = https://github.com/mddesignart-tech/batch-video-factory (public)
-BRANCH:      main trên remote (local vẫn là master, track origin/main)
-COMMIT:      e5c8b73 — fix(import,qa) + V1 final QA pass
-TAG:         batch-video-factory-v1.0.0 -> e5c8b73 (tag object e4d1be1)
-PUSH STATUS: OK, 2026-09-25 — push thường, không force, không viết lại lịch sử
+REMOTE:             origin = https://github.com/mddesignart-tech/batch-video-factory (public)
+DEFAULT BRANCH:     main
+LOCAL BRANCH:       main -> origin/main (đổi tên từ master 2026-09-25; git push / git pull trơn)
+RELEASE URL:        https://github.com/mddesignart-tech/batch-video-factory/releases/tag/batch-video-factory-v1.0.0
+TAG:                batch-video-factory-v1.0.0 (tag object e4d1be1, không di chuyển)
+TAG COMMIT:         e5c8b73 — fix(import,qa) + V1 final QA pass
+SECRET SCAN STATUS: SẠCH — key thật trong .env không có trong mã nguồn lẫn lịch sử;
+                    fixture giả đổi sang fake-api-key-for-test-only (QĐ-091)
+PUSH STATUS:        OK — không force, không viết lại lịch sử
 ```
 
 Ứng dụng chạy trên máy (local-first) để sản xuất video ngắn 9:16 (YouTube Shorts /

@@ -66,7 +66,7 @@ function config(over: Partial<VoiceModelConfig> = {}): VoiceModelConfig {
   return {
     providerName: "openai",
     model: "gpt-4o-mini-tts",
-    apiKey: "sk-test-not-a-real-key",
+    apiKey: "fake-api-key-for-test-only",
     baseUrl,
     pricePer1kChars: 0.0006,
     supportsInstructions: true,
@@ -168,7 +168,7 @@ describe("the request body", () => {
       { text: "Hi", voiceId: "echo", instructions: "", speed: 1, format: "wav" },
       outPath("e"),
     );
-    expect(lastAuth).toBe("Bearer sk-test-not-a-real-key");
+    expect(lastAuth).toBe("Bearer fake-api-key-for-test-only");
     expect(JSON.stringify(lastBody)).not.toContain("sk-test");
   });
 
