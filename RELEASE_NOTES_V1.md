@@ -1,6 +1,14 @@
 # Batch Video Factory — V1.0.0
 
-**Ngày phát hành:** 2026-09-25 · **Tag:** `batch-video-factory-v1.0.0`
+**Ngày phát hành:** 2026-09-25 · **Tag:** `batch-video-factory-v1.0.0` · **BATCH VIDEO FACTORY V1 = RELEASED**
+
+```
+REMOTE:      origin = https://github.com/mddesignart-tech/batch-video-factory (public)
+BRANCH:      main trên remote (local vẫn là master, track origin/main)
+COMMIT:      e5c8b73 — fix(import,qa) + V1 final QA pass
+TAG:         batch-video-factory-v1.0.0 -> e5c8b73 (tag object e4d1be1)
+PUSH STATUS: OK, 2026-09-25 — push thường, không force, không viết lại lịch sử
+```
 
 Ứng dụng chạy trên máy (local-first) để sản xuất video ngắn 9:16 (YouTube Shorts /
 TikTok / Reels) theo lô, từ một storyboard có sẵn hoặc từ một thành ngữ, với chi

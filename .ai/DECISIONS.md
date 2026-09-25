@@ -2696,3 +2696,17 @@ cấp rỗng (nghĩa là không giới hạn) và dự toán từng dự án $0.
 Nay lúc nhập ghi đúng trần/video + số video; preflight cập nhật trần/video, phạm vi
 nhà cung cấp (đúng danh sách người vận hành nhìn thấy) và dự toán từng dự án. Lô đã
 chạy không bị sửa hồi tố: bản ghi của nó nói đúng điều gateway đã áp lúc đó.
+
+## QĐ-090 — Phát hành V1 lên `main` của remote, giữ `master` ở máy
+
+Repo `mddesignart-tech/batch-video-factory` (public) rỗng lúc push, branch mặc định
+`main`. Code ở máy nằm trên `master`. Đẩy `master:main` thay vì đổi tên branch ở máy:
+không đổi branch, không force, không viết lại lịch sử — một repo rỗng nhận lịch sử
+70 commit nguyên vẹn. `master` ở máy track `origin/main`.
+
+Trước khi đẩy lên một repo **public**, đã quét **toàn bộ lịch sử** (không chỉ cây
+hiện tại): không `.env`, DB, media lớn hay chuỗi giống API key nào — chỉ chuỗi giả
+`sk-live-abcdefghijkl123` trong một test về che key.
+
+Tag `batch-video-factory-v1.0.0` trỏ `e5c8b73`. Tài liệu viết sau khi push nằm ở
+commit sau đó và **không** kéo tag theo: tag đã công khai thì không di chuyển.

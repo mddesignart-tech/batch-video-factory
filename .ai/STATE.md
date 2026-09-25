@@ -1,8 +1,18 @@
 # Trạng thái dự án
 
 **Cập nhật:** 2026-09-25
-**Cột mốc hiện tại:** **Batch Video Factory V1.0.0 — ĐÃ PHÁT HÀNH.** Tag
+**Cột mốc hiện tại:** **BATCH VIDEO FACTORY V1 = RELEASED.** Tag
 `batch-video-factory-v1.0.0`. Xem `RELEASE_NOTES_V1.md`.
+
+```
+REMOTE:      origin = https://github.com/mddesignart-tech/batch-video-factory (public)
+BRANCH:      main trên remote (local vẫn là master, track origin/main)
+COMMIT:      e5c8b73 — fix(import,qa) + V1 final QA pass
+TAG:         batch-video-factory-v1.0.0 -> e5c8b73 (tag object e4d1be1)
+PUSH STATUS: OK, 2026-09-25 — push thường, không force, không viết lại lịch sử
+```
+
+Tài liệu cập nhật sau tag nằm ở commit sau `e5c8b73` trên `main`; tag không đổi.
 
 ## V1.0.0 — lô thật 2 video đầu tiên, 2026-09-25
 
