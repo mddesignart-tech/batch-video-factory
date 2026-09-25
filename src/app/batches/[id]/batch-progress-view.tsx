@@ -24,7 +24,7 @@ import {
   type ProjectStatus,
 } from "@/domain/enums";
 import type { BatchProgress } from "@/services/batch-runner";
-import { BatchControls, RetryVideoButton } from "./batch-controls";
+import { BatchControls, OpenOutputButton, RetryVideoButton } from "./batch-controls";
 import { ApprovePanel, type ApprovalFigures } from "./approve-panel";
 import { POLL_INTERVAL_MS, useBatchProgress } from "./use-batch-progress";
 
@@ -211,6 +211,10 @@ export function BatchProgressView({
                 <Th>Trạng thái</Th>
                 <Th className="text-right">Cảnh xong</Th>
                 <Th className="text-right">Local / AI</Th>
+                <Th className="text-right">Ảnh</Th>
+                <Th className="text-right">Video AI</Th>
+                <Th className="text-right">Giọng</Th>
+                <Th>Render</Th>
                 <Th className="text-right">Dự toán</Th>
                 <Th className="text-right">Thực tế</Th>
                 <Th>Kết quả</Th>
@@ -247,6 +251,24 @@ export function BatchProgressView({
                     <span className="text-ok-500">{video.localMotionScenes}</span> /{" "}
                     <span className="text-accent-500">{video.aiVideoScenes}</span>
                   </Td>
+                  <Td className="text-right tabular-nums text-ink-300">
+                    {video.imagesDone}/{video.sceneCount}
+                  </Td>
+                  <Td className="text-right tabular-nums text-ink-300">
+                    {video.aiVideoScenes > 0 ? `${video.clipsDone}/${video.aiVideoScenes}` : "—"}
+                  </Td>
+                  <Td className="text-right tabular-nums text-ink-300">
+                    {video.voicesDone}/{video.sceneCount}
+                  </Td>
+                  <Td className="text-xs">
+                    {video.finalVideoPath ? (
+                      <span className="text-ok-500">XONG</span>
+                    ) : video.status === "rendering" ? (
+                      <span className="text-accent-500">đang render</span>
+                    ) : (
+                      <span className="text-ink-500">chưa</span>
+                    )}
+                  </Td>
                   <Td className="text-right tabular-nums text-ink-400">
                     {formatUSD(video.estimatedCost, 4)}
                   </Td>
@@ -254,11 +276,29 @@ export function BatchProgressView({
                     {formatUSD(video.actualCost, 4)}
                   </Td>
                   <Td className="text-xs">
-                    {video.finalVideoPath ? (
-                      <span className="text-ok-500">MP4 đã xuất</span>
-                    ) : (
-                      <RetryVideoButton projectId={video.projectId} />
-                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {video.finalVideoPath ? (
+                        <>
+                          <a
+                            href={`/api/media/${video.finalVideoPath}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-ok-500 hover:underline"
+                          >
+                            Xem MP4
+                          </a>
+                          <OpenOutputButton projectId={video.projectId} />
+                        </>
+                      ) : ["failed", "needs_review", "budget_exhausted"].includes(video.status) ? (
+                        <RetryVideoButton projectId={video.projectId} />
+                      ) : null}
+                      <Link
+                        href={`/projects/${video.projectId}`}
+                        className="text-ink-400 hover:text-brand-400"
+                      >
+                        Mở dự án
+                      </Link>
+                    </div>
                   </Td>
                 </tr>
               ))}

@@ -12,6 +12,7 @@ import {
 } from "@/data/seed-config";
 import { generateSceneImage } from "@/services/generation";
 import { setSpendCap } from "@/services/spend-guard";
+import { buildPlannedScenes } from "@/services/project-service";
 
 /**
  * A RESUME must not re-buy an image; a REGENERATE must.
@@ -214,5 +215,35 @@ describe("ảnh đã mua rồi thì chạy lại KHÔNG mua nữa", () => {
 
     expect(out).toBeTruthy();
     expect(await prisma.providerJob.count()).toBeGreaterThan(jobsBefore);
+  });
+});
+
+/**
+ * The ESTIMATE must answer the same question `generateSceneImage` answers.
+ *
+ * Found by re-running the first real two-video batch: the run would have bought
+ * nothing, yet the preflight quoted all ten keyframes again ($0.48) and the
+ * resume gate refused a run that could not spend. Same predicate on both sides:
+ * the file, plus a completed image job for the scene.
+ */
+describe("dự toán: ảnh đã mua là REUSE, không phải WILL_CREATE", () => {
+  it("file + ProviderJob completed -> hasExistingImage", async () => {
+    const scene = await sceneWithBoughtImage(11);
+    const planned = await buildPlannedScenes(projectId);
+    expect(planned.find((p) => p.sceneNumber === scene.sceneNumber)?.hasExistingImage).toBe(true);
+  });
+
+  it("file đã bị xoá -> KHÔNG phải ảnh đã có", async () => {
+    const scene = await sceneWithBoughtImage(12);
+    fs.rmSync(toAbsolute(scene.imagePath!), { force: true });
+    const planned = await buildPlannedScenes(projectId);
+    expect(planned.find((p) => p.sceneNumber === scene.sceneNumber)?.hasExistingImage).toBe(false);
+  });
+
+  it("có file nhưng không ai trả tiền -> KHÔNG phải ảnh đã có", async () => {
+    const scene = await sceneWithBoughtImage(13);
+    await prisma.providerJob.deleteMany({ where: { sceneId: scene.id, kind: "image" } });
+    const planned = await buildPlannedScenes(projectId);
+    expect(planned.find((p) => p.sceneNumber === scene.sceneNumber)?.hasExistingImage).toBe(false);
   });
 });

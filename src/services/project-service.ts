@@ -261,6 +261,16 @@ export async function buildPlannedScenes(
     orderBy: { sceneNumber: "asc" },
     include: { dialogueLines: true },
   });
+  // Scenes whose keyframe was paid for. One query, the same predicate
+  // `generateSceneImage` checks before it routes.
+  const paidImages = new Set(
+    (
+      await prisma.providerJob.findMany({
+        where: { projectId, kind: "image", status: "completed", sceneId: { not: null } },
+        select: { sceneId: true },
+      })
+    ).map((j) => j.sceneId),
+  );
   return scenes.map((scene) => ({
     sceneNumber: scene.sceneNumber,
     duration: scene.duration,
@@ -287,6 +297,7 @@ export async function buildPlannedScenes(
     // treating it as one would forecast $0 for a clip the run really does buy -
     // the one direction an estimate must never be wrong in. QĐ-071.
     hasExistingVideo: fileOnDisk(scene.videoPath),
+    hasExistingImage: paidImages.has(scene.id) && fileOnDisk(scene.imagePath),
     hasExistingVoice:
       scene.dialogueLines.length > 0 &&
       // EVERY line, not any: a scene with two lines and one file still buys the

@@ -241,6 +241,8 @@ async function main(): Promise<void> {
   const jobsBefore = await prisma.providerJob.count();
   const spentBefore = await totalSpend(prisma);
   const imagesBefore = await prisma.providerJob.count({ where: { kind: "image" } });
+  const ledgerRowsBefore = await prisma.costEntry.count();
+  const assetRowsBefore = await prisma.asset.count();
 
   const { generateSceneImage, generateSceneVideo, generateSceneVoice } = await import(
     "@/services/generation"
@@ -259,6 +261,18 @@ async function main(): Promise<void> {
     `${imagesBefore}`);
   must("Chenh lech chi phi = 0", Math.abs(spentAfter - spentBefore) < 1e-9,
     `${money(spentBefore)} -> ${money(spentAfter)}`);
+  // A reuse used to add a $0 ledger line and an Asset row per spoken line on
+  // every re-run. Harmless to the total, but the ledger grew with each run that
+  // cost nothing - found on the first real two-video batch.
+  must("Khong dong so cai nao moi", (await prisma.costEntry.count()) === ledgerRowsBefore,
+    `${ledgerRowsBefore} -> ${await prisma.costEntry.count()}`);
+  must("Khong dong Asset nao moi", (await prisma.asset.count()) === assetRowsBefore,
+    `${assetRowsBefore} -> ${await prisma.asset.count()}`);
+  const { buildPlannedScenes } = await import("@/services/project-service");
+  const replanned = await buildPlannedScenes(projectId);
+  must("Du toan lai: moi anh deu la anh DA CO",
+    replanned.every((s) => s.hasSuppliedKeyframe === true || s.hasExistingImage === true),
+    `${replanned.filter((s) => s.hasSuppliedKeyframe || s.hasExistingImage).length}/${replanned.length}`);
 
   // Rendering again must not regenerate anything upstream either.
   const { renderProject } = await import("@/media/render");
@@ -267,6 +281,27 @@ async function main(): Promise<void> {
   await rerender(prisma, projectId);
   must("Render lai khong dong toi media phia truoc",
     (await prisma.providerJob.count()) === beforeRerender, `${beforeRerender}`);
+
+  // ------------------------------------------- 6b. batch queue + open output
+  heading("6b. BATCH QUEUE va MO OUTPUT (du lieu trang /batches/<id>)");
+  const { batchProgress } = await import("@/services/batch-runner");
+  const queue = await batchProgress(created.batchId);
+  const row = queue?.videos.find((v) => v.projectId === projectId);
+  must("Batch queue doc duoc", queue !== null, queue?.status ?? "-");
+  must("Video hien COMPLETED", row?.status === "completed", row?.status ?? "-");
+  must("Anh / giong du tren moi canh",
+    row !== undefined && row.imagesDone === row.sceneCount && row.voicesDone === row.sceneCount,
+    row ? `anh ${row.imagesDone}/${row.sceneCount} · giong ${row.voicesDone}/${row.sceneCount}` : "-");
+  must("Video AI du clip", row !== undefined && row.clipsDone === row.aiVideoScenes,
+    row ? `${row.clipsDone}/${row.aiVideoScenes}` : "-");
+  const { resolveOutputFolder } = await import("@/services/output-folder");
+  const folder = await resolveOutputFolder(projectId);
+  const done = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+  must("OPEN OUTPUT tro dung thu muc chua MP4",
+    folder !== null && done.finalVideoPath !== null &&
+      fs.existsSync(path.join(folder, path.basename(done.finalVideoPath))),
+    folder ?? "(khong co)");
+  must("Du an khong ton tai -> khong mo gi", (await resolveOutputFolder("khong-ton-tai")) === null, "null");
 
   // ------------------------------------------------------------- 7. report
   heading("7. BAO CAO LO");

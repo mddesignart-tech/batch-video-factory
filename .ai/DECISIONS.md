@@ -2637,3 +2637,50 @@ Hai trần cứng **không** đổi: vẫn kiểm mọi lần, và đã chứng 
 chạy ngược — `--max-batch 0,50` cho ra NOT READY, và quan trọng hơn, dự toán
 vẫn báo **$0,906600** chứ không tự co xuống cho vừa $0,50. Đúng thứ QĐ-081 sửa.
 
+
+## QĐ-084 — Dự toán hỏi đúng câu mà bước tạo ảnh hỏi
+
+Chạy lại lô thật `4d18d1a9` sau khi nó đã xong: preflight báo **10 ảnh
+WILL_CREATE, $0,48**, trong khi `generateSceneImage` sẽ dùng lại cả 10 (nó dùng
+lại theo **file + ProviderJob ảnh completed** từ QĐ-072). Hai nơi trả lời cùng một
+câu hỏi bằng hai luật khác nhau. Hướng sai là hướng "an toàn" cho một cái trần,
+nhưng nó làm cổng resume **từ chối** một lần chạy không thể tiêu đồng nào
+($0,4944 > $0,387 còn lại), và preflight nói WILL_CREATE cho thứ đã sở hữu.
+
+Nay `buildPlannedScenes` đặt `hasExistingImage` bằng **đúng** vị từ đó, và bộ dự
+toán coi nó như ảnh nhập sẵn: $0, REUSE. Test ở cả hai tầng (hàm thuần + DB).
+
+## QĐ-085 — Dùng lại không phải là mua, nên không ghi sổ
+
+`runProviderJob` trả về một asset $0 khi khoá idempotency đã xong, rồi
+`saveAsset` ghi thêm một hàng `Asset` và một dòng `CostEntry` $0 — mỗi câu thoại,
+mỗi lần resume. Tổng tiền không đổi, nhưng sổ cái lớn lên theo mỗi lần chạy **không
+tốn gì** (10 dòng cho một lần chạy lại lô 2 video), và "CostEntry delta" không còn
+đo được "có mua gì không". Nay kết quả reuse mang `meta.reused` và `saveAsset` bỏ
+qua. Giao dịch gốc vẫn giữ nguyên hàng của nó.
+
+## QĐ-086 — Script chạy lô viết trạng thái bằng luật của runner, không tự đặt tên
+
+`run-real-multi-batch.ts` từng ghi `PARTIAL` vào `Batch.status` — không có trong
+`BATCH_STATUSES`, trang lô sẽ hiện một trạng thái lạ — và để lô ở PLANNED, dự án ở
+`script_ready` suốt lúc đang tiêu tiền. Nay: lô RUNNING khi bắt đầu, video
+`media_generating` → `failed` (nếu dừng), chốt cuối bằng `settleBatchIfDone` (cùng
+luật với hàng đợi: hỏng một phần = NEEDS_REVIEW).
+
+Thêm `--resume`: **không bao giờ** duyệt lại quyền chi; video đã xong chỉ được đi
+qua để chứng minh REUSE, không đổi trạng thái, không render lại; quyền chi đã đóng
+thì mọi POST bị chặn ở gateway (reuse được kiểm **trước** cổng).
+
+## QĐ-087 — Nhãn trạng thái không được đổi theo lịch
+
+`autoRouteBlock` có nhánh "ngày tắt đã qua" đứng trước nhánh DEPRECATED, và câu của
+nó không có chữ NGỪNG DÙNG. Từ 2026-09-24 (ngày Sora tắt) cùng một lời từ chối đổi
+câu và mất nhãn — 2 test đỏ chỉ vì đồng hồ. Model vẫn bị chặn đúng; nay câu giữ
+nhãn khi lifecycle là DEPRECATED.
+
+## QĐ-088 — V1.0.0 đóng băng phạm vi
+
+V1 phát hành với đúng những gì đã chạy thật. Mọi thứ sau đây là V1.1/V2 và **không**
+được kéo ngược vào V1: đổi tên trạng thái lô sang DRAFT/READY/BLOCKED, ô sửa MAX
+PER VIDEO/MAX BATCH mặc định, benchmark model PIN_ONLY, provider mới, chạy lô thật
+qua hàng đợi thay vì script.

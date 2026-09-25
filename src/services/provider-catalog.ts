@@ -364,7 +364,11 @@ export function autoRouteBlock(
   // off last Tuesday, a row still reading ACTIVE is simply wrong, and believing
   // it costs a failed paid call to discover.
   if (model.shutdownDate && model.shutdownDate.getTime() <= now.getTime()) {
-    return `nhà cung cấp đã tắt model này từ ${model.shutdownDate
+    // Keep the label once the date passes. The sentence changed tense on the
+    // shutdown day and dropped the status with it, so the same refusal read
+    // "NGỪNG DÙNG" on the 23rd and never again from the 24th.
+    const label = model.lifecycle === "DEPRECATED" ? "đã bị đánh dấu NGỪNG DÙNG — " : "";
+    return `${label}nhà cung cấp đã tắt model này từ ${model.shutdownDate
       .toISOString()
       .slice(0, 10)}`;
   }

@@ -72,6 +72,17 @@ export interface PlannedSceneInput {
   hasExistingVideo?: boolean;
 
   /**
+   * The keyframe was BOUGHT earlier and is still on disk.
+   *
+   * The generated counterpart of `hasSuppliedKeyframe`, and the same test
+   * `generateSceneImage` applies before it routes: the file plus a completed
+   * image ProviderJob for this scene. Without it, re-running a finished batch
+   * quoted every image again - $0.48 on the first two-video batch - and the
+   * resume gate refused a run that could not have bought anything.
+   */
+  hasExistingImage?: boolean;
+
+  /**
    * Every spoken line of this scene already has audio on disk.
    *
    * Same rule, same reason. Partial is NOT reuse: a scene with two lines and
@@ -426,8 +437,9 @@ export function planScene(opts: {
         characterCount: scene.characterCount,
       });
 
+  const ownsKeyframe = scene.hasSuppliedKeyframe === true || scene.hasExistingImage === true;
   const wantsKeyframe =
-    scene.hasSuppliedKeyframe === true
+    ownsKeyframe
       ? false
       : keyframeRequired(
           motion.source,
@@ -625,7 +637,7 @@ export function planScene(opts: {
       // contributes $0 of video, and it is not reuse - nothing was ever bought
       // for it. Merging the two would let a preview report six reused clips for
       // a batch that has never called a video model. QĐ-071.
-      image: scene.hasSuppliedKeyframe === true,
+      image: ownsKeyframe,
       video: motion.source === "AI_VIDEO" && scene.hasExistingVideo === true,
       voice: speechChars > 0 && scene.hasExistingVoice === true,
     },

@@ -115,6 +115,15 @@ describe("dự toán: cần mua, dùng lại, hay không cần", () => {
     expect(supplied.reuse.image).toBe(true);
   });
 
+  // The generated twin of the case above. Missing until the first real
+  // two-video batch was re-run: every bought keyframe was quoted again.
+  it("ảnh ĐÃ MUA và còn trên đĩa -> dùng lại, $0 tiền ảnh", () => {
+    const owned = planScene({ scene: scene({ hasExistingImage: true }), ...OPTS });
+    expect(owned.image).toBeNull();
+    expect(owned.needs.image).toBe(false);
+    expect(owned.reuse.image).toBe(true);
+  });
+
   // The distinction the whole three-way split exists for. A free scene saves
   // nothing, because nothing was ever going to be bought for it.
   it("LOCAL_MOTION: không cần clip, và KHÔNG được tính là dùng lại", () => {

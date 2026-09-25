@@ -16,6 +16,15 @@ import { ModelRow, NewModelButton } from "./model-forms";
 
 export const dynamic = "force-dynamic";
 
+const LIFECYCLE_TONE: Record<string, "neutral" | "info" | "ok" | "warn" | "danger"> = {
+  ACTIVE: "ok",
+  LOW_AUTO: "info",
+  LOW_AUTO_CANDIDATE: "neutral",
+  PIN_ONLY: "warn",
+  DEPRECATED: "danger",
+  DISABLED: "danger",
+};
+
 const TYPE_LABEL: Record<string, string> = {
   text: "Kịch bản",
   image: "Ảnh",
@@ -143,9 +152,19 @@ export default async function ModelsPage() {
                         </div>
                       </Td>
                       <Td>
-                        <Badge tone={model.enabled ? "ok" : "neutral"}>
-                          {model.enabled ? "Bật" : "Tắt"}
-                        </Badge>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge tone={model.enabled ? "ok" : "neutral"}>
+                            {model.enabled ? "Bật" : "Tắt"}
+                          </Badge>
+                          {/* Whether the ROUTER may choose it - the question a
+                              plain on/off switch does not answer. */}
+                          <Badge tone={LIFECYCLE_TONE[model.lifecycle] ?? "neutral"}>
+                            {model.lifecycle}
+                          </Badge>
+                          {model.reliability !== "OK" ? (
+                            <Badge tone="danger">{model.reliability}</Badge>
+                          ) : null}
+                        </div>
                       </Td>
                       <Td>
                         <ModelRow

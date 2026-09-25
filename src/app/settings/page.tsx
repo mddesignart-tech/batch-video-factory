@@ -15,15 +15,26 @@ import { SpendCapForm } from "@/components/spend-gate";
 import { ProviderBudgets } from "@/components/provider-budgets";
 import { providerSpendBreakdown } from "@/services/provider-budget";
 import { spendStatus } from "@/services/spend-guard";
+import { hasApiKey } from "@/providers/provider-credentials";
+import { DEFAULT_MAX_COST_PER_VIDEO } from "@/services/batch-authorization";
+
+/** The three vendors V1 actually calls. Anything else is not wired in V1. */
+const V1_PROVIDERS = [
+  { name: "openai", label: "OpenAI (ảnh + giọng)" },
+  { name: "runway", label: "Runway (Video AI)" },
+  { name: "groq", label: "Groq (kịch bản)" },
+] as const;
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [settings, version, spend, budgets] = await Promise.all([
+  const [settings, version, spend, budgets, keys] = await Promise.all([
     getSettings(),
     ffmpegVersion(),
     spendStatus(),
     providerSpendBreakdown(),
+    // YES/NO only. The key itself never leaves the server, not even masked.
+    Promise.all(V1_PROVIDERS.map(async (p) => ({ ...p, configured: await hasApiKey(p.name) }))),
   ]);
 
   return (
@@ -53,6 +64,44 @@ export default async function SettingsPage() {
         </Card>
 
         <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>API đã cấu hình</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1.5 text-xs">
+              {keys.map((k) => (
+                <Row
+                  key={k.name}
+                  label={k.label}
+                  value={k.configured ? "CÓ" : "KHÔNG"}
+                  tone={k.configured ? "ok" : "danger"}
+                />
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Mặc định cho lô</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1.5 text-xs">
+              <Row label="Tỉ lệ khung hình" value="9:16 (1080x1920)" />
+              <Row label="Chế độ video mặc định" value={settings.defaultQualityMode} />
+              <Row
+                label="MAX PER VIDEO mặc định"
+                value={`$${DEFAULT_MAX_COST_PER_VIDEO.toFixed(2)} — đặt lại cho từng lô lúc nhập/duyệt`}
+              />
+              <Row
+                label="MAX BATCH"
+                value="Đặt cho từng lô lúc duyệt; không bao giờ vượt hạn mức toàn cục bên dưới"
+              />
+              <Row
+                label="Hạn mức toàn cục"
+                value={`$${spend.cap.toFixed(2)} · đã chi $${spend.spent.toFixed(6)} · còn $${spend.remaining.toFixed(6)}`}
+              />
+            </CardContent>
+          </Card>
+
           <SpendCapForm cap={spend.cap} spent={spend.spent} />
 
           <ProviderBudgets rows={budgets} />

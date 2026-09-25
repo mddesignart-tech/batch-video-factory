@@ -48,6 +48,10 @@ export interface BatchProgressVideo {
   actualCost: number;
   finalVideoPath: string | null;
   errorMessage: string | null;
+  /** Per-stage progress, counted from the scene rows the pipeline writes. */
+  imagesDone: number;
+  clipsDone: number;
+  voicesDone: number;
 }
 
 export interface BatchProgress {
@@ -370,7 +374,13 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
         idiom: { select: { phrase: true } },
         scenes: {
           where: { skipped: false },
-          select: { status: true, motionSource: true },
+          select: {
+            status: true,
+            motionSource: true,
+            imagePath: true,
+            videoPath: true,
+            audioPath: true,
+          },
         },
       },
     }),
@@ -394,6 +404,9 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
     actualCost: p.actualCost,
     finalVideoPath: p.finalVideoPath,
     errorMessage: p.errorMessage,
+    imagesDone: p.scenes.filter((s) => s.imagePath).length,
+    clipsDone: p.scenes.filter((s) => s.motionSource !== "LOCAL_MOTION" && s.videoPath).length,
+    voicesDone: p.scenes.filter((s) => s.audioPath).length,
   }));
 
   const counts = {

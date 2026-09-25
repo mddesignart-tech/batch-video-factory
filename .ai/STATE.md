@@ -1,7 +1,52 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-19
-**Cột mốc hiện tại:** **Hai luồng nhập đều đã chạy thật và ra MP4.** Batch V1
+**Cập nhật:** 2026-09-25
+**Cột mốc hiện tại:** **Batch Video Factory V1.0.0 — ĐÃ PHÁT HÀNH.** Tag
+`batch-video-factory-v1.0.0`. Xem `RELEASE_NOTES_V1.md`.
+
+## V1.0.0 — lô thật 2 video đầu tiên, 2026-09-25
+
+Lô `4d18d1a9`, duyệt $1,00 / $0,70 mỗi video, chạy bằng
+`scripts/run-real-multi-batch.ts`:
+
+```
+Bite the bullet  5 cảnh · 4 LOCAL / 1 h3_max · 21,000s 1080x1920 30fps h264+aac · $0,605900
+All ears         5 cảnh · 5 LOCAL / 0        · 20,000s 1080x1920 30fps h264+aac · $0,205889
+LÔ               $0,811789 thật · dự toán $0,906600 · 21 POST · 0 retry · 0 trùng
+Runway 551 -> 511 credit · reservation treo $0 · CREATE_ATTEMPT_TOKEN null
+Hạn mức dự án: đã chi $7,612926 / $8,00 · còn $0,387074
+```
+
+Kiểm file bằng ffprobe: không đoạn đen ≥1s, audio -18 dB, subtitle đủ 5 dòng mỗi
+video, giọng mỗi cảnh ngắn hơn cảnh (không cắt cuối câu), scene 1..5 không trùng.
+
+**Resume (Phase 4), $0:** chạy lại lô đã xong → ProviderJob +0, CostEntry +0,
+reservation +0, chi +$0, 0 POST. Giả lập A=COMPLETED / B=FAILED rồi resume → A
+không đổi (dự án, MP4, mtime, 11 job), chỉ B render lại bằng FFmpeg.
+
+**Bốn lỗi tìm ra khi chạy thật, đã sửa ($0):** QĐ-084 đến QĐ-087.
+
+1. Dự toán báo lại **10 ảnh đã mua** là WILL_CREATE ($0,48) → cổng resume từ chối
+   nhầm. Nay `hasExistingImage` = file + ProviderJob ảnh completed, đúng điều kiện
+   `generateSceneImage` dùng (QĐ-084).
+2. Mỗi REUSE ghi thêm một Asset + một CostEntry $0 → sổ cái phình theo mỗi lần
+   resume. Nay `saveAsset` bỏ qua kết quả reuse (QĐ-085).
+3. Script chạy lô ghi trạng thái `PARTIAL` (không có trong enum) và không đổi
+   trạng thái lô/video khi chạy → trang tiến độ sai. Nay RUNNING /
+   media_generating / failed theo thực tế, chốt bằng `settleBatchIfDone` (QĐ-086).
+4. Thông báo từ chối model DEPRECATED mất chữ "NGỪNG DÙNG" kể từ ngày tắt
+   (lỗi phụ thuộc đồng hồ, làm đỏ 2 test) (QĐ-087).
+
+**UI V1:** bảng lô có cột Ảnh / Video AI / Giọng / Render, nút Xem MP4 / MỞ OUTPUT /
+Mở dự án, Thử lại chỉ hiện khi video lỗi. Cài đặt có "API đã cấu hình CÓ/KHÔNG"
+(không lộ key) và mặc định lô. Trang Mô hình AI có nhãn lifecycle + reliability.
+`npm run smoke` = import → dự toán → chạy → resume → batch queue → output, mock, $0.
+
+---
+
+## Lịch sử trước V1.0.0
+
+**Hai luồng nhập đều đã chạy thật và ra MP4.** Batch V1
 (lô `a690a290`, $1,047095) xong 2026-09-18; Import Storyboard chạy thật lần đầu
 cùng ngày ($0,400122). Milestone 2 xong trước đó (Text + Image + Video + Voice
 đã chạy thật).

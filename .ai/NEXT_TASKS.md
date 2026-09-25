@@ -1,72 +1,38 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-19 (đợt 5 — preflight READY)
+**Cập nhật:** 2026-09-25 — **V1.0.0 đã phát hành** (tag `batch-video-factory-v1.0.0`)
 
 ---
 
-## ⏸ CHỜ BẠN DUYỆT TIỀN — lô 2 video đầu tiên đã **READY**
+## ✅ V1.0.0 ĐÃ PHÁT HÀNH — 2026-09-25
 
-Hai việc chỉ bạn làm được ở đợt 4 **bạn đã quyết**: xác nhận giá h3_max, và nâng
-trần mỗi video lên $0,70. Chạy lại preflight giá thật:
+Lô thật 2 video `4d18d1a9`: **COMPLETED**, $0,811789 / dự toán $0,906600 / trần
+$1,00. Resume $0, 0 POST. Xem `RELEASE_NOTES_V1.md` và `.ai/STATE.md`.
 
-```
-npm run preflight:production -- --max-per-video 0.70 --max-batch 1.00
-```
+**V1 đã đóng băng (QĐ-088).** Mọi mục dưới đây là V1.1 hoặc V2 — không kéo về V1.
 
-```
-READY    Bite the bullet   5 cảnh · 4 LOCAL_MOTION · 1 clip h3_max · $0,659300
-READY    All ears          5 cảnh · 5 LOCAL_MOTION · 0 clip       · $0,247300
+**Ngân sách dự án còn $0,387074 / $8,00.** Bất kỳ lô thật nào tiếp theo cần bạn
+duyệt tiền, và có thể cần nâng hạn mức toàn cục trước.
 
-TEXT $0 · IMAGE $0,480000 · VIDEO $0,400000 · VOICE $0,000200 · RENDER $0
-RETRY (dự phòng) $0,026400                          TỔNG  $0,906600
-trần đề xuất $1,000000 · dự án còn $1,198863 · sau lô còn ~$0,29
-```
+## V1.1 — gọn, không đổi kiến trúc
 
-**0 mục HỎNG.** `REAL MULTI-VIDEO PREFLIGHT: READY`.
+- [ ] Chấm clip h3_max mẫu thứ 4 (cảnh 3 "Bite the bullet") và ghi `VideoBenchmark`.
+- [ ] Nhịp cảnh: giọng ngắn hơn cảnh 0,7–2,4s → khoảng lặng. Tự co thời lượng cảnh
+      theo giọng (chỉ cắt khoảng lặng, như lần siết cảnh 5 lô `a690a290`).
+- [ ] Resume không ghi lại cột đường dẫn media trên cảnh đã xong (hiện đổi `updatedAt`).
+- [ ] Ô sửa MAX PER VIDEO / MAX BATCH mặc định trong Cài đặt.
+- [ ] Đổi tên hiển thị trạng thái lô theo DRAFT / READY / QUEUED / RUNNING / BLOCKED /
+      FAILED / COMPLETED / CANCELLED (chỉ nhãn, không đổi enum).
+- [ ] Kiểm REUSE thật ở một lô sau dùng lại Max (ảnh tham chiếu dùng chung).
 
-### Việc duy nhất còn lại là **chữ ký của bạn**
+## V2 — cần tiền hoặc thay đổi lớn
 
-Tôi **không tự duyệt**. Để chạy thật, mở trang `/import`, duyệt lô với
-**max authorization $1,000000**, rồi bấm chạy. Hoặc bảo tôi, tôi sẽ chạy.
+- [ ] Chạy lô thật qua nút DUYỆT & CHẠY trên UI (hàng đợi job) thay vì script;
+      trước đó chứng minh hàng đợi giữ "1 POST / asset, không retry trả phí".
+- [ ] Sàn chuyển động gặp cảnh MODERATE/VIGOROUS trong lô thật.
+- [ ] Benchmark `veo3.1_fast`, `wan3`, `h3_max:480x854` (hiện PIN_ONLY).
+- [ ] Model quality thật thay cho mock (cần xét lại vòng retry theo điểm, QĐ-062).
 
-Trạng thái hiện tại: lô `PLANNED`, quyền chi `DRAFT`, trần đã duyệt `0`,
-`ProviderJob 0`, `CostReservation 0`, `CREATE_ATTEMPT_TOKEN null`.
-
-### Lô sẽ mua gì
-
-```
-2 video · 10 cảnh · 1 clip Video AI · 10 ảnh mới · 10 giọng mới
-ảnh   $0,480000   10 × $0,048  (48% tổng chi — hai video mới, không có gì REUSE)
-clip  $0,400000   runway/h3_max:768x1280, 5 giây, cảnh 3 của video 1
-giọng $0,000200
-retry $0,026400   dự phòng
-```
-
-Điều đáng nhìn: **không có một dòng REUSE nào**. Đây là hai video hoàn toàn mới.
-Lô sau, khi Max đã có ảnh, con số này sẽ khác hẳn — và đó là thứ lô này tồn tại
-để chứng minh.
-
----
-
-## Việc còn lại sau khi lô chạy xong
-
-- [ ] **Chạy lô nhiều video lần đầu.** Chờ đúng chữ ký ở trên.
-- [ ] **Sau khi chạy: chấm clip h3_max mẫu thứ 4** và ghi `VideoBenchmark`.
-- [ ] **Kiểm tra REUSE thật sự hoạt động** ở lô kế tiếp dùng lại Max.
-- [ ] **Sàn chuyển động chưa gặp cảnh MODERATE/VIGOROUS trong một lô THẬT.**
-      Lô này chỉ có 1 cảnh SUBTLE, nên sàn chưa bị thử lửa.
-- [ ] **`veo3.1_fast`, `wan3`, `h3_max:480x854` vẫn PIN_ONLY, chưa benchmark.**
-      Cố ý: benchmark là tiền.
-
-### Blocker miễn phí — vẫn HẾT
-
-Đợt này đóng thêm hai thứ, cả hai đều $0:
-
-- [x] **Giá h3_max ghi là chép từ docs trong khi đã có 7 hoá đơn thật**
-      (QĐ-082) — nay `OBSERVED_CHARGE`, và `BENCHMARK_VERIFIED`/`LOW_AUTO`/`OK`
-      được đọc lại từ DB để chứng minh không trục nào bị đụng.
-- [x] **Mục tiêu mềm $0,90 sót lại từ đợt trước đánh trượt một lô đã được duyệt**
-      (QĐ-083) — `--target` nay chỉ kiểm khi bạn truyền vào. Hai trần cứng không đổi.
 
 ---
 ## 🆕 MODULE MỚI: Import Storyboard / Batch From Scenes V1 (2026-09-18)

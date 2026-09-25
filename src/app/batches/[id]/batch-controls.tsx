@@ -6,6 +6,7 @@ import {
   retryBatchVideo,
   stopBatch,
 } from "@/app/actions/batches";
+import { openOutputFolder } from "@/app/actions/output";
 import { ActionButtonWithFeedback } from "@/components/action-ui";
 
 /**
@@ -81,6 +82,19 @@ export function RetryVideoButton({ projectId }: { projectId: string }) {
       confirm="Chạy lại video này? Vẫn chịu hạn mức lô và hạn mức/video như cũ."
     >
       Thử lại
+    </ActionButtonWithFeedback>
+  );
+}
+
+/** Opens the folder the MP4 was written to, on this machine. Costs nothing. */
+export function OpenOutputButton({ projectId }: { projectId: string }) {
+  return (
+    <ActionButtonWithFeedback
+      action={() => openOutputFolder(projectId)}
+      variant="outline"
+      size="sm"
+    >
+      MỞ OUTPUT
     </ActionButtonWithFeedback>
   );
 }

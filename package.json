@@ -49,7 +49,8 @@
     "batch:close-stale": "tsx scripts/close-stale-batch.ts",
     "import:dryrun": "tsx scripts/import-batch-dryrun.ts",
     "preflight:production": "tsx scripts/production-preflight.ts",
-    "audit:image-guard": "tsx scripts/audit-image-guard.ts"
+    "audit:image-guard": "tsx scripts/audit-image-guard.ts",
+    "smoke": "tsx scripts/import-e2e-mock.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.1",

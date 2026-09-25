@@ -360,6 +360,9 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
           : 0,
         actualCost: 0,
         generationTimeMs: 0,
+        // Tells `saveAsset` this is not a new asset: the purchase already has
+        // its Asset row and its ledger line.
+        meta: { reused: true },
       };
     }
   }
@@ -809,6 +812,10 @@ async function saveAsset(opts: {
   asset: GeneratedAsset;
 }): Promise<void> {
   const { ctx, kind, decision, prompt, asset } = opts;
+  // A reuse bought nothing. Recording it again added one Asset row and one $0
+  // ledger line per spoken line on EVERY resume - ten per re-run of the first
+  // two-video batch - so the ledger grew with each run that cost nothing.
+  if (asset.meta?.reused === true) return;
   await prisma.asset.create({
     data: {
       projectId: ctx.project.id,
