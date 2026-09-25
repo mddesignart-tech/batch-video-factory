@@ -7,21 +7,12 @@ import { peekCreateToken } from "@/services/create-token";
 import { confirmedProviders, spendStatus, totalRealSpend } from "@/services/spend-guard";
 import { providerSpendBreakdown } from "@/services/provider-budget";
 import { availableProviderNames } from "@/services/provider-health";
-import { approveAuthorization } from "@/services/batch-authorization";
-import { release as releaseReservation, reservationLedger } from "@/services/cost-reservation";
+import { reservationLedger } from "@/services/cost-reservation";
 import { materialiseImport, scanImportSource, validateImport } from "@/services/storyboard-import";
 import { preflightImportedBatch } from "@/services/import-preflight";
-import {
-  generateSceneImage,
-  generateSceneVideo,
-  generateSceneVoice,
-} from "@/services/generation";
 import { writeBatchReport } from "@/services/batch-report";
-import { settleBatchIfDone } from "@/services/batch-runner";
-import { completeJob, failJob } from "@/jobs/queue";
-import { runJob } from "@/jobs/handlers";
+import { approveAndRun, resumeRun, type RunSummary } from "@/services/batch-executor";
 import { ffmpeg, ffprobe, probeDuration } from "@/media/ffmpeg";
-import type { Job } from "@prisma/client";
 
 /**
  * The first REAL multi-video batch: two videos, ten scenes, one paid clip.
@@ -142,48 +133,6 @@ async function spentOnProject(projectId: string): Promise<number> {
     _sum: { amount: true },
   });
   return round(row._sum.amount ?? 0);
-}
-
-async function spentOnBatch(batchId: string): Promise<number> {
-  const projects = await prisma.project.findMany({ where: { batchId }, select: { id: true } });
-  let total = 0;
-  for (const p of projects) total += await spentOnProject(p.id);
-  return round(total);
-}
-
-/**
- * The four ceilings, asked again immediately before every paid step.
- *
- * Re-read rather than carried: a batch buys one asset after another, and a
- * figure captured when the batch started is stale by the third one - in the
- * direction that permits spending. The vendor wallet is in here because a
- * provider can run dry while every one of our own ledgers still looks healthy.
- */
-async function assertHeadroom(
-  projectId: string,
-  batchId: string,
-  what: string,
-): Promise<void> {
-  const [video, batch, cap, wallets] = await Promise.all([
-    spentOnProject(projectId),
-    spentOnBatch(batchId),
-    spendStatus(),
-    providerSpendBreakdown(),
-  ]);
-  if (video >= MAX_PER_VIDEO) {
-    throw new Error(`${what}: video da chi ${money(video)} >= tran ${money(MAX_PER_VIDEO, 2)}. DUNG.`);
-  }
-  if (batch >= MAX_BATCH) {
-    throw new Error(`${what}: lo da chi ${money(batch)} >= tran ${money(MAX_BATCH, 2)}. DUNG.`);
-  }
-  if (cap.remaining <= 0) {
-    throw new Error(`${what}: han muc du an da het (${money(cap.remaining)}). DUNG.`);
-  }
-  for (const w of wallets) {
-    if (w.remainingUsd !== null && w.remainingUsd <= 0) {
-      throw new Error(`${what}: vi ${w.provider} da het (${money(w.remainingUsd)}). DUNG.`);
-    }
-  }
 }
 
 interface Snapshot {
@@ -439,217 +388,41 @@ async function main(): Promise<void> {
   note("ProviderJob / CostEntry / Reservation TRUOC",
     `${before.providerJobs} / ${before.costEntries} / ${before.reservations}`);
 
-  const authNow = await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId } });
-  if (resume) {
-    // A resume never re-approves. An approval still APPROVED carries on with
-    // the money it has left; a closed one stays closed, so the only thing this
-    // run CAN do is reuse - any purchase is refused at the gateway.
-    note(
-      "Quyen chi (resume, khong duyet lai)",
-      authNow.status === "APPROVED"
-        ? `APPROVED ${money(authNow.authorizedMaxSpend, 2)} - chi phan con thieu duoc mua`
-        : `${authNow.status} - moi POST tra phi se bi CHAN, chi REUSE`,
-    );
-  } else await approveAuthorization({
-    batchId,
-    authorizedMaxSpend: MAX_BATCH,
-    note: `Real batch from ${source}, operator approved $${MAX_BATCH} / $${MAX_PER_VIDEO} per video`,
-    // Scene 3 names no model: the LOW_AUTO grant is what selects h3_max, and
-    // approving an amount is not the same as agreeing the router may choose.
-    // The operator fixed the model for this run and the preflight they approved
-    // showed that exact route, so the mechanism is granted here explicitly -
-    // never silently. See QĐ-069.
-    lowAutoApproved: true,
-  });
-  if (!resume) {
-    console.log(`  Quyen chi APPROVED = ${money(MAX_BATCH, 2)} (moi video <= ${money(MAX_PER_VIDEO, 2)})`);
-  }
-  // The batch page reads these columns. Left at PLANNED / script_ready, the
-  // progress view would show a batch that is spending money as one waiting to
-  // start - so the statuses move exactly when the work does.
-  await prisma.batch.update({ where: { id: batchId }, data: { status: "RUNNING" } });
-
-  const projects = await prisma.project.findMany({
-    where: { batchId },
-    orderBy: { createdAt: "asc" },
-  });
-
-  const outcomes: { projectId: string; title: string; stopped: string; rendered: boolean }[] = [];
-  for (const project of projects) {
-    const scenes = await prisma.scene.findMany({
-      where: { projectId: project.id },
-      orderBy: { sceneNumber: "asc" },
-    });
-    // A finished video on a resume is KEPT: its scenes are walked to prove each
-    // asset comes back as REUSE, its status is never touched and it is never
-    // re-rendered. A throw here means something tried to buy for a video that
-    // is done - a V1 blocker, reported as such, never papered over.
-    const kept =
-      resume &&
-      project.status === "completed" &&
-      Boolean(project.finalVideoPath) &&
-      fs.existsSync(toAbsolute(project.finalVideoPath!));
+  // THE SAME executor the DUYỆT & CHẠY / TIẾP TỤC buttons call - there is no
+  // second pipeline. Approval, ceilings before every paid step, one attempt per
+  // asset, BLOCKED videos skipped, render, export, settle: all in
+  // src/services/batch-executor.ts.
+  const summary: RunSummary | undefined = resume
+    ? await resumeRun({ batchId, wait: true })
+    : (
+        await approveAndRun({
+          batchId,
+          maxBatch: MAX_BATCH,
+          maxPerVideo: MAX_PER_VIDEO,
+          // Granted explicitly, never silently - the operator fixed the route in
+          // the preflight they approved. See QĐ-069.
+          lowAutoApproved: true,
+          wait: true,
+        })
+      ).run;
+  const outcomes = (summary?.outcomes ?? []).map((o) => ({
+    projectId: o.projectId,
+    title: o.title,
+    stopped: o.stopped,
+    rendered: o.rendered,
+  }));
+  for (const o of summary?.outcomes ?? []) {
     console.log(
-      `\n  === ${project.title} (${scenes.length} canh)${kept ? " — DA XONG, chi kiem REUSE" : ""} ===`,
+      `  ${o.title}: ${o.stopped ? `DUNG — ${o.stopped}` : "xong"}` +
+        (o.outputDir ? `  -> ${o.outputDir}` : ""),
     );
-    if (!kept) {
-      await prisma.project.update({
-        where: { id: project.id },
-        data: { status: "media_generating", errorMessage: null },
-      });
-    }
-    let stopped = "";
-    for (const scene of scenes) {
-      try {
-        await assertHeadroom(project.id, batchId, `canh ${scene.sceneNumber}`);
-        await runScene(scene.id, project.id, batchId);
-        console.log(
-          `  [xong] canh ${scene.sceneNumber} — video da chi ${money(await spentOnProject(project.id))}`,
-        );
-      } catch (err) {
-        stopped = err instanceof Error ? err.message : String(err);
-        console.log(`  [HONG] canh ${scene.sceneNumber}: ${stopped}`);
-        console.log("  DUNG VIDEO NAY. Khong thu lai, khong doi provider, khong mua lai.");
-        if (kept) break;
-        await prisma.scene.update({
-          where: { id: scene.id },
-          data: { status: "failed", errorMessage: stopped.slice(0, 500) },
-        });
-        break;
-      }
-    }
-
-    // A failure in one video is not a reason to abandon the other: they share a
-    // ceiling and nothing else. And a render that fails must never reach back
-    // for the paid API - the assets are already bought and on disk.
-    let rendered = false;
-    if (kept) {
-      rendered = !stopped;
-      console.log(
-        stopped ? "  VIDEO DA XONG NHUNG RESUME DOI MUA — BLOCKER" : "  Giu nguyen MP4, khong render lai.",
-      );
-    } else if (!stopped) {
-      console.log("  --- render (FFmpeg tai may, $0) ---");
-      try {
-        await render(project.id);
-        rendered = true;
-        console.log("  [xong] render");
-      } catch (err) {
-        stopped = `render: ${err instanceof Error ? err.message : String(err)}`;
-        console.log(`  [HONG] ${stopped}`);
-        console.log("  Khong mua lai asset nao. Asset da co van nguyen tren dia.");
-      }
-    } else {
-      console.log("  Bo qua render vi video chua du canh.");
-    }
-    // One video stopping is recorded on THAT video. The other one's run is
-    // untouched, and the batch settles from both - see settleBatchIfDone.
-    if (stopped && !kept) {
-      await prisma.project.update({
-        where: { id: project.id },
-        data: { status: "failed", errorMessage: stopped.slice(0, 1000) },
-      });
-    }
-    outcomes.push({ projectId: project.id, title: project.title, stopped, rendered });
   }
-
-  // ---------------------------------------------------- 6. settle and report
-  const stranded = await prisma.costReservation.findMany({
-    where: { batchId, status: "RESERVED" },
-    select: { idempotencyKey: true, kind: true, provider: true, estimatedCost: true },
-  });
-  for (const r of stranded) {
-    await releaseReservation(r.idempotencyKey, { billed: false });
-    console.log(`\n  Tra lai cho da giu ${r.kind}/${r.provider} ${money(r.estimatedCost)}`);
-  }
-
-  // COMPLETED / PARTIAL / FAILED - one bad video never makes the other worthless.
   const good = outcomes.filter((o) => !o.stopped && o.rendered);
   const verdict =
     good.length === outcomes.length ? "COMPLETED" : good.length === 0 ? "FAILED" : "PARTIAL";
-  // The terminal status comes from the same rule the queue-driven runner uses,
-  // not from a word invented here: PARTIAL is not a BatchStatus, and the batch
-  // page would have rendered it as an unknown state. A half-finished batch is
-  // NEEDS_REVIEW - the one status a person can retry a video from.
-  const settled = await settleBatchIfDone(batchId);
-  note("batch status", settled ?? "(chua chot - con video dang chay?)");
+  note("batch status", summary?.settledStatus ?? "(chua chot)");
 
   await report(batchId, creditsBefore, before, runStart, outcomes, verdict);
-}
-
-/**
- * One scene: image, then the clip when the storyboard asked for one, then voice.
- *
- * Exactly one paid attempt per asset. The quality stage is deliberately absent -
- * see the header. Anything already completed is reused by the generation layer's
- * own idempotency, so a resume buys nothing.
- */
-async function runScene(sceneId: string, projectId: string, batchId: string): Promise<void> {
-  await generateSceneImage(sceneId);
-  await assertHeadroom(projectId, batchId, "sau anh");
-
-  const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
-  if (scene.motionMode === "VIDEO_AI") {
-    const key = `${scene.videoProvider}/${scene.videoModel}`;
-    // The router has already chosen by the time the scene row says so. If it
-    // chose anything but the model the operator fixed, that is a stop - not a
-    // thing to work around.
-    if (scene.videoProvider && scene.videoModel && key !== APPROVED.video) {
-      throw new Error(`Canh ${scene.sceneNumber} doi model: cho ${APPROVED.video}, thuc te ${key}.`);
-    }
-    // Said only when a clip will actually be requested. On a resume the clip is
-    // on disk and handed back; claiming a POST there would contradict the very
-    // counter that proves nothing was bought.
-    const owned = Boolean(scene.videoPath) && fs.existsSync(toAbsolute(scene.videoPath!));
-    console.log(
-      owned
-        ? `    canh ${scene.sceneNumber}: clip da co -> REUSE, khong POST`
-        : `    canh ${scene.sceneNumber}: POST dung 1 lan toi ${APPROVED.video}`,
-    );
-  }
-
-  await generateSceneVideo(sceneId);
-  await assertHeadroom(projectId, batchId, "sau clip");
-  await generateSceneVoice(sceneId);
-
-  // Written only when it changes. A resume walks finished scenes to prove
-  // reuse, and must leave them exactly as they were - not even a new updatedAt.
-  const done = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
-  if (done.status !== "completed" || done.errorMessage !== null) {
-    await prisma.scene.update({
-      where: { id: sceneId },
-      data: { status: "completed", errorMessage: null },
-    });
-  }
-}
-
-async function render(projectId: string): Promise<void> {
-  const row = await prisma.job.findFirst({
-    where: { projectId, type: "render_final" },
-    orderBy: { createdAt: "desc" },
-  });
-  const job =
-    row ??
-    (await prisma.job.create({
-      data: { type: "render_final", projectId, status: "queued", maxAttempts: 1 },
-    }));
-  for (let i = 0; i < 120; i += 1) {
-    await prisma.job.update({
-      where: { id: job.id },
-      data: { status: "processing", attempts: 1, maxAttempts: 1, payloadJson: "{}" },
-    });
-    const fresh = await prisma.job.findUniqueOrThrow({ where: { id: job.id } });
-    try {
-      const outcome = await runJob(fresh as Job);
-      if (!outcome.deferred) {
-        await completeJob(job.id, outcome.result);
-        return;
-      }
-    } catch (err) {
-      await failJob(job.id, err);
-      throw err;
-    }
-  }
 }
 
 /**

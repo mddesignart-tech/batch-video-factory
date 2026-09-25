@@ -12,6 +12,9 @@ import {
 } from "./batch-authorization";
 import { reservationLedger, type ReservationLedger } from "./cost-reservation";
 import type { BatchPlan, PlannedVideo } from "./batch-planner";
+import { isRunning } from "./run-registry";
+import { existingOutputFor } from "./output-export";
+import { videoLifecycle, type VideoLifecycle } from "@/domain/video-lifecycle";
 
 /**
  * Running an approved batch, and being able to stop.
@@ -52,6 +55,19 @@ export interface BatchProgressVideo {
   imagesDone: number;
   clipsDone: number;
   voicesDone: number;
+  /** DRAFT…FAILED, derived - see domain/video-lifecycle. */
+  lifecycle: VideoLifecycle;
+  /** The per-video ceiling the gate enforces for this video. */
+  authorizedCost: number;
+  /** The exported output folder, once a finished video has been exported. */
+  output: {
+    dir: string;
+    relative: string;
+    duration: number | null;
+    resolution: string | null;
+  } | null;
+  /** Scenes whose keyframe was supplied by a person (IMPORTED = REUSE = $0). */
+  importedImages: number;
 }
 
 export interface BatchProgress {
@@ -78,6 +94,13 @@ export interface BatchProgress {
   };
   /** Videos in the approved plan that no project exists for yet. */
   notStarted: number;
+  /**
+   * Imported-storyboard batch: its videos already exist as rows, and it is run
+   * by the production executor (DUYỆT & CHẠY / TIẾP TỤC), not by the queue.
+   */
+  importBatch: boolean;
+  /** A production run for this batch is going in this server process. */
+  running: boolean;
 }
 
 /**
@@ -377,6 +400,7 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
           select: {
             status: true,
             motionSource: true,
+            imageSource: true,
             imagePath: true,
             videoPath: true,
             audioPath: true,
@@ -390,6 +414,10 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
     ? await reservationLedger(batchId, auth.authorizedMaxSpend)
     : null;
 
+  const planForStatus = storedPlan(batch);
+  const planStatus = new Map(
+    (planForStatus?.videos ?? []).filter((v) => v.projectId).map((v) => [v.projectId as string, v.status as string]),
+  );
   const videos: BatchProgressVideo[] = projects.map((p) => ({
     projectId: p.id,
     title: p.title,
@@ -407,6 +435,24 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
     imagesDone: p.scenes.filter((s) => s.imagePath).length,
     clipsDone: p.scenes.filter((s) => s.motionSource !== "LOCAL_MOTION" && s.videoPath).length,
     voicesDone: p.scenes.filter((s) => s.audioPath).length,
+    lifecycle: videoLifecycle({
+      projectStatus: p.status,
+      authorizationStatus: auth?.status ?? null,
+      planStatus: planStatus.get(p.id) ?? null,
+    }),
+    authorizedCost: auth?.maxCostPerVideo ?? batch.maxCostPerVideo,
+    output: (() => {
+      const found = p.status === "completed" ? existingOutputFor(p) : null;
+      return found
+        ? {
+            dir: found.dir,
+            relative: found.relative,
+            duration: found.metadata?.duration ?? null,
+            resolution: found.metadata ? `${found.metadata.width}x${found.metadata.height}` : null,
+          }
+        : null;
+    })(),
+    importedImages: p.scenes.filter((s) => s.imageSource === "IMPORTED" && s.imagePath).length,
   }));
 
   const counts = {
@@ -444,6 +490,10 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
     videos,
     counts,
     notStarted: Math.max(0, (plan?.runnableCount ?? batch.amount) - videos.length),
+    // Rows that exist before any money is approved can only have come from an
+    // import - a V1 batch creates its projects when it runs.
+    importBatch: projects.some((p) => p.importFingerprint !== null || (p.scriptJson ?? "").includes("IMPORT")),
+    running: isRunning(batchId),
   };
 }
 

@@ -64,6 +64,8 @@ export interface ImportSceneLine {
    * it will NOT silently buy a replacement).
    */
   imageSource: "IMPORTED" | "REUSED" | "WILL_CREATE" | "NONE" | "MISSING";
+  /** The keyframe on disk, relative to data/, for a thumbnail. Null if none. */
+  imagePath: string | null;
   estimatedCost: number;
   /** Per asset: BUY (this run pays), REUSE (already owned), NONE (not needed). */
   plan: {
@@ -144,6 +146,9 @@ function addCounts(into: AssetCounts, line: ImportSceneLine["plan"]): void {
 export interface ImportVideoPreview {
   projectId: string;
   title: string;
+  aspectRatio: string;
+  /** Seconds, summed over the scenes that will be rendered. */
+  totalDuration: number;
   sceneCount: number;
   localMotionCount: number;
   videoAiCount: number;
@@ -453,6 +458,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         videoModel: row.video ? `${row.video.provider}/${row.video.modelId}` : null,
         keyframe: scene?.imageSource === "IMPORTED" ? "supplied" : "will-generate",
         imageSource,
+        imagePath: scene?.imagePath && fileOnDisk(scene.imagePath) ? scene.imagePath : null,
         estimatedCost: round(row.estimatedCost, 6),
         plan,
       });
@@ -643,6 +649,8 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     }
 
     videos.push({
+      aspectRatio: project.aspectRatio,
+      totalDuration: round(project.scenes.reduce((n, sc) => n + sc.duration, 0), 3),
       lifecycle,
       blockedReason,
       characters,

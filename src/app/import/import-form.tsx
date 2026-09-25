@@ -27,6 +27,37 @@ import { CharacterEditor } from "./character-editor";
 import { PreflightPanel } from "./preflight-panel";
 import { reestimateImportBatch } from "@/app/actions/storyboard-import";
 import { stageStoryboardUpload } from "@/app/actions/scene-images";
+import { ApproveRunPanel } from "@/components/approve-run-panel";
+
+/**
+ * Walk a dropped folder the way the browser exposes it, keeping each file's
+ * path inside the folder so video-01/storyboard.json and video-01/scene-01.png
+ * stay together. Files and ZIPs dropped directly come through as themselves.
+ */
+async function collectDropped(items: DataTransferItemList): Promise<{ file: File; path: string }[]> {
+  const out: { file: File; path: string }[] = [];
+  async function walk(entry: FileSystemEntry): Promise<void> {
+    if (entry.isFile) {
+      const file = await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej));
+      out.push({ file, path: entry.fullPath.replace(/^\//, "") });
+    } else if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      // readEntries returns in chunks; keep reading until it returns nothing.
+      for (;;) {
+        const batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
+        if (batch.length === 0) break;
+        for (const child of batch) await walk(child);
+      }
+    }
+  }
+  const roots: FileSystemEntry[] = [];
+  for (const item of Array.from(items)) {
+    const entry = item.webkitGetAsEntry();
+    if (entry) roots.push(entry);
+  }
+  for (const root of roots) await walk(root);
+  return out;
+}
 
 /**
  * Three buttons, in the order the money actually moves.
@@ -54,15 +85,22 @@ export function ImportForm() {
   const folderRef = useRef<HTMLInputElement>(null);
   const filesRef = useRef<HTMLInputElement>(null);
 
+  const [dragging, setDragging] = useState(false);
+
   // Upload from the browser into a staging folder under data/, then run the
   // SAME check a typed path gets. Nothing is imported yet.
-  async function onUpload(list: FileList | null) {
+  async function onUpload(list: FileList | { file: File; path: string }[] | null) {
     if (!list || list.length === 0) return;
     const form = new FormData();
-    for (const f of Array.from(list)) {
-      form.append("files", f, f.name);
-      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
-      form.append("paths", rel && rel.length > 0 ? rel : f.name);
+    const entries = Array.isArray(list)
+      ? list
+      : Array.from(list).map((f) => {
+          const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
+          return { file: f, path: rel && rel.length > 0 ? rel : f.name };
+        });
+    for (const { file, path } of entries) {
+      form.append("files", file, file.name);
+      form.append("paths", path);
     }
     setBusy("validate");
     setMessage(null);
@@ -140,6 +178,28 @@ export function ImportForm() {
           <CardTitle>Nguồn nhập</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={async (e) => {
+              e.preventDefault();
+              setDragging(false);
+              const dropped = await collectDropped(e.dataTransfer.items);
+              await onUpload(dropped);
+            }}
+            className={`rounded-lg border-2 border-dashed p-5 text-center text-sm transition-colors ${
+              dragging ? "border-brand-500 bg-brand-500/10" : "border-ink-700"
+            }`}
+          >
+            <p className="font-medium text-ink-200">Kéo thả vào đây: thư mục storyboard, nhiều thư mục, file .json/.csv + ảnh, hoặc .zip</p>
+            <p className="mt-1 text-xs text-ink-500">
+              Nhiều storyboard một lần: mỗi thư mục con là một video (video-01/storyboard.json + ảnh, video-02/…).
+              Ảnh có sẵn được dùng lại — không gọi Image API, $0.
+            </p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <input
               ref={folderRef}
@@ -351,6 +411,8 @@ export function ImportForm() {
       {batchId ? <SceneEditor batchId={batchId} onEstimated={setPreflight} /> : null}
 
       {preflight ? <PreflightPanel preflight={preflight} batchId={batchId} /> : null}
+
+      {preflight && batchId ? <ApproveRunPanel batchId={batchId} /> : null}
     </div>
   );
 }

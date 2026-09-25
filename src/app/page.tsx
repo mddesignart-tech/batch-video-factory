@@ -23,6 +23,7 @@ import type { ProjectStatus, QualityMode } from "@/domain/enums";
 import { costSummary } from "@/services/cost-tracker";
 import { queueStats } from "@/jobs/queue";
 import { spendStatus } from "@/services/spend-guard";
+import { recentBatches, todayDashboard } from "@/services/dashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,7 @@ export default async function DashboardPage() {
   ]);
 
   const mediaBytes = dirSize(DIRS.projects);
+  const [day, batches] = await Promise.all([todayDashboard(), recentBatches(8)]);
 
   return (
     <>
@@ -93,6 +95,91 @@ export default async function DashboardPage() {
           </Link>
         }
       />
+
+      <Card className="mb-4">
+        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>Hôm nay</CardTitle>
+          <Link href="/import">
+            <Button size="sm" variant="primary">
+              Nhập storyboard <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+            <Stat label="Video hoàn thành" value={day.videosCompleted} tone="ok" />
+            <Stat label="Video lỗi" value={day.videosFailed} tone={day.videosFailed > 0 ? "danger" : "neutral"} />
+            <Stat label="Chi API thật" value={formatUSD(day.apiSpend, 4)} tone={day.apiSpend > 0 ? "warn" : "ok"} />
+            <Stat
+              label="Chi TB / video"
+              value={day.averageCostPerVideo === null ? "—" : formatUSD(day.averageCostPerVideo, 4)}
+            />
+            <Stat
+              label="Runway credit"
+              value={day.runwayCredits === null ? "không rõ" : String(day.runwayCredits)}
+              hint={
+                `${day.runwaySource ?? "?"}` +
+                (day.runwayCheckedAt
+                  ? ` · đọc live lần cuối ${new Date(day.runwayCheckedAt).toLocaleString("vi-VN")}`
+                  : " · chưa đọc live") +
+                " — không phải số dư lúc này"
+              }
+            />
+            <Stat
+              label="Ngân sách còn"
+              value={formatUSD(day.globalRemaining, 4)}
+              hint={`đã chi ${formatUSD(day.globalSpent, 4)} / ${formatUSD(day.globalCap, 2)}`}
+              tone={day.globalRemaining < 0.5 ? "danger" : "neutral"}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-4">
+        <CardHeader>
+          <CardTitle>Lô gần đây</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {batches.length === 0 ? (
+            <p className="p-4 text-xs text-ink-500">Chưa có lô nào.</p>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Lô</Th>
+                  <Th>Trạng thái</Th>
+                  <Th className="text-right">Video</Th>
+                  <Th className="text-right">Xong</Th>
+                  <Th className="text-right">Chặn / lỗi</Th>
+                  <Th className="text-right">Chi thật</Th>
+                  <Th>Ngày</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {batches.map((b) => (
+                  <tr key={b.id}>
+                    <Td>
+                      <Link href={`/batches/${b.id}`} className="hover:text-brand-400">
+                        {b.name}
+                      </Link>
+                    </Td>
+                    <Td>
+                      <Badge tone={b.status === "COMPLETED" ? "ok" : b.status === "RUNNING" ? "warn" : "neutral"}>{b.status}</Badge>
+                    </Td>
+                    <Td className="text-right tabular-nums">{b.videos}</Td>
+                    <Td className="text-right tabular-nums text-ok-500">{b.completed}</Td>
+                    <Td className="text-right tabular-nums text-warn-500">
+                      {b.blocked} / {b.failed}
+                    </Td>
+                    <Td className="text-right tabular-nums">{formatUSD(b.cost, 4)}</Td>
+                    <Td className="text-xs text-ink-400">{formatDateVi(b.createdAt)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Video hôm nay" value={todayCount} tone="brand" />

@@ -32,6 +32,16 @@ Import Storyboard / Batch From Scenes: IMPLEMENTED và đã chạy thật. Khôn
 vào baseline này. Hạn mức tổng $8,08, còn **$0,067** — lô trả phí tiếp theo cần người dùng
 nâng hạn mức và duyệt.
 
+## ✅ UI vận hành hằng ngày — XONG ($0, 2026-09-25)
+
+Import kéo-thả, preflight + DUYỆT & CHẠY trong UI, hàng đợi, TIẾP TỤC, output, dashboard.
+Executor production dùng chung với CLI (QĐ-099). **Chưa chạy lô trả phí nào qua nút UI** —
+lần đầu cần bạn duyệt (và nâng hạn mức: còn $0,067).
+
+- [ ] Lần chạy trả phí ĐẦU TIÊN qua nút DUYỆT & CHẠY (chờ bạn).
+- [ ] Nút "đọc số dư Runway" (GET /organization, miễn phí) để dashboard có số LIVE.
+- [ ] Lô V1 từ thành ngữ vẫn chạy qua hàng đợi cũ; chuyển sang executor nếu dùng hằng ngày.
+
 ## V1.1 — gọn, không đổi kiến trúc
 
 - [ ] Chấm clip h3_max mẫu thứ 4 (cảnh 3 "Bite the bullet") và ghi `VideoBenchmark`.

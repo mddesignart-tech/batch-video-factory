@@ -24,6 +24,8 @@ import { previewProjectCost } from "@/services/project-service";
 import { Storyboard } from "./storyboard";
 import { ProjectActions } from "./project-actions";
 import { ImportImagesCard } from "./import-images-card";
+import { OutputCard } from "./output-card";
+import { existingOutputFor } from "@/services/output-export";
 import { CostPreview } from "./cost-preview";
 
 export const dynamic = "force-dynamic";
@@ -141,6 +143,29 @@ export default async function ProjectDetailPage({
             <Alert tone="info" title="Dự án chưa có kịch bản">
               Bấm &ldquo;Tạo lại kịch bản&rdquo; ở trên để sinh kịch bản mẫu.
             </Alert>
+          ) : null}
+
+          {project.status === "completed" && project.finalVideoPath ? (
+            (() => {
+              const found = existingOutputFor(project);
+              return (
+                <OutputCard
+                  projectId={project.id}
+                  actualCost={project.actualCost}
+                  output={
+                    found
+                      ? {
+                          dir: found.dir,
+                          relative: found.relative,
+                          duration: found.metadata?.duration ?? null,
+                          resolution: found.metadata ? `${found.metadata.width}x${found.metadata.height}` : null,
+                          aspectRatio: found.metadata?.aspectRatio ?? null,
+                        }
+                      : null
+                  }
+                />
+              );
+            })()
           ) : null}
 
           {project.scenes.length > 0 ? (

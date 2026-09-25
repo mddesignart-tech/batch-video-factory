@@ -11,6 +11,22 @@ Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps �
 Release: batch-video-factory-v1.1.0
 ```
 
+## Vận hành hằng ngày bằng UI — 2026-09-25 (sau v1.1.0), $0
+
+Không còn cần CLI để duyệt/chạy lô storyboard. Luồng: **Nhập Storyboard** (kéo thả thư mục /
+nhiều storyboard / ZIP, thumbnail ảnh nhập, READY/BLOCKED/NEEDS_REFERENCE) → **PREFLIGHT**
+(dự toán, POST dự kiến, IMPORTED/WILL_CREATE, cổng, ngân sách còn) → người gõ trần lô (+ trần
+video tuỳ chọn), tick xác nhận → **DUYỆT & CHẠY BATCH** → trang lô / **Hàng đợi** (DRAFT…FAILED,
+Cảnh/Ảnh/Video AI/Giọng/Render, chi thật/trần) → **TIẾP TỤC** nếu gián đoạn → **Output**
+(player, thumbnail, thời lượng, độ phân giải, chi phí, MỞ THƯ MỤC, COPY PATH) → **Dashboard**
+(hôm nay + lô gần đây). Executor dùng chung với CLI — QĐ-099 → QĐ-102.
+
+Test UI thật (server trên bản sao DB, mock, worker BẬT): nhập 5 ảnh → preflight → duyệt $0,30
+→ chạy → COMPLETED: 5 job giọng + 1 job video mock, **0 job ảnh**, output xuất đủ 4 file.
+`tests/batch-executor.test.ts`: 3 video (A ảnh nhập, B thiếu 1 ảnh + VIDEO_AI, C vượt trần →
+BLOCKED không chặn A/B), từ chối trần sai, resume +0, chỉ render lại không gọi provider, chống
+trùng, khoá chạy đôi, metadata output, lifecycle, dashboard.
+
 Trước đó: **BATCH VIDEO FACTORY V1 = RELEASED + GITHUB RELEASE PUBLISHED.** Tag
 `batch-video-factory-v1.0.0`. Xem `RELEASE_NOTES_V1.md`.
 

@@ -93,9 +93,13 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
     <div className="space-y-3 rounded-lg border border-ink-800 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={LIFECYCLE_TONE[video.lifecycle]}>{video.lifecycle}</Badge>
+        {video.status === "NEEDS_CHARACTER_REFERENCE" ? <Badge tone="danger">NEEDS_REFERENCE</Badge> : null}
         <span className="font-medium">{video.title}</span>
         <span className="text-xs text-muted-foreground">
-          {video.sceneCount} cảnh · {duration.toFixed(1)}s · 9:16 ·{" "}
+          {video.sceneCount} cảnh · {duration.toFixed(1)}s · {video.aspectRatio} · ảnh có sẵn{" "}
+          {video.counts.imageReuse} / thiếu{" "}
+          {video.counts.imageBuy} · LOCAL {video.localMotionCount} · VIDEO_AI {video.videoAiCount} ·{" "}
+          model {[...new Set(video.scenes.map((s) => s.videoModel).filter(Boolean))].join(", ") || "—"} ·{" "}
           {video.characters.length} nhân vật (
           {video.characters.filter((c) => c.referenceCount > 0).length} có ảnh,{" "}
           {video.characters.filter((c) => c.referenceCount === 0).length} thiếu ảnh)
@@ -142,6 +146,7 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
         <thead>
           <tr>
             <Th>#</Th>
+            <Th>Ảnh cảnh</Th>
             <Th>Giây</Th>
             <Th>Nhân vật</Th>
             <Th>Camera</Th>
@@ -158,6 +163,15 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
           {video.scenes.map((s) => (
             <tr key={s.sceneNumber}>
               <Td>{s.sceneNumber}</Td>
+              <Td>
+                {s.imagePath ? (
+                  // Thumbnail of the picture this scene will use. Served from
+                  // data/ by the media route; nothing is generated to show it.
+                  <img src={`/api/media/${s.imagePath}`} alt="" className="h-12 w-7 rounded object-cover" />
+                ) : (
+                  <span className="text-[11px] text-ink-500">—</span>
+                )}
+              </Td>
               <Td>{s.duration}</Td>
               <Td className="text-xs">{s.characters.join(", ") || "—"}</Td>
               <Td className="max-w-[10rem] truncate text-xs">{s.camera || "—"}</Td>

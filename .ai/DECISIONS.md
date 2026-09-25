@@ -2797,3 +2797,41 @@ không bị ảnh hưởng.
 
 `run-real-multi-batch.ts` nhận `--source --name --expect-videos/-scenes/-local/-video-ai
 --max-per-video --max-batch --approved-estimate`; mặc định giữ nguyên lô V1.
+
+## QĐ-099 — Một executor production, hai nút bấm: CLI và UI
+
+Lô thật đã chạy bằng `scripts/run-real-multi-batch.ts`, vì hàng đợi job tự retry
+(`maxRetries`) và kết mỗi cảnh bằng `evaluateScene` — đúng với việc miễn phí, sai với
+việc trả phí (1 POST / asset, không retry ngầm). Vòng chạy của script nay là
+`src/services/batch-executor.ts`: preflight duyệt, duyệt, chạy, tiếp tục, render, xuất
+output, chốt lô. Script CLI và các nút PREFLIGHT / DUYỆT & CHẠY BATCH / TIẾP TỤC gọi
+CÙNG các hàm đó — không có pipeline UI riêng. Mọi cổng của `runProviderJob` (reuse,
+hạn mức toàn cục, quyền chi lô, trần/video, phạm vi, LOW_AUTO, giữ chỗ) vẫn đứng trước
+mọi POST; executor chỉ quyết THỨ TỰ, và đọc lại bốn trần trước mỗi bước trả phí.
+
+Lô nhập storyboard luôn chạy qua executor; lô V1 lập từ thành ngữ (dự án chưa tồn tại lúc
+duyệt) vẫn đi đường hàng đợi cũ, không đổi.
+
+## QĐ-100 — Video BLOCKED bị bỏ qua, không chặn lô; khoá một-lô-một-lần-chạy
+
+Preflight đánh BLOCKED (vượt trần/video, thiếu tham chiếu nhân vật…) → executor đánh dấu
+video đó `needs_review` và chạy tiếp video READY. Một lần chạy mỗi lô trong một tiến trình
+(`run-registry.ts`); bấm lần hai trả về đúng lần chạy đang có. Job render được tạo sẵn ở
+`processing` để worker hàng đợi không thể nhận render song song.
+
+## QĐ-101 — Chỉ ví của nhà cung cấp lô dùng mới dừng được lô
+
+Kiểm trần trước mỗi bước từng dừng video khi BẤT KỲ ví nào về $0 — test mock bị một ví
+runway $0 dừng dù lô chỉ dùng mock. Nay chỉ các ví trong phạm vi quyền chi của lô. Script cũ
+có cùng lỗi, chưa lộ vì mọi ví thật đều còn tiền.
+
+## QĐ-102 — Duyệt bằng UI: người gõ con số, preflight phải chạy với đúng con số đó
+
+Ô trần lô KHÔNG điền sẵn (đề xuất hiện bên cạnh). Nút DUYỆT & CHẠY chỉ mở khi preflight
+với CHÍNH các con số đang nhập đạt, người dùng tick câu nêu số tiền, và (nếu có clip do
+router chọn) tick đồng ý LOW_AUTO. Sửa số sau preflight → khoá lại. Server kiểm lại tất cả;
+trần vượt ngân sách toàn cục còn lại bị từ chối, không bao giờ tự nâng hạn mức.
+
+Output của video xong được xuất ra `data/output/<slug>-<id8>/` (final.mp4, thumbnail.jpg,
+subtitles.srt, metadata.json) — sao chép + FFmpeg tại máy, làm lại được bất cứ lúc nào.
+Dashboard hiện số dư Runway kèm NGUỒN và ngày đọc live (CACHE phải hiện kèm tuổi).

@@ -17,6 +17,7 @@ import {
   Users,
   Wallet,
   FileUp,
+  ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { href: "/projects", label: "Dự án video", icon: Clapperboard },
   { href: "/batches", label: "Tạo hàng loạt", icon: Layers },
   { href: "/import", label: "Nhập Storyboard", icon: FileUp },
+  { href: "/queue", label: "Hàng đợi", icon: ListChecks },
   { href: "/characters", label: "Nhân vật", icon: Users },
   { href: "/styles", label: "Phong cách", icon: Palette },
   { href: "/media", label: "Media", icon: Film },

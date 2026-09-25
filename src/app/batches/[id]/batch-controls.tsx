@@ -7,6 +7,7 @@ import {
   stopBatch,
 } from "@/app/actions/batches";
 import { openOutputFolder } from "@/app/actions/output";
+import { resumeBatchRun } from "@/app/actions/batch-run";
 import { ActionButtonWithFeedback } from "@/components/action-ui";
 
 /**
@@ -96,5 +97,40 @@ export function OpenOutputButton({ projectId }: { projectId: string }) {
     >
       MỞ OUTPUT
     </ActionButtonWithFeedback>
+  );
+}
+
+/**
+ * TIẾP TỤC - resume through the production executor. Never re-approves: done
+ * assets are reused, only what is missing is made, a render-only failure is
+ * only re-rendered.
+ */
+export function ResumeRunButton({ batchId, projectId, label = "TIẾP TỤC" }: { batchId: string; projectId?: string; label?: string }) {
+  return (
+    <ActionButtonWithFeedback
+      action={() => resumeBatchRun(batchId, projectId)}
+      variant={projectId ? "outline" : "primary"}
+      size="sm"
+      confirm={
+        (projectId ? "Chạy tiếp video này? " : "Chạy tiếp lô? ") +
+        "Không duyệt thêm tiền. Asset đã xong được dùng lại, không mua lại."
+      }
+    >
+      {label}
+    </ActionButtonWithFeedback>
+  );
+}
+
+/** Copy an output path to the clipboard. Local, free. */
+export function CopyPathButton({ path }: { path: string }) {
+  return (
+    <button
+      type="button"
+      className="rounded border border-ink-700 px-2 py-0.5 text-[11px] text-ink-300 hover:border-brand-500"
+      onClick={() => void navigator.clipboard?.writeText(path)}
+      title={path}
+    >
+      COPY PATH
+    </button>
   );
 }

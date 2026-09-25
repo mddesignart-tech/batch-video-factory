@@ -24,7 +24,15 @@ import {
   type ProjectStatus,
 } from "@/domain/enums";
 import type { BatchProgress } from "@/services/batch-runner";
-import { BatchControls, OpenOutputButton, RetryVideoButton } from "./batch-controls";
+import {
+  BatchControls,
+  CopyPathButton,
+  OpenOutputButton,
+  ResumeRunButton,
+  RetryVideoButton,
+} from "./batch-controls";
+import { ApproveRunPanel } from "@/components/approve-run-panel";
+import { LIFECYCLE_TONE } from "@/domain/video-lifecycle";
 import { ApprovePanel, type ApprovalFigures } from "./approve-panel";
 import { POLL_INTERVAL_MS, useBatchProgress } from "./use-batch-progress";
 
@@ -191,13 +199,37 @@ export function BatchProgressView({
           <BatchControls
             batchId={batch.id}
             canStop={live}
-            canResume={stopped}
-            canReplan={!live}
+            // An imported batch resumes through the production executor below,
+            // never through the queue.
+            canResume={stopped && !progress.importBatch}
+            canReplan={!live && !progress.importBatch}
           />
+          {progress.importBatch ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {progress.running ? (
+                <Badge tone="warn">Đang chạy (pipeline production)</Badge>
+              ) : authorization &&
+                authorization.status !== "DRAFT" &&
+                !["COMPLETED", "CANCELLED"].includes(status) ? (
+                <ResumeRunButton batchId={batch.id} />
+              ) : null}
+              {authorization?.approvedAt ? (
+                <span className="text-ink-500">
+                  Duyệt lúc {new Date(authorization.approvedAt).toLocaleString("vi-VN")}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
-      {approval ? <ApprovePanel batchId={batch.id} figures={approval} /> : null}
+      {progress.importBatch && authorization?.status === "DRAFT" ? (
+        <div className="mt-4">
+          <ApproveRunPanel batchId={batch.id} />
+        </div>
+      ) : approval ? (
+        <ApprovePanel batchId={batch.id} figures={approval} />
+      ) : null}
 
       <Card className="mt-4">
         <CardHeader>
@@ -232,9 +264,15 @@ export function BatchProgressView({
                     </Link>
                   </Td>
                   <Td>
+                    <Badge tone={LIFECYCLE_TONE[video.lifecycle]}>{video.lifecycle}</Badge>{" "}
                     <Badge tone={PROJECT_TONE[video.status] ?? "neutral"}>
                       {VI_PROJECT_STATUS[video.status as ProjectStatus] ?? video.status}
                     </Badge>
+                    {video.importedImages > 0 ? (
+                      <p className="mt-1 text-[11px] text-ok-500">
+                        {video.importedImages} ảnh nhập · REUSE · $0 Image API
+                      </p>
+                    ) : null}
                     {video.errorMessage ? (
                       <p className="mt-1 max-w-md text-[11px] text-ink-500">
                         {video.errorMessage}
@@ -274,8 +312,28 @@ export function BatchProgressView({
                   </Td>
                   <Td className="text-right tabular-nums text-ink-100">
                     {formatUSD(video.actualCost, 4)}
+                    <p className="text-[10px] text-ink-500">trần {formatUSD(video.authorizedCost, 2)}</p>
                   </Td>
                   <Td className="text-xs">
+                    {video.output ? (
+                      <div className="mb-1.5 flex items-start gap-2">
+                        <img
+                          src={`/api/media/${video.output.relative}/thumbnail.jpg`}
+                          alt=""
+                          className="h-16 w-9 rounded object-cover"
+                        />
+                        <div className="text-[11px] text-ink-400">
+                          <p>
+                            {video.output.duration !== null ? `${video.output.duration.toFixed(1)}s` : ""}{" "}
+                            {video.output.resolution ?? ""}
+                          </p>
+                          <p className="max-w-[16rem] truncate font-mono" title={video.output.dir}>
+                            {video.output.dir}
+                          </p>
+                          <CopyPathButton path={video.output.dir} />
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="flex flex-wrap items-center gap-2">
                       {video.finalVideoPath ? (
                         <>
@@ -290,7 +348,13 @@ export function BatchProgressView({
                           <OpenOutputButton projectId={video.projectId} />
                         </>
                       ) : ["failed", "needs_review", "budget_exhausted"].includes(video.status) ? (
-                        <RetryVideoButton projectId={video.projectId} />
+                        progress.importBatch ? (
+                          progress.running ? null : (
+                            <ResumeRunButton batchId={batch.id} projectId={video.projectId} label="Thử lại video này" />
+                          )
+                        ) : (
+                          <RetryVideoButton projectId={video.projectId} />
+                        )
                       ) : null}
                       <Link
                         href={`/projects/${video.projectId}`}

@@ -14,7 +14,7 @@ khác, rồi đưa vào đây để dựng video: tool chỉ còn làm giọng, 
 |---|---|---|
 | **A. Từng cảnh** | Trang dự án → chọn cảnh → khối **Ảnh cảnh** → **Chọn ảnh / Thay ảnh** | Sửa một hai cảnh |
 | **B. Nhiều ảnh một lần** | Trang dự án → **Nhập ảnh storyboard** → **NHẬP ẢNH** hoặc **Chọn cả thư mục** | Dự án đã có cảnh, bạn có sẵn bộ ảnh |
-| **C. Storyboard JSON/CSV + ảnh** | Trang **Nhập Storyboard** → **TẢI LÊN THƯ MỤC STORYBOARD** (hoặc chọn file / .zip, hoặc gõ đường dẫn) | Tạo video mới từ đầu, một hay nhiều video |
+| **C. Storyboard JSON/CSV + ảnh** | Trang **Nhập Storyboard** → **kéo thả** thư mục / nhiều thư mục / .zip, hoặc **TẢI LÊN THƯ MỤC STORYBOARD**, hoặc gõ đường dẫn | Tạo video mới từ đầu, một hay nhiều video |
 
 ### Cách B — ghép ảnh vào cảnh theo tên file
 
@@ -52,7 +52,11 @@ Số file khác số cảnh → tool báo rõ, chỉ gắn file ghép được, 
    LOCAL_MOTION: 4 · VIDEO_AI: 1
    ```
 
-7. Duyệt tiền ở trang lô, render.
+7. Bấm **PREFLIGHT** trong khối "Duyệt chi & chạy lô", nhập **trần chi cả lô** (và trần mỗi
+   video nếu muốn), bấm PREFLIGHT lại để kiểm với đúng con số đó, tick "Tôi đồng ý chi TỐI ĐA
+   $…", rồi **DUYỆT & CHẠY BATCH**. Theo dõi ở trang lô hoặc **Hàng đợi**; gián đoạn thì bấm
+   **TIẾP TỤC** (không mua lại gì đã xong). Video xong: khối **Output** (MỞ THƯ MỤC / COPY
+   PATH) — `data/output/<video>/final.mp4, thumbnail.jpg, subtitles.srt, metadata.json`.
 
 ## Định dạng JSON (một file `storyboard.json` cho mỗi video)
 
