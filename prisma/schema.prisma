@@ -510,6 +510,12 @@ model Scene {
   /// Without this column the first run of an imported storyboard would buy an
   /// image for every scene that already had one.
   imageSource String @default("GENERATED")
+  /// The Asset row the active keyframe came from, when it was IMPORTED.
+  ///
+  /// `imagePath` is what the pipeline reads; this says which supplied file it
+  /// was made from, so replacing an image keeps the old one as history instead
+  /// of deleting it, and a resume can prove it still points at the same file.
+  imageAssetId String?
 
   imageProvider     String?
   imageModel        String?
@@ -586,6 +592,20 @@ model Asset {
   filePath         String
   bytes            Int      @default(0)
   createdAt        DateTime @default(now())
+
+  /// GENERATED (a provider made it and was paid) or IMPORTED (a person supplied
+  /// the file). An IMPORTED asset never has a ProviderJob and never costs
+  /// anything: IMPORTED IMAGE = REUSE = $0 IMAGE API COST.
+  source           String   @default("GENERATED")
+  /// What the file was called on the operator's disk. Kept for display and
+  /// for mapping only - the stored copy under data/ is the source of truth.
+  originalFilename String?
+  mimeType         String?
+  width            Int?
+  height           Int?
+  /// SHA-256 of the stored bytes, so the same picture imported twice is
+  /// recognisable as the same picture.
+  sha256           String?
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   scene   Scene?  @relation(fields: [sceneId], references: [id], onDelete: Cascade)

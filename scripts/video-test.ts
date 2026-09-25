@@ -267,7 +267,7 @@ async function main(): Promise<void> {
   const promptToSend = replacementPrompt !== "" ? replacementPrompt : scene.videoPrompt;
 
   // ---- idempotency: is this work already paid for? ----------------------
-  const { idempotencyKey } = await import("../src/services/generation");
+  const { idempotencyKey, videoKeyVariant } = await import("../src/services/generation");
   const key = idempotencyKey({
     sceneId: scene.id,
     kind: "video",
@@ -275,7 +275,7 @@ async function main(): Promise<void> {
     model: MODEL_ID,
     prompt: promptToSend,
     generation: scene.retryCount,
-    variant: `${scene.duration}s`,
+    variant: videoKeyVariant(scene),
   });
   const existing = await prisma.providerJob.findUnique({
     where: { idempotencyKey: key },

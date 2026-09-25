@@ -242,7 +242,7 @@ export async function persistScript(
  * whether something has to be BOUGHT. `toAbsolute` throws on a path that escapes
  * the data root, and a path we refuse to resolve is not an asset we have.
  */
-function fileOnDisk(relative: string | null | undefined): boolean {
+export function fileOnDisk(relative: string | null | undefined): boolean {
   if (!relative) return false;
   try {
     return fs.existsSync(toAbsolute(relative));

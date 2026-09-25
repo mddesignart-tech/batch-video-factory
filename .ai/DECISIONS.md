@@ -2737,3 +2737,63 @@ manager). Trang báo "Existing tag", nên release gắn vào tag đã public —
 Quét lần cuối: key thật trong `.env` không xuất hiện trong mã nguồn lẫn lịch sử.
 Các fixture `sk-test-not-a-real-key` / `gsk-test-…` cũng đổi sang
 `fake-api-key-for-test-only` cho nhất quán với QĐ-091.
+
+## QĐ-093 — Ảnh nhập là một Asset IMPORTED, không phải một đường dẫn
+
+Ảnh người dùng đưa vào trước đây chỉ là một file chép vào `images/` với
+`Scene.imageSource = IMPORTED`: không biết tên gốc, kích thước, loại thật, và thay ảnh
+thì mất dấu ảnh cũ. Nay mỗi ảnh nhập là một dòng `Asset` (`source: IMPORTED`, tên gốc,
+mime đọc từ BYTE, rộng/cao, sha256, `actualCost 0`) và `Scene.imageAssetId` trỏ tới ảnh
+đang dùng. `Scene.imageSource` vẫn là nguồn sự thật của "cảnh này có phải ảnh nhập" —
+không có bảng hay cột trùng vai trò. Cùng một ảnh nhập hai lần trong một dự án: một
+file vật lý, hai Asset (mỗi lần dùng là một dòng).
+
+**IMPORTED IMAGE = REUSE = $0 IMAGE API COST.** Module `imported-image.ts` không có
+đường import nào dẫn tới provider; `sniffImageType` được tách ra `lib/image-sniff.ts`
+vì `character-master.ts` kéo theo registry Image AI.
+
+## QĐ-094 — Ảnh khác tỉ lệ: bản làm việc nền mờ, không sửa render
+
+Mọi nơi dùng keyframe (render, `prepareKeyframe` của Runway/Sora/Veo) đều "phủ khung rồi
+cắt giữa". Với ảnh 16:9 điều đó cắt mất ~2/3 bề ngang — kể cả nhân vật. Thay vì sửa
+bốn chỗ, lúc nhập tạo một BẢN LÀM VIỆC đúng kích thước khung: ảnh nguyên vẹn trên nền
+là chính nó làm mờ (FFmpeg tại máy). `scene.imagePath` trỏ bản làm việc, nên mọi thứ
+phía sau không đổi một dòng. Gần 9:16 (≤12%) dùng nguyên; `image_fit` cover/contain để
+người dùng quyết. Không bao giờ kéo giãn; bản gốc không bị ghi đè.
+
+## QĐ-095 — Khoá clip mang ảnh nhập, nhưng chỉ khi có ảnh nhập
+
+Khoá idempotency của clip gồm model, prompt, thời lượng, `retryCount` — KHÔNG có ảnh.
+Thay ảnh nhập của một cảnh VIDEO_AI sẽ làm bước video trả lại clip cũ dựng từ ảnh cũ.
+`videoKeyVariant(scene)` thêm `|img:<imageAssetId>` khi và chỉ khi cột đó có giá trị:
+mọi cảnh V1 (null) giữ nguyên khoá cũ, nên không clip V1 nào bị mua lại vì thay đổi này.
+Thay ảnh còn bỏ `videoPath` của clip cũ — và UI hỏi xác nhận, nói rõ clip mới sẽ tốn tiền.
+
+## QĐ-096 — "Tạo lại ảnh" không có hiệu lực trên ảnh nhập
+
+Nút cũ tăng `retryCount` rồi xếp job ảnh. Trên cảnh ảnh nhập, job ảnh trả lại đúng ảnh
+nhập ($0) — nhưng `retryCount` tăng đã đổi khoá CLIP, nên lần chạy sau MUA LẠI clip vô
+ích. Nay bị từ chối với hướng dẫn: muốn ảnh AI thì "Bỏ ảnh nhập" trước (dự toán sẽ báo
+WILL_CREATE). Không có đường nào thay ảnh người dùng đưa bằng ảnh AI mà họ không yêu cầu.
+
+## QĐ-097 — Ghép ảnh theo tên file: hiện trước, không đoán
+
+Mode B nhận nhiều ảnh cho một dự án có sẵn và ghép theo số cảnh trong TÊN FILE
+(`scene-01`, `01`, `s1`, `cảnh-2`…). Tên không có số → UNMAPPED; hai file một cảnh →
+CONFLICT và không dùng file nào; cảnh không tồn tại → NO_SUCH_SCENE. Bảng File → Cảnh
+hiện trước; server tính lại mapping bằng CÙNG hàm thuần khi xác nhận, nên client không
+thể tự chỉ định file nào vào cảnh nào. Cảnh đã có ảnh chỉ bị thay khi tick xác nhận.
+Tải storyboard từ trình duyệt đi vào thư mục staging rồi qua ĐÚNG bộ quét cũ — không có
+importer thứ hai.
+
+## QĐ-098 — Keyframe đã khai báo mà mất file: bước video DỪNG trước router
+
+Test mới "ảnh nhập của cảnh VIDEO_AI bị xoá" cho thấy bước ảnh dừng đúng nhưng
+`generateSceneVideo` vẫn đi tiếp: với model không cần ảnh nó tạo clip text-to-video của
+thứ khác; với Runway thì adapter mới từ chối — SAU khi tiền đã được giữ chỗ. Nay cảnh có
+`imagePath` mà file không còn thì dừng ngay đầu bước video, không định tuyến, không giữ
+chỗ, không POST, lỗi không thử lại. Cảnh không khai báo keyframe (text-to-video hợp lệ)
+không bị ảnh hưởng.
+
+`run-real-multi-batch.ts` nhận `--source --name --expect-videos/-scenes/-local/-video-ai
+--max-per-video --max-batch --approved-estimate`; mặc định giữ nguyên lô V1.

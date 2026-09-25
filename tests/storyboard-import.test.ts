@@ -801,7 +801,12 @@ describe("ZIP end-to-end, định tuyến AUTO, ghim hợp lệ, và chạy lạ
     });
     expect(scenes[0]!.imageSource).toBe("IMPORTED");
     expect(fs.existsSync(toAbsolute(scenes[0]!.imagePath!))).toBe(true);
-    expect(fs.readFileSync(toAbsolute(scenes[0]!.imagePath!))).toEqual(PNG_1X1);
+    // The ORIGINAL is kept byte for byte as the IMPORTED asset. The scene uses a
+    // 9:16 working copy, because a square picture would otherwise lose its sides
+    // to the downstream centre crop.
+    const asset = await prisma.asset.findUniqueOrThrow({ where: { id: scenes[0]!.imageAssetId! } });
+    expect(asset.source).toBe("IMPORTED");
+    expect(fs.readFileSync(toAbsolute(asset.filePath))).toEqual(PNG_1X1);
     expect(scenes[1]!.imageSource).toBe("GENERATED");
   });
 

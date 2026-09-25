@@ -1,0 +1,72 @@
+{
+  "video_id": "import-5",
+  "video_title": "Break the ice (5 ảnh nhập sẵn)",
+  "characters": [
+    {
+      "character_id": "max",
+      "character_name": "Max"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 5,
+      "visual_description": "Max alone against a plain light grey background, shoulders squared.",
+      "character_action": "Max closes his eyes for a moment, then gives one small nod.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Right. I will just say hello.\"",
+      "subtitle": "Right. I will just say hello.",
+      "image_file": "scene-01.png",
+      "motion_mode": "VIDEO_AI",
+      "priority": "HIGH"
+    },
+    {
+      "scene_number": 2,
+      "duration": 4,
+      "visual_description": "A plain shot of Max from the shoulders up, mouth closed, eyes flicking sideways.",
+      "character_action": "Max says nothing at all.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"...\"",
+      "subtitle": "...",
+      "image_file": "scene-02.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 3,
+      "duration": 4,
+      "visual_description": "Max looks down at his cup, then up again. Plain background.",
+      "character_action": "Max turns the cup once in his hands.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"The cup is very interesting.\"",
+      "subtitle": "The cup is very interesting.",
+      "image_file": "scene-03.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 4,
+      "duration": 5,
+      "visual_description": "Max stands against a plain warm background and grins.",
+      "character_action": "Max raises one hand in a small wave.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Nice cup.\"",
+      "subtitle": "Nice cup.",
+      "image_file": "scene-04.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 5,
+      "duration": 4,
+      "visual_description": "Max laughs, shoulders dropping. Plain background, nobody else in shot.",
+      "character_action": "Max laughs once and relaxes.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Break the ice means to start a conversation.\"",
+      "subtitle": "Break the ice = start a conversation.",
+      "image_file": "scene-05.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    }
+  ]
+}

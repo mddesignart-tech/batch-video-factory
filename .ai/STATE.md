@@ -1,7 +1,17 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-25
-**Cột mốc hiện tại:** **BATCH VIDEO FACTORY V1 = RELEASED + GITHUB RELEASE PUBLISHED.** Tag
+**Cập nhật:** 2026-09-25 (Import Storyboard đầy đủ — sau V1)
+**Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
+
+```
+FIRST REAL STORYBOARD PRODUCTION RUN: PASSED   (2026-09-25, lô 62e9322b)
+actual $0,400067 / authorized $0,46
+Image API POST 0 · Video API POST 1 · Voice POST 5
+Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
+Release: batch-video-factory-v1.1.0
+```
+
+Trước đó: **BATCH VIDEO FACTORY V1 = RELEASED + GITHUB RELEASE PUBLISHED.** Tag
 `batch-video-factory-v1.0.0`. Xem `RELEASE_NOTES_V1.md`.
 
 ```
@@ -17,6 +27,91 @@ PUSH STATUS:        OK — không force, không viết lại lịch sử
 ```
 
 Commit sau tag (tài liệu, fixture giả) nằm trên `main` sau `e5c8b73`; tag không đổi.
+
+## IMPORT STORYBOARD / BATCH FROM SCENES (sau V1, đề xuất V1.1.0) — 2026-09-25, $0
+
+```
+FEATURE:     IMPORT STORYBOARD / BATCH FROM SCENES
+STATUS:      IMPLEMENTED + chạy thật PASSED (tag batch-video-factory-v1.1.0)
+QUY TẮC:     IMPORTED IMAGE = REUSE = $0 IMAGE API COST
+```
+
+**SUPPORTED INPUT.** A: từng cảnh (trang dự án → khối "Ảnh cảnh": Chọn/Thay ảnh, Bỏ ảnh
+nhập, Dùng ảnh trước). B: nhiều ảnh / cả thư mục vào dự án có sẵn, ghép theo TÊN FILE,
+xem bảng File → Cảnh trước khi xác nhận (`src/domain/scene-image-mapping.ts`). C:
+storyboard JSON/CSV (+ ảnh) — gõ đường dẫn, hoặc TẢI LÊN thư mục / nhiều file / .zip từ
+trình duyệt (staging `data/imports/<uuid>`, rồi đi qua ĐÚNG bộ quét cũ). Nhiều video một
+lần. Định dạng giữ nguyên schema V1 + trường mới `image_fit`. Hướng dẫn:
+`docs/IMPORT_STORYBOARD.md`, ví dụ `examples/storyboard-import-5/`.
+
+**ASSET SOURCE TYPES.** `Asset.source` GENERATED | IMPORTED (+ `originalFilename`,
+`mimeType`, `width`, `height`, `sha256`). `Scene.imageSource` GENERATED | IMPORTED vẫn là
+nguồn sự thật của ảnh đang dùng; `Scene.imageAssetId` trỏ Asset nhập đang dùng. Preflight
+mỗi cảnh: IMPORTED · REUSED · WILL_CREATE · NONE · MISSING.
+
+**IMAGE API SKIP LOGIC.** `generateSceneImage`: IMPORTED + file còn → trả file, không định
+tuyến; IMPORTED + file mất → DỪNG, không mua thay. Dự toán: `hasSuppliedKeyframe` (nhập) và
+`hasExistingImage` (AI đã mua) → $0, REUSE. "Tạo lại ảnh" bị từ chối trên cảnh ảnh nhập
+(trước đây nó tăng `retryCount` → đổi khoá CLIP → mua lại clip vô ích). Module
+`imported-image.ts` không có đường import nào tới provider (tách `sniffImageType` ra
+`src/lib/image-sniff.ts`).
+
+**PREFLIGHT.** Đếm IMAGE/VIDEO/VOICE API POST, IMPORTED, tiền ảnh; trang `/import` có khối
+"Ảnh — nhập sẵn thì không gọi Image API"; `production-preflight.ts` in cùng các số.
+
+**RESUME.** Ảnh nhập giữ nguyên asset + file; test E (render hỏng → resume): POST ảnh/
+video/giọng +0, CostEntry +0, `imageAssetId`/`imagePath` không đổi, rồi ra MP4.
+
+**COST GUARD.** Ảnh nhập không bao giờ vào `runProviderJob` → không reservation, không
+CostEntry, Asset `actualCost` 0. Thay ảnh → clip cũ bị bỏ; `videoKeyVariant` thêm
+`|img:<assetId>` CHỈ khi có ảnh nhập → cảnh V1 giữ nguyên khoá, không mua lại clip V1.
+
+**KHUNG HÌNH.** Gần 9:16 (≤12%) dùng nguyên; khác tỉ lệ → bản làm việc 1080x1920, ảnh
+nguyên vẹn trên nền mờ (FFmpeg tại máy). `image_fit` auto/cover/contain. Bản gốc giữ nguyên.
+
+**BẢO MẬT.** Đuôi + magic bytes + giải mã thật 1 khung; ≤40 MB/ảnh; staging chặn `..`,
+chỉ nhận .json .csv .png .jpg .jpeg .webp .zip; body server action 500 MB.
+
+**REAL PREFLIGHT (chỉ đọc, $0)** `examples/storyboard-import-5`, giá thật:
+
+```
+Scenes 5 · Imported/Reused 5 · Will Create 0 · Image API POST 0 · Image cost $0
+4 LOCAL_MOTION + 1 VIDEO_AI (runway/h3_max) · Video POST 1 · Voice POST 5
+voice $0.0001 + video $0.40 + dự phòng $0.012 = $0.4121   (trước đây +5×$0.048 = $0.6521)
+HỎNG duy nhất: ngân sách dự án còn $0.387074 < $0.4121  — quyết định của người vận hành
+ProviderJob 0 · CostReservation 0 · chi thật 0
+```
+
+**UI test thật** (server QA trên DB nháp `data/.ui-qa`, mock): tải thư mục lên `/import` →
+0 lỗi, 5 IMPORTED, IMAGE API POST 0; trang dự án: Mode B với ảnh 16:9 → bảng ghép, xác
+nhận thay, bản làm việc nền mờ đúng, 0 ProviderJob; "Tạo lại ảnh" bị từ chối, 0 job.
+
+**Migration** `20260925000000_imported_image_assets` đã áp lên `data/app.db` (sao lưu trước ở
+`backups/app-before-imported-image-assets-*.db`); ledger vẫn $7,612926.
+
+Xem QĐ-093 → QĐ-098.
+
+**✅ LẦN CHẠY STORYBOARD THẬT ĐẦU TIÊN — COMPLETED (2026-09-25).** Lô `62e9322b`, project
+`70c3a4a0`, "Break the ice (5 ảnh nhập sẵn)". Người dùng nâng hạn mức tổng $8,00 → $8,08 và
+duyệt trần lô $0,46.
+
+```
+5 ảnh IMPORTED -> REUSE · Image API POST 0 · tiền ảnh $0
+1 clip runway/h3_max:768x1280 $0,400000 (511 -> 471 credit) · 5 giọng $0,000067
+TỔNG THẬT $0,400067 (dự toán $0,412100) · còn trong quyền chi $0,059933
+6 ProviderJob · 0 retry · 0 trùng · reservation treo 0 · token null
+MP4 final_d86d0bd4.mp4 · 22,000s · 1080x1920 · 30fps · h264+aac · không đoạn đen
+Hạn mức tổng $8,08 · đã chi $8,012993 · còn $0,067007
+```
+
+**Chuẩn bị (lịch sử):** dự toán giá thật
+$0,412100 (ảnh $0 · clip h3_max $0,40 · giọng $0,0001 · dự phòng $0,012). Ngân sách dự án
+còn $0,387074 → **thiếu $0,025026** để phủ dự toán; trần đề xuất (+10%) $0,46 cần thêm
+$0,072926. Chưa nâng hạn mức, chưa tạo lô trong DB production (lệnh preflight của
+`run-real-multi-batch.ts` với AI_MOCK_MODE=false bị bộ phân loại quyền chặn — người dùng tự
+chạy). Không gọi API trả phí.
+
+---
 
 ## V1.0.0 — lô thật 2 video đầu tiên, 2026-09-25
 

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { DIRS, projectSubdir, toRelative, uuidFilename } from "@/lib/paths";
+import { DIRS, toRelative, uuidFilename } from "@/lib/paths";
 import { readZipFile, ZipError, type ZipEntry } from "@/lib/zip";
 import {
   hasAllowedImageExtension,
@@ -16,6 +16,12 @@ import {
 import { sha256, sha256Bytes } from "@/lib/crypto";
 import { toAbsolute } from "@/lib/paths";
 import { classifyScene, assignSpendPriority } from "./complexity";
+import {
+  attachImportedImage,
+  ImportImageError,
+  inspectImageBytes,
+  storeImportedImage,
+} from "./imported-image";
 import {
   characterReadiness,
   findCharacterByName,
@@ -569,7 +575,18 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
             ),
           );
         } else {
-          supplied += 1;
+          // The name matched; now prove it is a picture. An `.png` holding HTML,
+          // a truncated file or a 60 MB poster is refused HERE, per scene and
+          // per file, before anything is written - never discovered at render.
+          try {
+            await inspectImageBytes(asset.read(), asset.label);
+            supplied += 1;
+          } catch (err) {
+            if (!(err instanceof ImportImageError)) throw err;
+            issues.push(issue("error", err.code, err.message, at));
+            asset = null;
+            missing += 1;
+          }
         }
       } else {
         missing += 1;
@@ -955,18 +972,25 @@ export async function materialiseImport(
           complexity: resolved.complexity,
         }).priority;
 
-      let imagePath: string | null = null;
-      if (resolved.asset) {
-        const destination = path.join(
-          projectSubdir(project.id, "images"),
-          uuidFilename(path.extname(resolved.asset.label) || ".png"),
-        );
-        fs.writeFileSync(destination, resolved.asset.read());
-        imagePath = toRelative(destination);
-        copiedImages += 1;
-      }
+      // The picture is stored and recorded BEFORE the scene exists, so a file
+      // that fails here never leaves a scene claiming an image it has not got.
+      // `storeImportedImage` re-inspects the bytes, keeps the original, writes a
+      // working copy when the shape is far from the frame, and records an Asset
+      // with source IMPORTED - no provider is anywhere on this path.
+      const stored = resolved.asset
+        ? await storeImportedImage({
+            projectId: project.id,
+            sceneId: null,
+            bytes: resolved.asset.read(),
+            originalFilename: resolved.asset.label,
+            fit: scene.imageFit,
+            via: "storyboard",
+          })
+        : null;
+      const imagePath = stored?.imagePath ?? null;
+      if (stored) copiedImages += 1;
 
-      await prisma.scene.create({
+      const createdScene = await prisma.scene.create({
         data: {
           projectId: project.id,
           sceneNumber: scene.sceneNumber,
@@ -1023,9 +1047,11 @@ export async function materialiseImport(
           videoModelPinned: Boolean(scene.videoProvider && scene.videoModel),
           imagePath,
           imageSource: imagePath ? "IMPORTED" : "GENERATED",
+          imageAssetId: stored?.asset.id ?? null,
           status: imagePath ? "image_ready" : "pending",
         },
       });
+      if (stored) await attachImportedImage(createdScene.id, stored);
       startSeconds += scene.duration;
     }
 

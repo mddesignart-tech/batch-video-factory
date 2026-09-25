@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-25 — **V1.0.0 đã phát hành** (tag `batch-video-factory-v1.0.0`)
+**Cập nhật:** 2026-09-25 — baseline **v1.1.0** (storyboard thật PASSED); v1.0.0 không đổi
 
 ---
 
@@ -17,6 +17,20 @@ $1,00. Resume $0, 0 POST. Xem `RELEASE_NOTES_V1.md` và `.ai/STATE.md`.
 
 **Ngân sách dự án còn $0,387074 / $8,00.** Bất kỳ lô thật nào tiếp theo cần bạn
 duyệt tiền, và có thể cần nâng hạn mức toàn cục trước.
+
+## ✅ FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0 (2026-09-25)
+
+```
+FIRST REAL STORYBOARD PRODUCTION RUN: PASSED   (2026-09-25, lô 62e9322b)
+actual $0,400067 / authorized $0,46
+Image API POST 0 · Video API POST 1 · Voice POST 5
+Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
+Release: batch-video-factory-v1.1.0
+```
+
+Import Storyboard / Batch From Scenes: IMPLEMENTED và đã chạy thật. Không kéo feature mới
+vào baseline này. Hạn mức tổng $8,08, còn **$0,067** — lô trả phí tiếp theo cần người dùng
+nâng hạn mức và duyệt.
 
 ## V1.1 — gọn, không đổi kiến trúc
 

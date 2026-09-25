@@ -238,6 +238,20 @@ function routeFor(
  * key (so we resume the in-flight vendor job), while an explicit "regenerate"
  * from the operator bumps the counter and legitimately buys a new one.
  */
+/**
+ * The part of a clip's idempotency key that is not the prompt or the model.
+ *
+ * Duration is billable, so it is always in. The imported keyframe is in only
+ * when there is one: a clip is made FROM its keyframe, so replacing an imported
+ * image must make the old clip stop matching - otherwise the scene would keep a
+ * clip of a picture that is no longer there. Scenes without an imported asset
+ * (every V1 scene) keep exactly the key they always had, so no finished V1 clip
+ * is ever re-bought because of this.
+ */
+export function videoKeyVariant(scene: { duration: number; imageAssetId?: string | null }): string {
+  return scene.imageAssetId ? `${scene.duration}s|img:${scene.imageAssetId}` : `${scene.duration}s`;
+}
+
 export function idempotencyKey(opts: {
   sceneId: string;
   kind: string;
@@ -1564,7 +1578,7 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
       model: scene.videoModel,
       prompt: videoPrompt,
       generation: scene.retryCount,
-      variant: `${scene.duration}s`,
+      variant: videoKeyVariant(scene),
     });
     const settled = await prisma.providerJob.findUnique({
       where: { idempotencyKey: settledKey },
@@ -1584,6 +1598,26 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
         message: `Cảnh ${scene.sceneNumber} đã có clip đã trả tiền, dùng lại, không định tuyến lại.`,
       });
       return stored.filePath;
+    }
+  }
+
+  // A scene that DECLARES a keyframe whose file is gone must stop here - before
+  // the router, before any reservation, before a vendor sees a request. Letting
+  // it through meant either a text-to-video clip of the wrong thing (a model
+  // that does not need an image) or a failure inside the adapter after money
+  // was already held. For an imported picture this is the only honest answer:
+  // the person's image is missing, so there is nothing to animate.
+  if (scene.imagePath) {
+    const declared = path.join(projectSubdir(project.id, "images"), path.basename(scene.imagePath));
+    if (!fs.existsSync(declared)) {
+      throw new GenerationError(
+        `Cảnh ${scene.sceneNumber}: ảnh keyframe "${scene.imagePath}" không còn trên đĩa` +
+          (scene.imageSource === "IMPORTED" ? " (ảnh nhập)" : "") +
+          `. Không tạo clip. Nhập lại hoặc tạo lại ảnh cho cảnh này trước.`,
+        "video",
+        "keyframe",
+        false,
+      );
     }
   }
 
@@ -1627,7 +1661,7 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
       // Duration is billable and is not implied by the model id, so it has to
       // be part of the key: a 5s and a 10s clip of the same scene are two
       // different purchases, not one job to resume.
-      variant: `${scene.duration}s`,
+      variant: videoKeyVariant(scene),
       outputPath,
       create: async () =>
         provider.createVideo({

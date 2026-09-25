@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Ban, Check, Image as ImageIcon, Mic, Video } from "lucide-react";
 import { ImageReview, type ImageModelChoice } from "./image-review";
+import { SceneImagePanel } from "./scene-image-panel";
 import {
   Badge,
   Card,
@@ -63,6 +64,10 @@ export interface SceneView {
   estimatedCost: number;
   actualCost: number;
   imagePath: string | null;
+  /** GENERATED or IMPORTED. IMPORTED = REUSE = $0 Image API. */
+  imageSource: string;
+  /** The person's motion instruction: AUTO, LOCAL_MOTION or VIDEO_AI. */
+  motionMode: string;
   videoPath: string | null;
   audioPath: string | null;
   qualityScore: number | null;
@@ -186,6 +191,26 @@ export function Storyboard({
                         <Badge tone="brand">Ưu tiên</Badge>
                       ) : null}
                       {scene.skipped ? <Badge tone="danger">Bỏ qua</Badge> : null}
+                      <Badge
+                        tone={
+                          scene.imageSource === "IMPORTED" && scene.imagePath
+                            ? "ok"
+                            : scene.imagePath
+                              ? "info"
+                              : "warn"
+                        }
+                      >
+                        {scene.imageSource === "IMPORTED" && scene.imagePath
+                          ? "Ảnh nhập"
+                          : scene.imagePath
+                            ? "Ảnh AI"
+                            : "Chưa có ảnh"}
+                      </Badge>
+                      {scene.motionMode !== "AUTO" ? (
+                        <Badge tone={scene.motionMode === "VIDEO_AI" ? "brand" : "neutral"}>
+                          {scene.motionMode === "VIDEO_AI" ? "VIDEO_AI" : "LOCAL"}
+                        </Badge>
+                      ) : null}
                       {scene.approved ? <Badge tone="ok">Đã duyệt</Badge> : null}
                     </div>
                     <div className="mt-1.5 flex items-center gap-1.5 text-ink-600">
@@ -325,6 +350,15 @@ export function Storyboard({
 
           {/* RIGHT: scene settings */}
           <div className="p-4">
+            <SceneImagePanel
+              sceneId={selected.id}
+              sceneNumber={selected.sceneNumber}
+              imageSource={selected.imageSource}
+              hasImage={Boolean(selected.imagePath)}
+              motionMode={selected.motionMode}
+              hasClip={Boolean(selected.videoPath)}
+              onDone={setResult}
+            />
             <div className="mb-3 flex flex-wrap gap-1.5">
               <ActionButton
                 size="sm"
@@ -457,6 +491,16 @@ export function Storyboard({
                   </Field>
                   <Field label="Máy quay">
                     <Input name="camera" defaultValue={selected.camera} />
+                  </Field>
+                  <Field
+                    label="Chuyển động"
+                    hint="LOCAL_MOTION: FFmpeg tại máy, $0. VIDEO_AI: 1 clip Video AI từ ảnh cảnh (tính phí)."
+                  >
+                    <Select name="motionMode" defaultValue={selected.motionMode}>
+                      <option value="AUTO">Tự chọn</option>
+                      <option value="LOCAL_MOTION">LOCAL_MOTION</option>
+                      <option value="VIDEO_AI">VIDEO_AI</option>
+                    </Select>
                   </Field>
                   <Field label="Hiệu ứng âm thanh">
                     <Input

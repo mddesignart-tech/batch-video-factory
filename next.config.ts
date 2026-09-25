@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
   // The job worker is booted once from src/instrumentation.ts, which Next 15
   // loads automatically (no experimental flag needed).
   serverExternalPackages: ["@prisma/client", "ffmpeg-static", "ffprobe-static"],
+  // Storyboard images are uploaded through server actions. The 1 MB default
+  // refuses an ordinary 2 MB PNG, so the limit is raised to match what the
+  // import itself accepts (40 MB per image; one batch upload stays well under).
+  experimental: { serverActions: { bodySizeLimit: "500mb" } },
 };
 
 export default nextConfig;

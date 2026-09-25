@@ -23,6 +23,7 @@ import type { ScriptScore } from "@/domain/script";
 import { previewProjectCost } from "@/services/project-service";
 import { Storyboard } from "./storyboard";
 import { ProjectActions } from "./project-actions";
+import { ImportImagesCard } from "./import-images-card";
 import { CostPreview } from "./cost-preview";
 
 export const dynamic = "force-dynamic";
@@ -140,7 +141,18 @@ export default async function ProjectDetailPage({
             <Alert tone="info" title="Dự án chưa có kịch bản">
               Bấm &ldquo;Tạo lại kịch bản&rdquo; ở trên để sinh kịch bản mẫu.
             </Alert>
-          ) : (
+          ) : null}
+
+          {project.scenes.length > 0 ? (
+            <ImportImagesCard
+              projectId={project.id}
+              scenes={project.scenes
+                .filter((s) => !s.skipped)
+                .map((s) => ({ sceneNumber: s.sceneNumber, hasImage: Boolean(s.imagePath) }))}
+            />
+          ) : null}
+
+          {project.scenes.length === 0 ? null : (
             <Storyboard
               projectId={project.id}
               idiomPhrase={project.idiom.phrase}
@@ -168,6 +180,8 @@ export default async function ProjectDetailPage({
                 estimatedCost: scene.estimatedCost,
                 actualCost: scene.actualCost,
                 imagePath: scene.imagePath,
+                imageSource: scene.imageSource,
+                motionMode: scene.motionMode,
                 videoPath: scene.videoPath,
                 audioPath: scene.audioPath,
                 qualityScore: scene.qualityScore,

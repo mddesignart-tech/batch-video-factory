@@ -77,10 +77,19 @@ import type { Job } from "@prisma/client";
  */
 
 const RUNWAY_BASE = "https://api.dev.runwayml.com/v1";
-const MAX_PER_VIDEO = 0.7;
-const MAX_BATCH = 1.0;
+// Every figure below defaults to the first real batch (examples/batch-real-2)
+// and can be stated on the command line for another approved storyboard. They
+// are what the operator APPROVED, so they are passed in - never inferred.
+const MAX_PER_VIDEO = Number(arg("max-per-video", "0.7"));
+const MAX_BATCH = Number(arg("max-batch", "1.0"));
 /** What the operator approved. A drift from this is a stop, not a rounding note. */
-const APPROVED_ESTIMATE = 0.9066;
+const APPROVED_ESTIMATE = Number(arg("approved-estimate", "0.9066"));
+const EXPECT = {
+  videos: Number(arg("expect-videos", "2")),
+  scenes: Number(arg("expect-scenes", "10")),
+  local: Number(arg("expect-local", "9")),
+  videoAi: Number(arg("expect-video-ai", "1")),
+};
 /** The three the operator fixed for this run. Nothing else may be called. */
 const APPROVED = {
   image: "openai/gpt-image-2:medium",
@@ -219,16 +228,16 @@ async function main(): Promise<void> {
   const validated = await validateImport(scan);
   const errors = validated.issues.filter((i) => i.level === "error");
   must("Khong loi validate", errors.length === 0, `${errors.length} loi`);
-  must("Dung 2 video", validated.videos.length === 2, `${validated.videos.length}`);
+  must(`Dung ${EXPECT.videos} video`, validated.videos.length === EXPECT.videos, `${validated.videos.length}`);
   if (failures > 0) return finish();
 
   const totalScenes = validated.videos.reduce((n, v) => n + v.scenes.length, 0);
   const totalAi = validated.videos.reduce((n, v) => n + v.videoAiScenes, 0);
   const totalLocal = validated.videos.reduce((n, v) => n + v.localMotionScenes, 0);
   const totalAuto = validated.videos.reduce((n, v) => n + v.autoScenes, 0);
-  must("Dung 10 canh", totalScenes === 10, `${totalScenes}`);
-  must("Dung 9 LOCAL_MOTION", totalLocal === 9, `${totalLocal}`);
-  must("Dung 1 VIDEO_AI", totalAi === 1, `${totalAi}`);
+  must(`Dung ${EXPECT.scenes} canh`, totalScenes === EXPECT.scenes, `${totalScenes}`);
+  must(`Dung ${EXPECT.local} LOCAL_MOTION`, totalLocal === EXPECT.local, `${totalLocal}`);
+  must(`Dung ${EXPECT.videoAi} VIDEO_AI`, totalAi === EXPECT.videoAi, `${totalAi}`);
   must("Khong canh nao de AUTO", totalAuto === 0, `${totalAuto}`);
 
   // ------------------------------------------------------- 2. the cast
@@ -263,7 +272,7 @@ async function main(): Promise<void> {
     existingBatchId ||
     (
       await materialiseImport(validated, {
-        batchName: "Lo that 2 video — Bite the bullet + All ears",
+        batchName: arg("name", "Lo that 2 video — Bite the bullet + All ears"),
         maxCostPerVideo: MAX_PER_VIDEO,
         maxCostForBatch: MAX_BATCH,
       })
@@ -444,7 +453,7 @@ async function main(): Promise<void> {
   } else await approveAuthorization({
     batchId,
     authorizedMaxSpend: MAX_BATCH,
-    note: "First real multi-video batch, operator approved $1.00 / $0.70 per video",
+    note: `Real batch from ${source}, operator approved $${MAX_BATCH} / $${MAX_PER_VIDEO} per video`,
     // Scene 3 names no model: the LOW_AUTO grant is what selects h3_max, and
     // approving an amount is not the same as agreeing the router may choose.
     // The operator fixed the model for this run and the preflight they approved
@@ -875,7 +884,8 @@ async function report(
   note("delta (actual - estimated)", money(round(batchTotal - APPROVED_ESTIMATE)));
   note("con lai trong quyen chi", money(round(MAX_BATCH - batchTotal)));
   console.log("");
-  note("ngan sach du an truoc", money(round(8 - before.spend)));
+  // Read, not assumed: the cap is a setting the operator can raise.
+  note("ngan sach du an truoc", money(round(cap.cap - before.spend)));
   note("ngan sach du an sau", money(cap.remaining));
   note("Runway credits truoc/sau", `${creditsBefore ?? "?"} -> ${creditsAfter ?? "?"}`);
   note(

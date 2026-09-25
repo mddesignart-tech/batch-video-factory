@@ -54,6 +54,12 @@ export interface StoryboardScene {
   subtitle: string;
   /** Relative to the storyboard's own folder. Null means "generate one". */
   imageFile: string | null;
+  /**
+   * How a supplied picture fills the frame. `auto` keeps a near-portrait
+   * picture as it is and puts any other shape whole over a blurred copy of
+   * itself; `cover` crops to fill; `contain` always fits whole. Never stretched.
+   */
+  imageFit: "auto" | "cover" | "contain";
   motionMode: MotionMode;
   /** Both null, or both set. A provider without a model is not a pin. */
   videoProvider: string | null;
@@ -272,6 +278,7 @@ const RawSceneSchema = z
     camera: z.unknown().optional(),
     subtitle: z.unknown().optional(),
     image_file: z.unknown().optional(),
+    image_fit: z.unknown().optional(),
     motion_mode: z.unknown().optional(),
     video_provider: z.unknown().optional(),
     video_model: z.unknown().optional(),
@@ -477,6 +484,19 @@ export function normaliseScene(
     imageFile = rawImage.replace(/\\/g, "/");
   }
 
+  const rawFit = text(raw.image_fit).toLowerCase() || "auto";
+  if (!["auto", "cover", "contain"].includes(rawFit)) {
+    issues.push(
+      err(
+        "image_fit_invalid",
+        `image_fit "${text(raw.image_fit)}" không hợp lệ. Chỉ nhận: auto, cover, contain.`,
+        at,
+      ),
+    );
+    return { scene: null, issues };
+  }
+  const imageFit = rawFit as "auto" | "cover" | "contain";
+
   // A provider without a model is not a pin, it is half a sentence - and half a
   // pin resolves to "the router picks", which is not what was written down.
   const videoProvider = text(raw.video_provider) || null;
@@ -546,6 +566,7 @@ export function normaliseScene(
       camera,
       subtitle: text(raw.subtitle),
       imageFile,
+      imageFit,
       motionMode,
       videoProvider,
       videoModel,

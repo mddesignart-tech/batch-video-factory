@@ -235,10 +235,19 @@ async function main(): Promise<void> {
   must("Khong con loi validate", errors.length === 0, `${errors.length} loi`);
   for (const e of errors) console.log(`      LOI  [${e.videoId ?? "-"}] ${e.code}: ${e.message}`);
   for (const w of warnings) console.log(`      CB   [${w.videoId ?? "-"}] ${w.code}: ${w.message}`);
-  must("Dung 2 video", validated.videos.length === 2, `${validated.videos.length} video`);
+  // The two-video count belongs to the V1 acceptance fixture. Any other source
+  // states its own expectation, or states none.
+  const expectVideos = process.argv.includes("--expect-videos")
+    ? Number(arg("expect-videos"))
+    : SOURCE === "examples/batch-real-2"
+      ? 2
+      : null;
+  if (expectVideos !== null) {
+    must(`Dung ${expectVideos} video`, validated.videos.length === expectVideos, `${validated.videos.length} video`);
+  }
 
   const created = await materialiseImport(validated, {
-    batchName: "Production preflight 2 video",
+    batchName: `Production preflight ${validated.videos.length} video`,
     maxCostPerVideo: MAX_PER_VIDEO,
     maxCostForBatch: MAX_BATCH,
   });
@@ -253,13 +262,21 @@ async function main(): Promise<void> {
     console.log(`\n  ${v.lifecycle.padEnd(10)} ${v.title}`);
     note("canh / giay", `${v.sceneCount} / ${seconds.toFixed(1)}s`);
     note("LOCAL_MOTION / VIDEO_AI", `${v.localMotionCount} / ${v.videoAiCount}`);
-    note("anh", `${v.counts.imageBuy} tao moi, ${v.counts.imageReuse} dung lai`);
+    note(
+      "anh",
+      `${v.counts.imageBuy} tao moi, ${v.counts.imageReuse} dung lai (${v.counts.imageImported} IMPORTED)`,
+    );
+    note(
+      "POST du kien anh/clip/giong",
+      `${v.counts.imagePosts} / ${v.counts.videoPosts} / ${v.counts.voicePosts}`,
+    );
+    note("tien anh", `$${v.breakdown.image.toFixed(6)}`);
     note("clip", `${v.counts.videoBuy} tao moi, ${v.counts.videoReuse} dung lai`);
     note("giong", `${v.counts.voiceBuy} tao moi, ${v.counts.voiceReuse} dung lai`);
     for (const s of v.scenes) {
       console.log(
         `      #${s.sceneNumber} ${String(s.duration).padStart(2)}s ` +
-          `${s.motionSource.padEnd(12)} anh=${s.plan.image.padEnd(11)} ` +
+          `${s.motionSource.padEnd(12)} anh=${s.imageSource.padEnd(11)} ` +
           `clip=${s.plan.video.padEnd(11)} giong=${s.plan.voice.padEnd(11)} ` +
           `${(s.videoModel ?? "-").padEnd(28)} ${money(s.estimatedCost)}`,
       );
@@ -383,6 +400,10 @@ async function main(): Promise<void> {
     "REUSE        anh/clip/giong",
     `${pre.counts.imageReuse} / ${pre.counts.videoReuse} / ${pre.counts.voiceReuse}`,
   );
+  note("IMPORTED (anh nhap san)", String(pre.counts.imageImported));
+  note("IMAGE API POST", String(pre.counts.imagePosts));
+  note("VIDEO API POST", String(pre.counts.videoPosts));
+  note("VOICE API POST", String(pre.counts.voicePosts));
   const totals = pre.videos.reduce(
     (acc, v) => ({
       text: acc.text + v.breakdown.text,

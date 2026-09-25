@@ -146,7 +146,7 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
             <Th>Nhân vật</Th>
             <Th>Camera</Th>
             <Th>Chuyển động</Th>
-            <Th>Keyframe</Th>
+            <Th>Nguồn ảnh</Th>
             <Th>Ảnh</Th>
             <Th>Clip</Th>
             <Th>Giọng</Th>
@@ -167,9 +167,7 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
                 </Badge>
               </Td>
               <Td>
-                <Badge tone={s.keyframe === "supplied" ? "ok" : "warn"}>
-                  {s.keyframe === "supplied" ? "existing" : "required"}
-                </Badge>
+                <Badge tone={IMAGE_SOURCE_TONE[s.imageSource]}>{s.imageSource}</Badge>
               </Td>
               <Td>
                 <PlanBadge plan={s.plan.image} />
@@ -208,6 +206,18 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
   );
 }
 
+/** IMPORTED = REUSE = $0 Image API. Only WILL_CREATE costs an image POST. */
+const IMAGE_SOURCE_TONE: Record<
+  "IMPORTED" | "REUSED" | "WILL_CREATE" | "NONE" | "MISSING",
+  "ok" | "info" | "warn" | "neutral" | "danger"
+> = {
+  IMPORTED: "ok",
+  REUSED: "ok",
+  WILL_CREATE: "warn",
+  NONE: "neutral",
+  MISSING: "danger",
+};
+
 export function PreflightPanel({
   preflight,
   batchId,
@@ -236,6 +246,34 @@ export function PreflightPanel({
         {preflight.videos.map((v) => (
           <VideoBlock key={v.projectId} video={v} />
         ))}
+
+        {/* ---- images first: the purchase an import exists to avoid ---- */}
+        <div className="rounded-lg border border-ink-800 p-3">
+          <h4 className="mb-2 text-sm font-medium">Ảnh — nhập sẵn thì không gọi Image API</h4>
+          <div className="grid gap-1 font-mono text-xs md:grid-cols-2">
+            <div>TOTAL SCENES: {preflight.totalScenes}</div>
+            <div>
+              IMAGES: <strong className="text-ok-500">{c.imageReuse} REUSE</strong> (
+              {c.imageImported} IMPORTED) · <strong>{c.imageBuy} CREATE</strong>
+            </div>
+            <div>
+              IMAGE API POST: <strong>{c.imagePosts}</strong>
+            </div>
+            <div>
+              IMAGE API COST:{" "}
+              <strong>
+                {formatUSD(preflight.videos.reduce((n, v) => n + v.breakdown.image, 0))}
+              </strong>
+            </div>
+            <div>VOICE API POST: {c.voicePosts}</div>
+            <div>VIDEO API POST: {c.videoPosts}</div>
+            <div>LOCAL_MOTION: {preflight.totalLocalMotion}</div>
+            <div>VIDEO_AI: {preflight.totalVideoAi}</div>
+            <div className="md:col-span-2">
+              ESTIMATED TOTAL COST: <strong>{formatUSD(preflight.estimatedTotal)}</strong>
+            </div>
+          </div>
+        </div>
 
         {/* ---- what this run will buy, and what it already has ---- */}
         <div className="rounded-lg border border-ink-800 p-3">

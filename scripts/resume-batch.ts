@@ -23,6 +23,7 @@ import {
   generateSceneVideo,
   generateSceneVoice,
   idempotencyKey,
+  videoKeyVariant,
 } from "@/services/generation";
 import { deriveSceneVideoFacts } from "@/services/low-auto-facts";
 import { lowAutoEligibility } from "@/domain/low-auto";
@@ -189,7 +190,7 @@ async function proveKeys(project: Project, scenes: Scene[]): Promise<KeyProof[]>
         model: scene.videoModel,
         prompt: derived.videoPrompt,
         generation: scene.retryCount,
-        variant: `${scene.duration}s`,
+        variant: videoKeyVariant(scene),
       });
       out.push(await classify(scene.sceneNumber, "video", scene.videoModel, key));
     }

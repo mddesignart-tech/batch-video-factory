@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { MOTION_MODES } from "@/domain/storyboard";
 import { z } from "zod";
 import { COMPLEXITIES, QUALITY_MODES, ROUTER_STRATEGIES } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
@@ -169,6 +170,8 @@ const SceneInput = z.object({
   routingMode: z.enum(ROUTER_STRATEGIES).optional(),
   videoProvider: z.string().optional(),
   videoModel: z.string().optional(),
+  /** The person's instruction for this scene's motion. See QĐ-066. */
+  motionMode: z.enum(MOTION_MODES).optional(),
 });
 
 export async function updateScene(
@@ -253,6 +256,19 @@ export async function regenerateSceneAsset(
 ): Promise<ActionResult> {
   const scene = await prisma.scene.findUnique({ where: { id: sceneId } });
   if (!scene) return { ok: false, message: "Không tìm thấy cảnh." };
+
+  // A supplied picture is never redrawn behind the person's back. "Regenerate"
+  // would only have bumped retryCount - which changes the CLIP's key too, so the
+  // next run would re-buy a clip for nothing - while handing back the same
+  // imported file. Removing the import is the explicit way to ask for AI.
+  if (kind === "image" && scene.imageSource === "IMPORTED") {
+    return {
+      ok: false,
+      message:
+        `Cảnh ${scene.sceneNumber} đang dùng ảnh nhập, không tạo lại bằng AI. ` +
+        `Muốn ảnh AI: bấm "Bỏ ảnh nhập" trước (lần chạy sau sẽ tạo và tính phí).`,
+    };
+  }
 
   await prisma.scene.update({
     where: { id: sceneId },

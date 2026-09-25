@@ -6,7 +6,7 @@ import type { QualityMode, VideoPlanStatus } from "@/domain/enums";
 import { confirmedProviders, spendStatus } from "./spend-guard";
 import { providerSpendBreakdown } from "./provider-budget";
 import { productionProviderNames, availableProviderNames } from "./provider-health";
-import { previewProjectCost } from "./project-service";
+import { fileOnDisk, previewProjectCost } from "./project-service";
 import {
   characterReadiness,
   CORE_BIBLE_FIELDS,
@@ -56,6 +56,14 @@ export interface ImportSceneLine {
   /** Null for a LOCAL_MOTION scene: there is no model, because there is no purchase. */
   videoModel: string | null;
   keyframe: "supplied" | "will-generate";
+  /**
+   * Where this scene's picture comes from, in the words the operator decides on:
+   * IMPORTED (supplied by a person, $0), REUSED (bought earlier and still on
+   * disk, $0), WILL_CREATE (one Image API POST), NONE (no picture needed),
+   * MISSING (an imported file that is no longer on disk - this scene will stop,
+   * it will NOT silently buy a replacement).
+   */
+  imageSource: "IMPORTED" | "REUSED" | "WILL_CREATE" | "NONE" | "MISSING";
   estimatedCost: number;
   /** Per asset: BUY (this run pays), REUSE (already owned), NONE (not needed). */
   plan: {
@@ -79,6 +87,16 @@ export type AssetPlan = "BUY" | "REUSE" | "NONE";
 export interface AssetCounts {
   imageBuy: number;
   imageReuse: number;
+  /** The part of `imageReuse` a person supplied. IMPORTED = REUSE = $0. */
+  imageImported: number;
+  /**
+   * Expected paid POSTs, per API. Image and video are one per BUY; voice is one
+   * per spoken line still without audio (one per scene when lines are not yet
+   * split, which is how every storyboard scene starts).
+   */
+  imagePosts: number;
+  videoPosts: number;
+  voicePosts: number;
   videoBuy: number;
   videoReuse: number;
   voiceBuy: number;
@@ -89,6 +107,10 @@ function emptyCounts(): AssetCounts {
   return {
     imageBuy: 0,
     imageReuse: 0,
+    imageImported: 0,
+    imagePosts: 0,
+    videoPosts: 0,
+    voicePosts: 0,
     videoBuy: 0,
     videoReuse: 0,
     voiceBuy: 0,
@@ -109,6 +131,8 @@ function assetPlan(needs: boolean, reuse: boolean): AssetPlan {
 }
 
 function addCounts(into: AssetCounts, line: ImportSceneLine["plan"]): void {
+  if (line.image === "BUY") into.imagePosts += 1;
+  if (line.video === "BUY") into.videoPosts += 1;
   if (line.image === "BUY") into.imageBuy += 1;
   if (line.image === "REUSE") into.imageReuse += 1;
   if (line.video === "BUY") into.videoBuy += 1;
@@ -374,6 +398,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     const plannedScenes: PlannedSceneRow[] = [];
 
     const counts = emptyCounts();
+    const imageWarnings: string[] = [];
 
     for (const row of estimate.scenes) {
       const scene = project.scenes.find((s) => s.sceneNumber === row.sceneNumber);
@@ -383,6 +408,40 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         voice: assetPlan(row.needs.voice, row.reuse.voice),
       };
       addCounts(counts, plan);
+      const importedOnDisk =
+        scene?.imageSource === "IMPORTED" ? fileOnDisk(scene.imagePath) : false;
+      const imageSource: ImportSceneLine["imageSource"] =
+        scene?.imageSource === "IMPORTED"
+          ? importedOnDisk
+            ? "IMPORTED"
+            : "MISSING"
+          : plan.image === "BUY"
+            ? "WILL_CREATE"
+            : plan.image === "REUSE"
+              ? "REUSED"
+              : "NONE";
+      if (imageSource === "IMPORTED") counts.imageImported += 1;
+      if (imageSource === "MISSING") {
+        // The estimator would price a new image here; the generator refuses
+        // instead. Say what will really happen, and do not count a POST that
+        // will never be sent.
+        if (plan.image === "BUY") {
+          counts.imageBuy -= 1;
+          counts.imagePosts -= 1;
+        }
+        imageWarnings.push(
+          `Cảnh ${row.sceneNumber}: ảnh nhập "${scene?.imagePath}" không còn trên đĩa. ` +
+            `Cảnh sẽ DỪNG chứ không tự mua ảnh thay thế — nhập lại ảnh cho cảnh này.`,
+        );
+      }
+      if (plan.voice === "BUY" && scene) {
+        const lines = await prisma.dialogueLine.findMany({
+          where: { sceneId: scene.id },
+          select: { status: true },
+        });
+        counts.voicePosts +=
+          lines.length > 0 ? lines.filter((l) => l.status !== "completed").length : 1;
+      }
       sceneLines.push({
         sceneNumber: row.sceneNumber,
         duration: scene?.duration ?? 0,
@@ -393,6 +452,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         camera: scene?.camera ?? "",
         videoModel: row.video ? `${row.video.provider}/${row.video.modelId}` : null,
         keyframe: scene?.imageSource === "IMPORTED" ? "supplied" : "will-generate",
+        imageSource,
         estimatedCost: round(row.estimatedCost, 6),
         plan,
       });
@@ -465,7 +525,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     const paidModels = paidModelsFor(estimate.scenes, confirmed);
     const unconfirmed = paidModels.filter((m) => !m.confirmed).map((m) => m.key);
 
-    const videoWarnings: string[] = [...estimate.errors];
+    const videoWarnings: string[] = [...estimate.errors, ...imageWarnings];
 
     // Budget verdict FIRST, exactly as `planBatch` orders it, and for the same
     // reason: when the per-video ceiling is what the router ran out of, every
@@ -809,6 +869,10 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     counts: videos.reduce((into, v) => {
       into.imageBuy += v.counts.imageBuy;
       into.imageReuse += v.counts.imageReuse;
+      into.imageImported += v.counts.imageImported;
+      into.imagePosts += v.counts.imagePosts;
+      into.videoPosts += v.counts.videoPosts;
+      into.voicePosts += v.counts.voicePosts;
       into.videoBuy += v.counts.videoBuy;
       into.videoReuse += v.counts.videoReuse;
       into.voiceBuy += v.counts.voiceBuy;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import {
   Alert,
@@ -26,6 +26,7 @@ import { SceneEditor } from "./scene-editor";
 import { CharacterEditor } from "./character-editor";
 import { PreflightPanel } from "./preflight-panel";
 import { reestimateImportBatch } from "@/app/actions/storyboard-import";
+import { stageStoryboardUpload } from "@/app/actions/scene-images";
 
 /**
  * Three buttons, in the order the money actually moves.
@@ -50,6 +51,43 @@ export function ImportForm() {
   const [batchId, setBatchId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+  const filesRef = useRef<HTMLInputElement>(null);
+
+  // Upload from the browser into a staging folder under data/, then run the
+  // SAME check a typed path gets. Nothing is imported yet.
+  async function onUpload(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    const form = new FormData();
+    for (const f of Array.from(list)) {
+      form.append("files", f, f.name);
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
+      form.append("paths", rel && rel.length > 0 ? rel : f.name);
+    }
+    setBusy("validate");
+    setMessage(null);
+    try {
+      const staged = await stageStoryboardUpload(form);
+      if (!staged.ok || !staged.source) {
+        setMessage({ tone: "danger", text: staged.message });
+        return;
+      }
+      setSource(staged.source);
+      const result = await validateStoryboardSource(staged.source);
+      setView(result);
+      setPreflight(null);
+      setBatchId(null);
+      setMessage(
+        result.ok
+          ? { tone: "ok", text: `${staged.message} Đã kiểm tra — xem kết quả bên dưới.` }
+          : { tone: "danger", text: `${staged.message} ${result.errorCount} lỗi cần sửa trước khi nhập.` },
+      );
+    } catch (e) {
+      setMessage({ tone: "danger", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function onValidate() {
     setBusy("validate");
@@ -102,8 +140,35 @@ export function ImportForm() {
           <CardTitle>Nguồn nhập</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={folderRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => void onUpload(e.currentTarget.files)}
+              {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+            />
+            <input
+              ref={filesRef}
+              type="file"
+              multiple
+              accept=".json,.csv,.zip,.png,.jpg,.jpeg,.webp"
+              className="hidden"
+              onChange={(e) => void onUpload(e.currentTarget.files)}
+            />
+            <Button variant="secondary" disabled={busy !== null} onClick={() => folderRef.current?.click()}>
+              TẢI LÊN THƯ MỤC STORYBOARD
+            </Button>
+            <Button variant="outline" disabled={busy !== null} onClick={() => filesRef.current?.click()}>
+              Chọn file (.json/.csv + ảnh, hoặc .zip)
+            </Button>
+            <span className="text-xs text-ink-500">
+              Có thể chứa nhiều video: video-01/storyboard.json + ảnh, video-02/…
+            </span>
+          </div>
           <Field
-            label="Đường dẫn thư mục, file .zip, hoặc một file .json/.csv"
+            label="…hoặc đường dẫn thư mục, file .zip, hoặc một file .json/.csv trên máy"
             hint="Ví dụ: F:\\storyboards\\batch-01 hoặc F:\\storyboards\\batch.zip"
           >
             <Input
