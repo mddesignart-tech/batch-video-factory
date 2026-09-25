@@ -57,7 +57,7 @@ export function decryptSecret(payload: string): string {
   ]).toString("utf8");
 }
 
-/** `sk-live-abcd1234EF92A` -> `****F92A`. Never reveals more than 4 chars. */
+/** `fake-api-key-for-test-only` -> `****ONLY`. Never reveals more than 4 chars. */
 export function maskSecret(plain: string): string {
   const tail = plain.trim().slice(-4).toUpperCase();
   return `****${tail}`;

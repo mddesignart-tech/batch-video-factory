@@ -377,7 +377,7 @@ describe("cost tracking", () => {
 describe("secret handling", () => {
   it("round-trips an encrypted key", () => {
     expect(encryptionAvailable()).toBe(true);
-    const secret = "sk-live-abcd1234EF92A";
+    const secret = "fake-api-key-for-test-only";
     const encrypted = encryptSecret(secret);
     expect(encrypted).not.toContain(secret);
     expect(decryptSecret(encrypted)).toBe(secret);
@@ -388,7 +388,7 @@ describe("secret handling", () => {
   });
 
   it("masks to only the last four characters", () => {
-    expect(maskSecret("sk-live-abcd1234EF92A")).toBe("****F92A");
+    expect(maskSecret("fake-api-key-for-test-only")).toBe("****ONLY");
   });
 
   it("rejects tampered ciphertext instead of returning garbage", () => {
@@ -400,7 +400,7 @@ describe("secret handling", () => {
 
   it("redacts anything key-shaped from logs", () => {
     const redacted = redact({
-      apiKey: "sk-live-abcdef123456",
+      apiKey: "fake-api-key-for-test-only",
       Authorization: "Bearer xyz",
       nested: { api_key: "secret" },
       safe: "hello",
@@ -411,8 +411,10 @@ describe("secret handling", () => {
     expect(redacted.safe).toBe("hello");
   });
 
+  // Detection BY SHAPE (prefix + long body), so the fixture must have that
+  // shape - but not the format of any real vendor's key. Clearly fake.
   it("redacts a key that appears inside a plain string", () => {
-    expect(redact("failed with sk-live-abcdefghijkl123")).toBe("[redacted]");
+    expect(redact("failed with api_FAKE_TEST_ONLY_NOT_A_KEY")).toBe("[redacted]");
   });
 });
 

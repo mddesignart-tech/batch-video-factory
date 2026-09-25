@@ -2705,8 +2705,20 @@ không đổi branch, không force, không viết lại lịch sử — một re
 70 commit nguyên vẹn. `master` ở máy track `origin/main`.
 
 Trước khi đẩy lên một repo **public**, đã quét **toàn bộ lịch sử** (không chỉ cây
-hiện tại): không `.env`, DB, media lớn hay chuỗi giống API key nào — chỉ chuỗi giả
-`sk-live-abcdefghijkl123` trong một test về che key.
+hiện tại): không `.env`, DB, media lớn hay chuỗi giống API key nào — chỉ vài chuỗi giả
+dạng `sk-live-…` trong test về che key (đã thay bằng placeholder rõ ràng, QĐ-091).
 
 Tag `batch-video-factory-v1.0.0` trỏ `e5c8b73`. Tài liệu viết sau khi push nằm ở
 commit sau đó và **không** kéo tag theo: tag đã công khai thì không di chuyển.
+
+## QĐ-091 — Dữ liệu giả trong test không được trông giống key thật
+
+Repo nay public. Test về mã hoá/che key dùng các chuỗi dạng `sk-live-…` — giả, nhưng
+đúng hình dạng key của một nhà cung cấp, nên bộ quét secret và người đọc đều không
+phân biệt được. Đã thay bằng `fake-api-key-for-test-only`; riêng test "che key nằm
+trong chuỗi" kiểm việc nhận diện **theo hình dạng**, nên dùng
+`api_FAKE_TEST_ONLY_NOT_A_KEY` — khớp luật che của logger, không khớp định dạng của
+hãng nào. Regex `/sk-live|Bearer /` trong `pipeline.e2e` là bộ dò rò rỉ, giữ nguyên.
+
+Các chuỗi giả cũ còn trong lịch sử Git; không viết lại lịch sử để xoá chúng vì chúng
+chưa bao giờ là secret. Commit housekeeping sau V1 — tag V1 không di chuyển.
