@@ -2881,3 +2881,28 @@ Paid UI test 2026-09-26 cần bấm TIẾP TỤC trên lô đã xong để chứ
 COPY PATH dùng `navigator.clipboard.writeText` kiểu `void` — trình duyệt từ chối thì im lặng, người
 dùng tưởng đã copy. Nay `CopyPathButton` dùng chung: thử Clipboard API, rồi textarea+execCommand,
 và luôn hiện ĐÃ COPY hoặc COPY LỖI.
+
+## QĐ-106 — QA cuối Import Storyboard: thứ tự cảnh chứng minh từ MP4; output tự sửa khi resume; mock tách khỏi số production
+
+Bộ `examples/storyboard-qa-distinct` (sinh bằng `scripts/make-qa-storyboard.ts`, FFmpeg tại máy):
+5 ảnh 1080x1920 khác nhau từng byte và từng màu (đỏ/xanh/vàng/tím/đen, chữ "SCENE n"), thời
+lượng không đều (4/5/3/4/4). `tests/storyboard-qa-distinct.test.ts` đi theo từng ảnh
+file → Asset (sha256, originalFilename, sceneId) → Scene → màu khung giữa mỗi cảnh trong MP4
+thật, mốc tính từ duration trong DB — không hard-code.
+
+Bug thật tìm thấy và sửa (không đụng routing):
+1. Resume bỏ qua video COMPLETED mà KHÔNG kiểm thư mục output — xoá subtitles.srt / final.mp4 /
+   metadata.json / thumbnail.jpg trong output thì không bao giờ được xuất lại. Nay
+   `missingOutputFiles` + xuất lại tại máy ($0); file phụ đề của DỰ ÁN mất → render lại tại máy.
+2. COPY PATH: `navigator.clipboard.writeText` có thể TREO (không resolve/reject, quyền đã
+   granted) → nút không báo gì. Nay hạn 1,5s rồi execCommand; thành công muộn vẫn đổi thành ĐÃ COPY.
+3. Dashboard: video làm hoàn toàn bằng provider mock bị đếm vào "Video hoàn thành" và làm loãng
+   "Chi TB / video". Nay `mockOnlyProjectIds` tách ra, hiện "(+N mock, không tính)".
+4. Bảng dự toán nhập không hiện tên file ảnh của từng cảnh — nay có `imageFilename`.
+
+Hành vi xác nhận (không phải lỗi): thiếu duration → cảnh báo `duration_defaulted`, 4s; thiếu
+motion_mode → AUTO; hai cảnh cùng tên file / cùng nội dung → hợp lệ, mỗi cảnh một Asset;
+VIDEO_AI không có ảnh nhập → preflight nói rõ WILL_CREATE 1 ảnh.
+
+Giới hạn công cụ, không phải app: kéo thả thư mục không giả lập được bằng JS (Chrome không cấp
+FileSystemEntry cho DataTransfer tổng hợp) — đường chọn nhiều file và ZIP đã kiểm trên UI thật.

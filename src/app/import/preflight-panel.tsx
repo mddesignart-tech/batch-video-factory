@@ -167,10 +167,19 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
                 {s.imagePath ? (
                   // Thumbnail of the picture this scene will use. Served from
                   // data/ by the media route; nothing is generated to show it.
-                  <img src={`/api/media/${s.imagePath}`} alt="" className="h-12 w-7 rounded object-cover" />
+                  <img
+                    src={`/api/media/${s.imagePath}`}
+                    alt={s.imageFilename ?? `Cảnh ${s.sceneNumber}`}
+                    className="h-12 w-7 rounded object-cover"
+                  />
                 ) : (
                   <span className="text-[11px] text-ink-500">—</span>
                 )}
+                {s.imageFilename ? (
+                  <span className="mt-0.5 block max-w-[7rem] truncate font-mono text-[10px] text-ink-400" title={s.imageFilename}>
+                    {s.imageFilename}
+                  </span>
+                ) : null}
               </Td>
               <Td>{s.duration}</Td>
               <Td className="text-xs">{s.characters.join(", ") || "—"}</Td>

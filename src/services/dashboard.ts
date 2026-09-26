@@ -7,8 +7,27 @@ import { providerSpendBreakdown } from "@/services/provider-budget";
  * ledger and the project rows - never estimated. Spend is REAL spend
  * (`estimated: false`, mock excluded).
  */
+/**
+ * Projects produced ONLY by the mock provider: at least one mock ProviderJob and
+ * no job at any real provider. They are real rows (a QA run on this database)
+ * but not production output, so they stay out of production counts and
+ * averages. A project with no provider job at all (every asset reused) is
+ * production and is kept.
+ */
+export async function mockOnlyProjectIds(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const jobs = await prisma.providerJob.groupBy({
+    by: ["projectId", "provider"],
+    where: { projectId: { in: ids } },
+  });
+  const real = new Set(jobs.filter((j) => j.provider !== "mock").map((j) => j.projectId));
+  return new Set(jobs.filter((j) => j.provider === "mock" && j.projectId && !real.has(j.projectId)).map((j) => j.projectId!));
+}
+
 export interface TodayDashboard {
   videosCompleted: number;
+  /** Completed today on the mock provider only - shown apart, never in the production figures. */
+  videosCompletedMock: number;
   videosFailed: number;
   apiSpend: number;
   /** Real spend of the videos completed today, divided by their count. */
@@ -51,17 +70,20 @@ export async function todayDashboard(now = new Date()): Promise<TodayDashboard> 
     spendStatus(),
     providerSpendBreakdown(),
   ]);
+  const mockOnly = await mockOnlyProjectIds(completed.map((p) => p.id));
+  const production = completed.filter((p) => !mockOnly.has(p.id));
   let average: number | null = null;
-  if (completed.length > 0) {
+  if (production.length > 0) {
     const perVideo = await prisma.costEntry.aggregate({
-      where: { estimated: false, projectId: { in: completed.map((p) => p.id) } },
+      where: { estimated: false, provider: { not: "mock" }, projectId: { in: production.map((p) => p.id) } },
       _sum: { amount: true },
     });
-    average = Math.round(((perVideo._sum.amount ?? 0) / completed.length) * 1e6) / 1e6;
+    average = Math.round(((perVideo._sum.amount ?? 0) / production.length) * 1e6) / 1e6;
   }
   const runway = wallets.find((w) => w.provider === "runway");
   return {
-    videosCompleted: completed.length,
+    videosCompleted: production.length,
+    videosCompletedMock: mockOnly.size,
     videosFailed: failed,
     apiSpend: Math.round((spend._sum.amount ?? 0) * 1e6) / 1e6,
     averageCostPerVideo: average,

@@ -1,8 +1,18 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-26 — PAID UI RUN PASS; hạn mức còn $0,086940
+**Cập nhật:** 2026-09-26 — V1.1 QA COMPLETE; hạn mức còn $0,086940
 
 ---
+
+## V1.2 — đề xuất (CHƯA làm, chờ duyệt)
+
+1. Nhịp cảnh theo giọng: tự co thời lượng cảnh khi lời ngắn hơn cảnh (khoảng lặng tới 6s).
+2. Nâng hạn mức / kế hoạch chi cho lô có Video AI tiếp theo (còn $0,086940 < 1 clip h3_max $0,40).
+3. Nút TIẾP TỤC / KIỂM TRA LẠI theo từng video COMPLETED (hiện có ở mức lô).
+4. Kiểm REUSE clip thật giữa hai lần nhập cùng storyboard (hiện mỗi lần nhập là video riêng, mua clip riêng).
+5. Test E2E trình duyệt tự động (Playwright) cho luồng Nhập → DUYỆT & CHẠY → Output, chạy mock.
+
+## ✅ V1.1 QA COMPLETE (2026-09-26) — xem QĐ-106
 
 ## ✅ READY FOR DAILY USE (2026-09-26)
 

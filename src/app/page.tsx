@@ -108,7 +108,15 @@ export default async function DashboardPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-            <Stat label="Video hoàn thành" value={day.videosCompleted} tone="ok" />
+            <Stat
+              label={
+                day.videosCompletedMock > 0
+                  ? `Video hoàn thành (+${day.videosCompletedMock} mock, không tính)`
+                  : "Video hoàn thành"
+              }
+              value={day.videosCompleted}
+              tone="ok"
+            />
             <Stat label="Video lỗi" value={day.videosFailed} tone={day.videosFailed > 0 ? "danger" : "neutral"} />
             <Stat label="Chi API thật" value={formatUSD(day.apiSpend, 4)} tone={day.apiSpend > 0 ? "warn" : "ok"} />
             <Stat

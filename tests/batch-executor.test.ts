@@ -309,7 +309,10 @@ describe("lifecycle + dashboard", () => {
 
   it("dashboard hôm nay đếm video xong và lô gần đây", async () => {
     const day = await todayDashboard();
-    expect(day.videosCompleted).toBeGreaterThanOrEqual(2);
+    // Every video in this suite is made by the mock provider: counted, but
+    // apart from production, and kept out of the production average.
+    expect(day.videosCompletedMock).toBeGreaterThanOrEqual(2);
+    if (day.videosCompleted === 0) expect(day.averageCostPerVideo).toBeNull();
     expect(day.globalCap).toBe((await spendStatus()).cap);
     const rows = await recentBatches(20);
     const row = rows.find((r) => r.id === batchId)!;

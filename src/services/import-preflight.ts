@@ -66,6 +66,8 @@ export interface ImportSceneLine {
   imageSource: "IMPORTED" | "REUSED" | "WILL_CREATE" | "NONE" | "MISSING";
   /** The keyframe on disk, relative to data/, for a thumbnail. Null if none. */
   imagePath: string | null;
+  /** The name the imported picture had when the person supplied it, so the table shows which file went to which scene. */
+  imageFilename: string | null;
   estimatedCost: number;
   /** Per asset: BUY (this run pays), REUSE (already owned), NONE (not needed). */
   plan: {
@@ -459,6 +461,11 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         keyframe: scene?.imageSource === "IMPORTED" ? "supplied" : "will-generate",
         imageSource,
         imagePath: scene?.imagePath && fileOnDisk(scene.imagePath) ? scene.imagePath : null,
+        imageFilename:
+          scene?.imageSource === "IMPORTED" && scene.imageAssetId
+            ? ((await prisma.asset.findUnique({ where: { id: scene.imageAssetId }, select: { originalFilename: true } }))
+                ?.originalFilename ?? null)
+            : null,
         estimatedCost: round(row.estimatedCost, 6),
         plan,
       });

@@ -99,6 +99,33 @@ export async function exportProjectOutput(projectId: string): Promise<string> {
   return dir;
 }
 
+/**
+ * What an export folder is missing, if anything: final.mp4 (or a copy whose size
+ * no longer matches the project's MP4), thumbnail.jpg, metadata.json, and
+ * subtitles.srt when the project has subtitles. Empty = complete.
+ */
+export function missingOutputFiles(project: {
+  id: string;
+  title: string;
+  finalVideoPath: string | null;
+  subtitlePath: string | null;
+}): string[] {
+  const dir = outputDirFor(project);
+  const missing: string[] = [];
+  const copy = path.join(dir, "final.mp4");
+  const source = project.finalVideoPath ? toAbsolute(project.finalVideoPath) : null;
+  if (
+    !fs.existsSync(copy) ||
+    (source && fs.existsSync(source) && fs.statSync(copy).size !== fs.statSync(source).size)
+  ) {
+    missing.push("final.mp4");
+  }
+  if (!fs.existsSync(path.join(dir, "thumbnail.jpg"))) missing.push("thumbnail.jpg");
+  if (!fs.existsSync(path.join(dir, "metadata.json"))) missing.push("metadata.json");
+  if (project.subtitlePath && !fs.existsSync(path.join(dir, "subtitles.srt"))) missing.push("subtitles.srt");
+  return missing;
+}
+
 /** The export folder if it exists, relative to data/ (for the media route). */
 export function existingOutputFor(project: { id: string; title: string }): {
   dir: string;

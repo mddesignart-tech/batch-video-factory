@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-26 (PAID UI RUN PASS — executor hợp nhất, dùng hằng ngày qua UI)
+**Cập nhật:** 2026-09-26 (V1.1 QA COMPLETE — paid UI run PASS + QA cuối Import Storyboard, $0)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,21 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.1 QA COMPLETE — QA cuối Import Storyboard (2026-09-26, $0, không POST trả phí)
+
+V1.1 core production pipeline: PAID UI RUN PASS (bên dưới) + QA cuối import storyboard PASS.
+
+- 5 ảnh khác nhau (`examples/storyboard-qa-distinct`), 5 SHA256 khác nhau; cảnh n → scene-0n.png →
+  Asset riêng → khung MP4 đúng màu: đỏ → xanh → vàng → tím → đen (đọc từ MP4 thật, mốc theo duration).
+- Preflight: IMPORTED/REUSE 5 · WILL_CREATE 0 · Image POST 0 (dự kiến và thực tế).
+- UI (server nháp trên bản sao DB, mock): chọn nhiều file + ZIP → KIỂM TRA → DỰ TOÁN (tên ảnh,
+  thumbnail đúng cảnh) → PREFLIGHT (MOCK) → DUYỆT & CHẠY → COMPLETED; Output/player/thumbnail/
+  COPY PATH (clipboard khớp)/MỞ OUTPUT; TIẾP TỤC trên video COMPLETED: mọi delta = 0.
+- Settings hạn mức (DB nháp): chặn abc, xác nhận, readback, reload, audit +1, SAVE FAILED khi
+  server chết. DB production KHÔNG đổi: 156 ProviderJob · 193 CostEntry · cap $8,50 · audit 4.
+- Sửa: output tự xuất lại khi resume; COPY PATH treo; mock tách khỏi Dashboard; tên ảnh trong
+  bảng dự toán. QĐ-106. Test mới: tests/storyboard-qa-distinct.test.ts (16).
 
 ## ✅ PAID UI RUN — PASS (2026-09-26, lô 6f4ec6e3, project a1b501c2)
 

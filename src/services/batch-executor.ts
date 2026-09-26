@@ -21,7 +21,7 @@ import {
   type BatchSource,
 } from "@/services/batch-sources";
 import { generateSceneImage, generateSceneVideo, generateSceneVoice } from "@/services/generation";
-import { existingOutputFor } from "@/services/output-export";
+import { existingOutputFor, exportProjectOutput, missingOutputFiles } from "@/services/output-export";
 import { recommendAuthorization } from "@/domain/cost-basis";
 import { currentRun, isRunning, registerRun } from "@/services/run-registry";
 import { completeJob, failJob } from "@/jobs/queue";
@@ -686,13 +686,38 @@ export async function runBatch(
 
   for (const project of projects) {
     if (opts.onlyProjectIds && !opts.onlyProjectIds.includes(project.id)) continue;
+    // Finished = the MP4 AND its subtitle file are still on disk. A missing
+    // subtitle file sends the video back through the scenes (all reused, $0)
+    // to a local re-render, which writes the subtitles again.
     const finished =
       project.status === "completed" &&
       Boolean(project.finalVideoPath) &&
-      fs.existsSync(toAbsolute(project.finalVideoPath!));
+      fs.existsSync(toAbsolute(project.finalVideoPath!)) &&
+      (!project.subtitlePath || fs.existsSync(toAbsolute(project.subtitlePath)));
     if (finished && opts.resume) {
-      // Done is done: no scene is walked, nothing is re-rendered.
-      outcomes.push({ projectId: project.id, title: project.title, stopped: "", rendered: true, skipped: false, outputDir: null });
+      // Done is done: no scene is walked, nothing is re-rendered, nothing is
+      // bought. Only the export folder is checked, and re-made locally (copy +
+      // one FFmpeg frame, $0) when a file in it has gone missing.
+      let outputDir = existingOutputFor(project)?.dir ?? null;
+      const missing = missingOutputFiles(project);
+      if (missing.length > 0) {
+        try {
+          outputDir = await exportProjectOutput(project.id);
+          await logger.info({
+            event: "output.reexported",
+            projectId: project.id,
+            message: `Xuất lại output (thiếu ${missing.join(", ")}) tại máy, không gọi provider.`,
+          });
+        } catch (err) {
+          outputDir = null;
+          await logger.warn({
+            event: "output.export_failed",
+            projectId: project.id,
+            message: `Không xuất được thư mục output (thiếu ${missing.join(", ")}): ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
+      outcomes.push({ projectId: project.id, title: project.title, stopped: "", rendered: true, skipped: false, outputDir });
       continue;
     }
     const reason = blocked.get(project.id);
