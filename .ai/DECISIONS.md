@@ -3029,3 +3029,53 @@ Bộ đầy đủ lần 1 sau khi cách ly (2026-09-26 18:17→19:06, chạy tr�
   hơn dự toán → EXHAUSTED giữa chừng. Test dùng 1.5×A (vẫn < A+B). UI vẫn đề xuất trần = dự toán +10%.
 - `storyboard-import`: bám câu chữ cũ "thật ra tốn"; nay kiểm VIDEO_LIMIT_EXCEEDED + đúng số dự toán
   không cắt (QĐ-081 vẫn được giữ: con số thật vẫn hiện).
+
+## QĐ-110 — Tiếp tục / kiểm tra lại từng video độc lập trong lô (V1.2 Phase 3)
+
+**Một kế hoạch cho mỗi video:** `buildVideoResumePlan` (`src/services/video-resume.ts`) đọc từ CHÍNH
+dòng của video (không từ trạng thái lô): currentStatus, nextStep (NONE · RENDER_ONLY · GENERATE ·
+RECOVER · BLOCKED · ALREADY_RUNNING), tài sản có / thiếu / dùng lại được, request trả phí cần
+(ảnh/video/giọng), việc tại máy (local_motion · render · export), chi phí TĂNG THÊM (dùng dự toán KHÔNG
+bị cắt, QĐ-081), lý do chặn, safeToContinue, tiến độ, và phần còn lại của trần video / lô / toàn cục.
+
+**Trạng thái video** (`videoLifecycle`, suy ra, không lưu): DRAFT · PREFLIGHT · READY · APPROVED
+(= PLANNED của đặc tả) · RUNNING · RENDERING · COMPLETED · BLOCKED · FAILED · NEEDS_RECOVERY (mới).
+RUNNING/RENDERING khi khoá video đang bị giữ. Trạng thái lô vẫn tổng hợp từ video.
+
+**Ba hành động khác nhau:** CONTINUE (làm phần còn thiếu, dùng lại mọi thứ đã có) · RETRY (= CONTINUE
+trên bước thất bại AN TOÀN: request chưa rời máy, reservation RELEASED, hoặc nhà cung cấp báo 0) ·
+RECOVER (request trả phí chưa rõ kết quả: bám theo task id — GET, không POST — hoặc, sau khi người dùng
+kiểm tra, `acknowledgeRecovery` lưu trữ job + reservation dưới key `#reviewed-…` để lần mua sau là
+yêu cầu MỚI qua đủ cổng; tiền đã tính giữ nguyên).
+
+**NEEDS_RECOVERY** (`paid-recovery.ts`): IN_FLIGHT = job pending/processing có task id mà không ai
+theo dõi; POSSIBLY_CHARGED = job failed có reservation COMMITTED, hoặc (ngoài lô) nhà cung cấp đã
+nhận (task id) mà không báo billedUnits = 0. Provider `mock` không bao giờ vào đây.
+
+**Hai lỗ thật đã bịt (tiền):**
+1. Thử lại một job FAILED có reservation COMMITTED dưới cùng key: cổng thấy "đã giữ chỗ" → $0 mới →
+   POST lần hai, sổ chỉ ghi một. Nay `runProviderJob` từ chối (`PAID_ASSET_NEEDS_RECOVERY`,
+   không retry) cho tới khi có xác nhận.
+2. Thử lại một job có reservation RELEASED: coi như $0 → bỏ qua CẢ BỐN trần và không giữ chỗ. Nay
+   reservation RELEASED được kích hoạt lại như tiền MỚI (kiểm trần, giữ chỗ, cùng khoá).
+
+**Khoá theo video** (`run-registry`: tryLockVideo/unlockVideo, lấy đồng bộ trước await đầu tiên): mỗi
+video tối đa một lần thực thi (media + render + export). Bấm TIẾP TỤC hai lần → lần hai ALREADY_RUNNING;
+runBatch gặp video đang bị giữ → bỏ qua video đó (ALREADY_RUNNING), video khác vẫn chạy. Theo tiến
+trình (một app, một SQLite) như khoá reservation.
+
+**TIẾP TỤC** (`continueVideo`): COMPLETED + output đủ → no-op "Video đã hoàn thành." (mọi delta 0);
+chỉ việc tại máy → chạy thẳng, $0; có request trả phí → NEEDS_CONFIRMATION kèm mini-preflight, xác
+nhận thì kiểm lại trần (Phase 2) và mở lại quyền chi trong trần cũ (resumeAuthorization), rồi cổng
+kiểm lại lần nữa ngay trước POST (TOCTOU). Video chưa xong mà preflight báo chặn (vượt trần video/cảnh,
+chưa xác nhận giá…) → BLOCKED kèm mã lý do, dù dòng dự án đang FAILED.
+**TIẾP TỤC TẤT CẢ** (`continueAllEligible`): kế hoạch từng video; bỏ COMPLETED/BLOCKED/NEEDS_RECOVERY/
+ALREADY_RUNNING; phần còn lại qua planBatchSpend (Phase 2); số duyệt = tổng tăng thêm của video chạy.
+
+**Phát hiện, KHÔNG sửa (routing):** lúc resume, chốt "model đã duyệt" kiểm model ĐANG LƯU trên cảnh
+trước khi định tuyến lại; nếu trần video bị hạ và có nhiều model video tự định tuyến được (chế độ mock),
+router có thể chọn model rẻ hơn model đã duyệt. Production chỉ có h3_max tự định tuyến được nên không
+xảy ra. Ghi vào NEXT_TASKS.
+
+Test: tests/video-resume.test.ts (12, ma trận A–T). Môi trường test: `socket_timeout=60` cho SQLite
+của DB test (nhiều video render song song trên máy bận).

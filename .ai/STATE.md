@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-26 (V1.2 Phase 2 COMPLETE — ngân sách nhiều tầng, $0; chờ duyệt Phase 3)
+**Cập nhật:** 2026-09-26 (V1.2 Phase 3 COMPLETE — tiếp tục/khôi phục từng video, $0; chờ duyệt Phase 4)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,14 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.2 PHASE 3 — TIẾP TỤC / KHÔI PHỤC TỪNG VIDEO (2026-09-26, $0, không POST trả phí)
+
+Kế hoạch từng video (buildVideoResumePlan), khoá theo video, NEEDS_RECOVERY, TIẾP TỤC / TIẾP TỤC TẤT CẢ / KIỂM TRA: QĐ-110.
+Bịt 2 lỗ tiền: thử lại job COMMITTED từng POST lần hai; thử lại job RELEASED từng bỏ qua cả 4 trần.
+Bộ test đầy đủ 63/63 file · 1294/1294 test · 0 hỏng · 0 ngắt (3100s, một process). Không migration.
+QA dữ liệu UI (bản sao DB, mock): A KIỂM TRA LẠI · B TIẾP TỤC · C XEM LÝ DO · D TIẾP TỤC $0 · E KIỂM TRA; Continue All = B+D.
+Chưa kiểm giao diện bằng trình duyệt (tiện ích Chrome không kết nối). Sổ production: 156/193/57, $8.413060 — không đổi.
 
 ## ✅ V1.2 PHASE 2 — NGÂN SÁCH NHIỀU TẦNG (2026-09-26, $0, không POST trả phí)
 

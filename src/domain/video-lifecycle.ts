@@ -16,6 +16,8 @@ export const VIDEO_LIFECYCLES = [
   "COMPLETED",
   "BLOCKED",
   "FAILED",
+  /** A paid request may already have been billed without a settled outcome (QĐ-110). */
+  "NEEDS_RECOVERY",
 ] as const;
 export type VideoLifecycle = (typeof VIDEO_LIFECYCLES)[number];
 
@@ -25,8 +27,16 @@ export function videoLifecycle(input: {
   authorizationStatus: string | null;
   /** The preflight's status for this video ("OK" or a blocker), null if not priced. */
   planStatus: string | null;
+  /** A paid request of this video is unsettled (paid-recovery.ts). */
+  needsRecovery?: boolean;
+  /** An execution holds this video's lock right now. */
+  active?: boolean;
 }): VideoLifecycle {
   const { projectStatus, authorizationStatus, planStatus } = input;
+  // Live work first: what is running is running, whatever the row said last.
+  if (input.active) return projectStatus === "rendering" ? "RENDERING" : "RUNNING";
+  // Then money that may be spent without a result: nothing proceeds past it.
+  if (input.needsRecovery && projectStatus !== "completed") return "NEEDS_RECOVERY";
   switch (projectStatus) {
     case "completed":
       return "COMPLETED";
@@ -59,4 +69,5 @@ export const LIFECYCLE_TONE: Record<VideoLifecycle, "neutral" | "info" | "ok" | 
   COMPLETED: "ok",
   BLOCKED: "warn",
   FAILED: "danger",
+  NEEDS_RECOVERY: "danger",
 };

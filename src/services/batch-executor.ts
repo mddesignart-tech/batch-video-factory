@@ -24,7 +24,7 @@ import { generateSceneImage, generateSceneVideo, generateSceneVoice } from "@/se
 import { existingOutputFor, exportProjectOutput, missingOutputFiles } from "@/services/output-export";
 import { recommendAuthorization } from "@/domain/cost-basis";
 import { planBatchSpend, type BatchSpendPlan, type PlannedVideo, type SpendReasonCode } from "@/domain/spend-limits";
-import { currentRun, isRunning, registerRun } from "@/services/run-registry";
+import { currentRun, isRunning, registerRun, tryLockVideo, unlockVideo } from "@/services/run-registry";
 import { completeJob, failJob } from "@/jobs/queue";
 import { runJob } from "@/jobs/handlers";
 
@@ -768,7 +768,12 @@ export async function renderProjectNow(projectId: string): Promise<void> {
 
 export async function runBatch(
   batchId: string,
-  opts: { resume: boolean; onlyProjectIds?: string[] },
+  opts: {
+    resume: boolean;
+    onlyProjectIds?: string[];
+    /** Run under a video lock the caller already holds (per-video TIẾP TỤC, QĐ-110). */
+    lockOwner?: string;
+  },
 ): Promise<RunSummary> {
   const auth = await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId } });
   const ceilings: Ceilings = {
@@ -820,8 +825,24 @@ export async function runBatch(
   const projects = await prisma.project.findMany({ where: { batchId }, orderBy: { createdAt: "asc" } });
   const outcomes: VideoOutcome[] = [];
 
+  // One active execution per VIDEO (QĐ-110): a video another run is already
+  // working on is reported ALREADY_RUNNING and left to it - never run twice.
+  const owner =
+    opts.lockOwner ?? `run:${batchId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
   for (const project of projects) {
     if (opts.onlyProjectIds && !opts.onlyProjectIds.includes(project.id)) continue;
+    if (!tryLockVideo(project.id, owner)) {
+      outcomes.push({
+        projectId: project.id,
+        title: project.title,
+        stopped: "ALREADY_RUNNING: video này đang được một lần chạy khác xử lý.",
+        rendered: false,
+        skipped: true,
+        outputDir: null,
+      });
+      continue;
+    }
+    try {
     // Finished = the MP4 AND its subtitle file are still on disk. A missing
     // subtitle file sends the video back through the scenes (all reused, $0)
     // to a local re-render, which writes the subtitles again.
@@ -913,6 +934,9 @@ export async function runBatch(
       });
     }
     outcomes.push({ projectId: project.id, title: project.title, stopped, rendered, skipped: false, outputDir });
+    } finally {
+      unlockVideo(project.id, owner);
+    }
   }
 
   // Money held for a request that never finished is handed back - never left

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { batchProgress } from "@/services/batch-runner";
 import { BatchProgressView } from "./batch-progress-view";
+import { VideoResumePanel } from "./video-resume-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -26,5 +27,11 @@ export default async function BatchDetailPage({
   const progress = await batchProgress(id);
   if (!progress) notFound();
 
-  return <BatchProgressView initial={progress} />;
+  return (
+    <div className="space-y-4">
+      <BatchProgressView initial={progress} />
+      {/* Per-video resume (QĐ-110): one plan, one button per video. */}
+      <VideoResumePanel batchId={progress.batch.id} />
+    </div>
+  );
 }

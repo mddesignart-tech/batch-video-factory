@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-26 — V1.2 Phase 2 (ngân sách nhiều tầng) PASS; chờ duyệt Phase 3
+**Cập nhật:** 2026-09-26 — V1.2 Phase 3 (tiếp tục từng video) COMPLETE; chờ duyệt Phase 4
 
 ---
 
@@ -11,6 +11,14 @@
 3. Nút TIẾP TỤC / KIỂM TRA LẠI theo từng video COMPLETED (hiện có ở mức lô).
 4. Kiểm REUSE clip thật giữa hai lần nhập cùng storyboard (hiện mỗi lần nhập là video riêng, mua clip riêng).
 5. Test E2E trình duyệt tự động (Playwright) cho luồng Nhập → DUYỆT & CHẠY → Output, chạy mock.
+
+## ✅ V1.2 Phase 3 COMPLETE — tiếp tục / khôi phục từng video (QĐ-110)
+
+- [ ] Kiểm bảng "Từng video" bằng trình duyệt (lần QA này chỉ kiểm dữ liệu vì Chrome không kết nối).
+- [ ] Phát hiện chưa sửa (routing, cần duyệt): lúc resume, chốt "model đã duyệt" kiểm model đang lưu TRƯỚC khi
+      định tuyến lại; nếu có nhiều model video tự định tuyến được, router có thể chọn model rẻ hơn khi trần thấp.
+      Production hiện chỉ h3_max nên không xảy ra.
+- [ ] Resume vẫn ghi lại cột sổ sách (updatedAt) trên dòng thoại đã xong — không tạo lại media.
 
 ## ✅ V1.2 Phase 2 COMPLETE — ngân sách nhiều tầng (QĐ-108, QĐ-109)
 

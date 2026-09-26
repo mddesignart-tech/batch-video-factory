@@ -32,10 +32,12 @@ export const TEST_DATA =
 export const TEST_DB = path.join(TEST_DATA, "test.db");
 
 /** Prisma resolves a relative `file:` URL against the schema folder. */
+// socket_timeout: a busy test machine renders several 1080x1920 videos at once
+// (per-video runs, QĐ-110); the default wait for SQLite is too short for that.
 export const TEST_DATABASE_URL = `file:${path
   .relative(path.join(ROOT, "prisma"), TEST_DB)
   .split(path.sep)
-  .join("/")}`;
+  .join("/")}?socket_timeout=60`;
 
 export function applyTestEnv(): void {
   process.env[TEST_RUN_ENV] = TEST_DATA;

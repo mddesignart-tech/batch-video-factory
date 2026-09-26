@@ -67,6 +67,7 @@ import {
   type CharacterSheet,
 } from "./character-service";
 import { overallQualityScore, QualityReportSchema } from "@/domain/script";
+import { jobPossiblyBilled, RECOVERY_MESSAGE } from "@/services/paid-recovery";
 
 /**
  * Scene media generation.
@@ -414,6 +415,24 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
       message: `Job ${kind} trước đó vẫn đang chạy, tiếp tục theo dõi thay vì tạo mới.`,
     });
   } else {
+    // Never buy AGAIN what may already have been bought (QĐ-110).
+    //
+    // A failed job whose reservation was settled as billed - or that the vendor
+    // accepted without saying it was free - must not be re-sent under the same
+    // key: the gate would find the old reservation, hold no new money, and the
+    // request would be paid for twice while the ledger counted it once. It
+    // stays NEEDS_RECOVERY until a person has checked the vendor and archived
+    // it (acknowledgeRecovery); the next attempt is then a new, fully gated one.
+    if (existing?.status === "failed" && (await jobPossiblyBilled(existing))) {
+      throw new ProviderError(
+        `PAID_ASSET_NEEDS_RECOVERY: ${RECOVERY_MESSAGE} (${kind} ${existing.provider}/${existing.model}` +
+          `${existing.externalId ? `, task ${existing.externalId}` : ""}). Không gửi lại tự động.`,
+        decision.provider,
+        false,
+        "PAID_ASSET_NEEDS_RECOVERY",
+      );
+    }
+
     // Never buy the same failure twice.
     //
     // Checked BEFORE the budget gate and before any reservation, because the

@@ -25,3 +25,34 @@ export function registerRun<T>(batchId: string, run: Promise<T>): Promise<T> {
   void run.finally(() => registry.delete(batchId)).catch(() => undefined);
   return run;
 }
+
+// ------------------------------------------------------- per-video locks ---
+//
+// V1.2 Phase 3 (QĐ-110): each VIDEO has at most one active execution - media,
+// render, export - whoever started it (a batch run, TIẾP TỤC on one video,
+// TIẾP TỤC TẤT CẢ). Videos of the same batch run independently of each other.
+//
+// Taken SYNCHRONOUSLY, before the first await, so a double click cannot slip a
+// second execution in between "is it free?" and "it is mine". In-process, like
+// the reservation lock (one app, one SQLite file).
+
+const VIDEO_KEY = "__videoRunRegistry";
+const videos: Map<string, string> =
+  ((globalThis as Record<string, unknown>)[VIDEO_KEY] as Map<string, string>) ?? new Map();
+(globalThis as Record<string, unknown>)[VIDEO_KEY] = videos;
+
+/** Take the video's lock for `owner`. False when someone else holds it. */
+export function tryLockVideo(projectId: string, owner: string): boolean {
+  const held = videos.get(projectId);
+  if (held !== undefined && held !== owner) return false;
+  videos.set(projectId, owner);
+  return true;
+}
+
+export function unlockVideo(projectId: string, owner: string): void {
+  if (videos.get(projectId) === owner) videos.delete(projectId);
+}
+
+export function isVideoRunning(projectId: string): boolean {
+  return videos.has(projectId);
+}

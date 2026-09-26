@@ -181,6 +181,27 @@ async function reserveOnce(
     where: { idempotencyKey: input.idempotencyKey },
   });
 
+  const cost = money(Math.max(0, input.estimatedCost));
+
+  if (existing && existing.status === "RELEASED") {
+    // A RETRY of a request that never left (or was confirmed free): the money
+    // was handed back, so this attempt is NEW money and is held again under the
+    // same key - against the ceiling like any other request (QĐ-110). Treating
+    // it as "already spoken for" let the retry go out with nothing held.
+    const ledger = await reservationLedger(input.batchId, ceiling);
+    if (money(ledger.used + cost) > ledger.ceiling) {
+      throw new ReservationError(
+        `Lô đã dùng $${ledger.used.toFixed(6)} trong hạn mức được duyệt $${ledger.ceiling.toFixed(6)}. ` +
+          `Lần thử lại này ước tính $${cost.toFixed(6)} nên sẽ vượt. KHÔNG gửi request.`,
+      );
+    }
+    await prisma.costReservation.update({
+      where: { idempotencyKey: input.idempotencyKey },
+      data: { status: "RESERVED", estimatedCost: cost, actualCost: 0, settledAt: null },
+    });
+    return { reused: false, ledger: await reservationLedger(input.batchId, ceiling) };
+  }
+
   if (existing) {
     // Already held or already settled: this exact request is spoken for. Asking
     // twice must not hold money twice.
@@ -190,7 +211,6 @@ async function reserveOnce(
     };
   }
 
-  const cost = money(Math.max(0, input.estimatedCost));
   const ledger = await reservationLedger(input.batchId, ceiling);
 
   if (money(ledger.used + cost) > ledger.ceiling) {

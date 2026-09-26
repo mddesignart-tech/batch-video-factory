@@ -419,9 +419,11 @@ export async function assertBatchAuthorized(
   const limitsCheck = async (): Promise<void> => {
     const alreadyReserved = await prisma.costReservation.findUnique({
       where: { idempotencyKey: input.idempotencyKey },
-      select: { id: true },
+      select: { id: true, status: true },
     });
-    const newMoney = alreadyReserved ? 0 : cost;
+    // A RELEASED hold was handed back: a retry under the same key is NEW money
+    // and is judged as such (QĐ-110).
+    const newMoney = alreadyReserved && alreadyReserved.status !== "RELEASED" ? 0 : cost;
     const [onVideo, onScene, status, held] = await Promise.all([
       projectReservedAndSpent(input.projectId),
       sceneReservedAndSpent(input.sceneId),
