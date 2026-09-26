@@ -23,6 +23,7 @@ import {
 import { generateSceneImage, generateSceneVideo, generateSceneVoice } from "@/services/generation";
 import { existingOutputFor, exportProjectOutput, missingOutputFiles } from "@/services/output-export";
 import { recommendAuthorization } from "@/domain/cost-basis";
+import { planBatchSpend, type BatchSpendPlan, type PlannedVideo, type SpendReasonCode } from "@/domain/spend-limits";
 import { currentRun, isRunning, registerRun } from "@/services/run-registry";
 import { completeJob, failJob } from "@/jobs/queue";
 import { runJob } from "@/jobs/handlers";
@@ -92,6 +93,10 @@ export interface ApprovalPreflight {
   mockMode: boolean;
   batchStatus: string;
   authorizationStatus: string;
+  /** Partial-batch plan (rows only): who runs, who is blocked, and why. */
+  spendPlan: BatchSpendPlan | null;
+  /** The projects this approval covers. Null = every runnable video (idiom plan). */
+  runnableProjectIds: string[] | null;
 }
 
 /**
@@ -104,6 +109,15 @@ interface ApprovalInput {
   maxCostPerVideo: number;
   runnable: { title: string; estimatedCost: number }[];
   blocked: { title: string; reason: string }[];
+  /**
+   * Per-video money plan input (rows only): lets the approval pick the videos
+   * that fit the batch / global money deterministically (QĐ-108). Null for an
+   * idiom plan, whose projects do not exist yet - that path keeps the old
+   * all-or-nothing check.
+   */
+  planned: PlannedVideo[] | null;
+  /** Per video (rows only): its POSTs, models and LOW_AUTO use - recounted after a partial cut. */
+  perVideo: Record<string, { image: number; video: number; voice: number; models: string[]; lowAuto: boolean }>;
   estimatedTotal: number;
   paidModels: { key: string; confirmed: boolean }[];
   plannedVideoModels: string[];
@@ -161,6 +175,8 @@ async function idiomApprovalInput(batchId: string): Promise<ApprovalInput> {
     maxCostPerVideo: batch.maxCostPerVideo,
     runnable: runnable.map((v) => ({ title: v.phrase, estimatedCost: v.estimatedCost })),
     blocked: blocked.map((v) => ({ title: v.phrase, reason: v.status })),
+    planned: null,
+    perVideo: {},
     estimatedTotal: costing.estimatedTotal,
     paidModels,
     plannedVideoModels,
@@ -187,13 +203,23 @@ async function rowsApprovalInput(batchId: string, resume: boolean): Promise<Appr
   const blocked = pre.videos.filter((v) => v.lifecycle === "BLOCKED");
   // A clip the ROUTER will choose (no hand pin) needs the separate LOW_AUTO yes.
   let usesLowAuto = false;
+  const perVideo: ApprovalInput["perVideo"] = {};
   for (const v of runnable) {
     const buying = v.scenes.filter((sc) => sc.plan.video === "BUY").map((sc) => sc.sceneNumber);
-    if (buying.length === 0) continue;
-    const unpinned = await prisma.scene.count({
-      where: { projectId: v.projectId, sceneNumber: { in: buying }, videoModelPinned: false },
-    });
+    const unpinned =
+      buying.length === 0
+        ? 0
+        : await prisma.scene.count({
+            where: { projectId: v.projectId, sceneNumber: { in: buying }, videoModelPinned: false },
+          });
     if (unpinned > 0) usesLowAuto = true;
+    perVideo[v.projectId] = {
+      image: v.counts.imagePosts,
+      video: v.counts.videoPosts,
+      voice: v.counts.voicePosts,
+      models: [...new Set(v.scenes.map((sc) => sc.videoModel).filter((m): m is string => Boolean(m)))],
+      lowAuto: unpinned > 0,
+    };
   }
   return {
     source: await batchSource(batchId),
@@ -201,6 +227,25 @@ async function rowsApprovalInput(batchId: string, resume: boolean): Promise<Appr
     maxCostPerVideo: pre.maxCostPerVideo,
     runnable: runnable.map((v) => ({ title: v.title, estimatedCost: v.estimatedCost })),
     blocked: blocked.map((v) => ({ title: v.title, reason: v.blockedReason ?? v.status })),
+    planned: [...runnable, ...blocked].map((v) => ({
+      id: v.projectId,
+      title: v.title,
+      order: v.order,
+      videoLimit: v.videoLimit,
+      // Incremental: REUSE is already $0 in the preflight's per-scene figures.
+      scenes: v.scenes.map((sc) => ({ sceneNumber: sc.sceneNumber, incrementalCost: sc.estimatedCost, limit: sc.spendLimit })),
+      // Already BLOCKED by the preflight: listed in the plan with its own
+      // reason and figures, never counted or authorised.
+      preBlocked:
+        v.lifecycle === "BLOCKED"
+          ? {
+              reasonCode: blockedReasonCode(v.status),
+              message: v.blockedReason ?? v.status,
+              verdict: v.spend.status === "BLOCKED" ? v.spend : undefined,
+            }
+          : null,
+    })),
+    perVideo,
     estimatedTotal: pre.estimatedTotal,
     paidModels: pre.paidModels,
     plannedVideoModels: [
@@ -211,6 +256,33 @@ async function rowsApprovalInput(batchId: string, resume: boolean): Promise<Appr
     willCreateImages: pre.counts.imageBuy,
     usesLowAuto,
   };
+}
+
+/** The reason code for a video the preflight already BLOCKED. */
+function blockedReasonCode(status: string): SpendReasonCode {
+  switch (status) {
+    case "OVER_VIDEO_BUDGET":
+      return "VIDEO_LIMIT_EXCEEDED";
+    case "OVER_SCENE_BUDGET":
+      return "SCENE_LIMIT_EXCEEDED";
+    case "NEEDS_PROVIDER_CONFIRMATION":
+      return "MODEL_NOT_CONFIRMED";
+    case "NEEDS_PROVIDER":
+      return "PROVIDER_NOT_CONFIRMED";
+    default:
+      return "NOT_RUNNABLE";
+  }
+}
+
+/**
+ * A video's limit at approval time. A video whose own limit is just the batch
+ * default follows the per-video figure typed at approval (raised or lowered);
+ * one with its own storyboard max_cost keeps it, and never goes above the
+ * typed figure. Nothing is raised that the person did not type.
+ */
+export function approvalVideoLimit(videoLimit: number, batchPerVideo: number, typed: number | undefined): number {
+  if (typed === undefined) return videoLimit;
+  return videoLimit >= batchPerVideo - 1e-9 ? typed : Math.min(typed, videoLimit);
 }
 
 /** THE approval checks - one implementation for every source. */
@@ -232,7 +304,48 @@ async function gateChecks(
   const add = (label: string, ok: boolean, detail: string, blocking = true) =>
     checks.push({ label, ok, detail, blocking });
 
-  add("Có video chạy được", input.runnable.length > 0 || Boolean(opts.resume), `${input.runnable.length} video`);
+  // PARTIAL BATCH (QĐ-108). Rows are planned against the money a person is
+  // about to type: every video judged against its own scene / video limits,
+  // then first-fit into min(batch, global) in a deterministic order. What does
+  // not fit is BLOCKED by name with its reason code and takes nothing from the
+  // approval; only the videos that fit are counted, authorised and run.
+  let spendPlan: BatchSpendPlan | null = null;
+  if (input.planned) {
+    spendPlan = planBatchSpend({
+      videos: input.planned.map((v) => ({
+        ...v,
+        videoLimit: v.videoLimit === null ? null : approvalVideoLimit(v.videoLimit, batch.maxCostPerVideo, opts.maxPerVideo),
+      })),
+      batchLimit: opts.maxBatch ?? null,
+      globalRemaining: cap.remaining,
+    });
+    const keep = spendPlan.runnable.map((v) => v.id);
+    const sum = (k: "image" | "video" | "voice") => keep.reduce((n, id) => n + (input.perVideo[id]?.[k] ?? 0), 0);
+    input = {
+      ...input,
+      runnable: spendPlan.runnable.map((v) => ({ title: v.title, estimatedCost: v.incrementalCost })),
+      blocked: [
+        ...input.blocked,
+        // Only the videos the MONEY plan cut - the preflight's own BLOCKED are already listed.
+        ...spendPlan.blocked
+          .filter((v) => !input.planned!.some((p) => p.id === v.id && p.preBlocked))
+          .map((v) => ({ title: v.title, reason: `${v.verdict.reasonCode}: ${v.verdict.message}` })),
+      ],
+      estimatedTotal: spendPlan.authorizationAmount,
+      posts: { text: input.posts.text, image: sum("image"), video: sum("video"), voice: sum("voice") },
+      plannedVideoModels: [...new Set(keep.flatMap((id) => input.perVideo[id]?.models ?? []))],
+      usesLowAuto: keep.some((id) => input.perVideo[id]?.lowAuto),
+    };
+  }
+
+  add(
+    "Có video chạy được",
+    input.runnable.length > 0 || Boolean(opts.resume),
+    input.runnable.length > 0 || input.blocked.length === 0
+      ? `${input.runnable.length} video`
+      : // Nothing fits: say why, with the reason code, not just "0 video".
+        `0 video — ${input.blocked.map((b) => `${b.title}: ${b.reason}`).join(" · ")}`,
+  );
   for (const v of input.blocked) {
     // Named, never silent - and NOT blocking: one video's problem is its own.
     add(`${v.title}: BLOCKED — sẽ bỏ qua`, false, v.reason, false);
@@ -323,6 +436,8 @@ async function gateChecks(
     textPosts: input.posts.text,
     checks,
     ready: checks.every((c) => c.ok || !c.blocking),
+    spendPlan,
+    runnableProjectIds: spendPlan ? spendPlan.runnable.map((v) => v.id) : null,
     runnableVideos: input.runnable.length,
     blockedVideos: input.blocked.length,
     estimatedTotal: input.estimatedTotal,
@@ -409,6 +524,13 @@ export async function approveAndRun(opts: {
   }
 
   if (opts.maxPerVideo !== undefined) {
+    // Videos whose own limit was just the batch default follow the typed
+    // figure; a storyboard max_cost stays as the video's own (approvalVideoLimit).
+    const before = await prisma.batch.findUniqueOrThrow({ where: { id: opts.batchId }, select: { maxCostPerVideo: true } });
+    await prisma.project.updateMany({
+      where: { batchId: opts.batchId, maxBudget: { gte: before.maxCostPerVideo - 1e-9 } },
+      data: { maxBudget: opts.maxPerVideo },
+    });
     await prisma.batch.update({ where: { id: opts.batchId }, data: { maxCostPerVideo: opts.maxPerVideo } });
     await prisma.batchAuthorization.updateMany({
       where: { batchId: opts.batchId, status: "DRAFT" },
@@ -420,7 +542,9 @@ export async function approveAndRun(opts: {
   await approveAuthorization({
     batchId: opts.batchId,
     authorizedMaxSpend: opts.maxBatch,
-    note: JSON.stringify({ plannedVideoModels: check.plannedVideoModels }),
+    // runnableProjectIds: the videos this approval covers (partial batch). The
+    // run starts nothing else, even if money were left.
+    note: JSON.stringify({ plannedVideoModels: check.plannedVideoModels, runnableProjectIds: check.runnableProjectIds }),
     lowAutoApproved: opts.lowAutoApproved,
   });
 
@@ -667,9 +791,21 @@ export async function runBatch(
   // decides - the verdict they saw. For idiom projects, the per-video re-check
   // against the real script has already marked them needs_review.
   const blocked = new Map<string, string>();
+  // The approval covers named videos only (partial batch, QĐ-108).
+  const approvedIds = parseJson<{ runnableProjectIds?: string[] | null }>(auth.note, {}).runnableProjectIds ?? null;
   if ((await batchSource(batchId)) === "STORYBOARD_IMPORTED") {
     const pre = await preflightImportedBatch(batchId);
     for (const v of pre.videos) if (v.lifecycle === "BLOCKED") blocked.set(v.projectId, v.blockedReason ?? v.status);
+    if (approvedIds) {
+      for (const v of pre.videos) {
+        if (!approvedIds.includes(v.projectId) && !blocked.has(v.projectId) && v.lifecycle !== "COMPLETED") {
+          blocked.set(
+            v.projectId,
+            "BATCH_LIMIT_EXCEEDED: video này không nằm trong phần được duyệt của lô (không đủ trần lô / hạn mức toàn cục lúc duyệt). Duyệt lại để chạy.",
+          );
+        }
+      }
+    }
   } else {
     const flagged = await prisma.project.findMany({
       where: { batchId, OR: [{ status: "needs_review" }, { scriptJson: null }] },

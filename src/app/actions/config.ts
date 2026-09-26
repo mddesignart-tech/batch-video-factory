@@ -297,6 +297,7 @@ export async function updateSettings(formData: FormData): Promise<ActionResult> 
     cleanupTempDays: z.coerce.number().min(1).max(365).optional(),
     cleanupFailedDays: z.coerce.number().min(1).max(365).optional(),
     maxRetries: z.coerce.number().min(1).max(10).optional(),
+    defaultMaxCostPerVideo: z.coerce.number().positive("Trần mỗi video phải > 0.").max(1000).optional(),
   });
   const raw = Object.fromEntries(formData.entries());
   const parsed = schema.safeParse(raw);
@@ -306,8 +307,15 @@ export async function updateSettings(formData: FormData): Promise<ActionResult> 
       message: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ.",
     };
   }
+  // Blank = no scene cap. A number must be positive; it is a limit a person set.
+  const sceneCapRaw = String(raw.defaultMaxCostVideoAiScene ?? "").trim();
+  const sceneCap = sceneCapRaw === "" ? null : Number(sceneCapRaw);
+  if (sceneCap !== null && (!Number.isFinite(sceneCap) || sceneCap <= 0 || sceneCap > 1000)) {
+    return { ok: false, message: "Trần mỗi cảnh VIDEO_AI phải là số > 0, hoặc để trống (không giới hạn cảnh)." };
+  }
   await saveSettings({
     ...parsed.data,
+    ...("defaultMaxCostVideoAiScene" in raw ? { defaultMaxCostVideoAiScene: sceneCap } : {}),
     burnSubtitles: raw.burnSubtitles === "on",
   });
   revalidatePath("/settings");

@@ -13,6 +13,17 @@ export interface AppSettings {
   defaultRouterStrategy: string;
   defaultTargetDuration: number;
   defaultMaxBudget: number;
+  /**
+   * Per-video spend limit an imported video gets when its storyboard names
+   * none (V1.2, QĐ-108). A limit, not a target: it never raises anything and
+   * never sits above the global cap.
+   */
+  defaultMaxCostPerVideo: number;
+  /**
+   * Cap on what ONE VIDEO_AI scene may spend, when the storyboard names none.
+   * Null = no scene cap (only the video / batch / global limits apply).
+   */
+  defaultMaxCostVideoAiScene: number | null;
   jobConcurrency: number;
   workerEnabled: boolean;
   cleanupTempDays: number;
@@ -42,6 +53,8 @@ export function defaultSettings(): AppSettings {
     defaultRouterStrategy: "AUTO",
     defaultTargetDuration: 25,
     defaultMaxBudget: 10,
+    defaultMaxCostPerVideo: 1.5,
+    defaultMaxCostVideoAiScene: null,
     jobConcurrency: e.JOB_CONCURRENCY,
     workerEnabled: e.JOB_WORKER_ENABLED,
     cleanupTempDays: e.CLEANUP_TEMP_DAYS,

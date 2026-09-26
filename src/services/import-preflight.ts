@@ -17,6 +17,9 @@ import {
   type CharacterReadiness,
 } from "./character-service";
 import { sceneCharacters } from "@/domain/scene-characters";
+import { evaluateSpendLimits, usd, type SpendVerdict } from "@/domain/spend-limits";
+import { sceneSpendLimit, videoSpendLimit } from "./batch-authorization";
+import { getSettings } from "@/lib/settings";
 import {
   estimateVoiceDuration,
   pacingSummary,
@@ -139,6 +142,9 @@ export interface ImportSceneLine {
   imageFilename: string | null;
   /** For per-scene edits (duration mode) from the preview. */
   sceneId: string | null;
+  /** Scene spend cap (null = none) and this scene's verdict against it. */
+  spendLimit: number | null;
+  spend: SpendVerdict;
   /**
    * Voice-aware timing as it will be decided at render (V1.2). Before audio
    * exists the voice length is an ESTIMATE from the words and says so; the
@@ -276,6 +282,11 @@ export interface ImportVideoPreview {
    */
   uncappedCost: number;
   status: VideoPlanStatus;
+  /** This video's spend limit (QĐ-108) and its verdict with a reason code. */
+  videoLimit: number;
+  spend: SpendVerdict;
+  /** Queue order (import order) - the deterministic tie-break of a partial run. */
+  order: number;
   /**
    * Where this ONE video is in its own life, independent of its neighbours.
    *
@@ -472,13 +483,14 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     throw new Error("Lô nhập chưa có video nào. Hãy nhập storyboard trước.");
   }
 
-  const [cap, wallets, production, available, authorization, confirmed] = await Promise.all([
+  const [cap, wallets, production, available, authorization, confirmed, settings] = await Promise.all([
     spendStatus(),
     providerSpendBreakdown(),
     productionProviderNames(),
     availableProviderNames(),
     prisma.batchAuthorization.findUnique({ where: { batchId } }),
     confirmedProviders(),
+    getSettings(),
   ]);
   const moneyApproved = authorization?.status === "APPROVED";
 
@@ -559,6 +571,14 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         estimatedCost: round(row.estimatedCost, 6),
         plan,
         timing: await previewTiming(scene ?? null, row.sceneNumber, row.motionSource),
+        // Scene cap (QĐ-108), against the INCREMENTAL cost: REUSE = $0.
+        spendLimit: sceneSpendLimit(scene ?? null, settings.defaultMaxCostVideoAiScene),
+        spend: evaluateSpendLimits({
+          label: `${project.title} · cảnh ${row.sceneNumber}`,
+          estimatedCost: row.estimatedCost,
+          global: { cap: Infinity, used: 0 },
+          scene: { limit: sceneSpendLimit(scene ?? null, settings.defaultMaxCostVideoAiScene), used: 0 },
+        }),
       });
       plannedScenes.push({
         sceneNumber: row.sceneNumber,
@@ -575,6 +595,9 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     const localMotion = sceneLines.filter((s) => s.motionSource === "LOCAL_MOTION").length;
     const videoAi = sceneLines.length - localMotion;
     const total = round(estimate.breakdown.total, 6);
+    // This video's own spend limit (QĐ-108) and the first scene over its cap.
+    const videoLimit = videoSpendLimit(batch.maxCostPerVideo, project.maxBudget);
+    const overScene = sceneLines.find((s) => s.spend.status === "BLOCKED") ?? null;
 
     // THE CAST OF THIS VIDEO, resolved against the character table.
     //
@@ -637,7 +660,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     // as NEEDS_PROVIDER sends the operator into the model registry to fix
     // something that is not broken.
     const ranOutOfBudget = estimate.errorCodes.includes("over_budget");
-    const overCeiling = total > batch.maxCostPerVideo;
+    const overCeiling = total > videoLimit + 1e-9;
 
     let status: ImportVideoPreview["status"] = "OK";
     if (unusableCharacters.length > 0) {
@@ -661,14 +684,22 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
           `xem giá và bấm xác nhận — nếu không, request trả phí ĐẦU TIÊN sẽ bị từ chối ` +
           `giữa chừng, đúng như lô a690a290 đã dừng.`,
       );
+    } else if (overScene) {
+      // A scene over its own cap: named, with its figures. No cheaper model is
+      // tried and no clip is planned for it - the person decides.
+      status = "OVER_SCENE_BUDGET";
+      videoWarnings.push(`SCENE_LIMIT_EXCEEDED: ${overScene.spend.message}`);
+      videoWarnings.push(
+        "Video này sẽ KHÔNG chạy; các video khác trong lô không bị ảnh hưởng.",
+      );
     } else if (ranOutOfBudget || overCeiling) {
       status = "OVER_VIDEO_BUDGET";
       videoWarnings.push(
         ranOutOfBudget
-          ? `Hạn mức $${batch.maxCostPerVideo.toFixed(2)} cho một video không đủ để định ` +
+          ? `Hạn mức $${videoLimit.toFixed(2)} cho video này không đủ để định ` +
             `tuyến hết các cảnh. Hãy nâng hạn mức/video hoặc bỏ bớt cảnh Video AI.`
-          : `Dự toán $${total.toFixed(6)} vượt hạn mức $${batch.maxCostPerVideo.toFixed(2)} ` +
-            `cho một video.`,
+          : `VIDEO_LIMIT_EXCEEDED: dự toán $${total.toFixed(6)} vượt hạn mức $${videoLimit.toFixed(2)} ` +
+            `của video này $${(total - videoLimit).toFixed(6)}.`,
       );
       videoWarnings.push(
         "Video này sẽ KHÔNG chạy; các video khác trong lô không bị ảnh hưởng.",
@@ -732,11 +763,15 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
           ? `Không thể vẽ nhất quán: ${unusableCharacters.join(", ")} — chưa có ảnh ` +
             `tham chiếu VÀ chưa có một chữ nào mô tả ngoại hình. Tải ảnh lên hoặc ` +
             `điền hồ sơ nhân vật rồi dự toán lại.`
+          : status === "OVER_SCENE_BUDGET" && overScene
+            ? `SCENE_LIMIT_EXCEEDED: ${overScene.spend.message} Không đổi model, không tạo clip.`
           : status === "OVER_VIDEO_BUDGET"
-            ? `Video này thật ra tốn $${uncappedCost.toFixed(6)}, vượt trần ` +
-              `$${batch.maxCostPerVideo.toFixed(2)} cho một video ` +
-              `$${(uncappedCost - batch.maxCostPerVideo).toFixed(6)}. ` +
-              `(Con số $${total.toFixed(6)} bên trên chỉ là phần LỌT vào trần.)`
+            ? `VIDEO_LIMIT_EXCEEDED: ${project.title} vượt giới hạn video ` +
+              `${usd(uncappedCost - videoLimit)} — dự toán ${usd(uncappedCost)}, ` +
+              `giới hạn ${usd(videoLimit)}.` +
+              (Math.abs(uncappedCost - total) > 1e-6
+                ? ` (Con số $${total.toFixed(6)} bên trên chỉ là phần LỌT vào trần.)`
+                : "")
             : (estimate.needsProvider[0] ??
               estimate.errors[0] ??
               "Có cảnh chưa định tuyến được model.");
@@ -756,6 +791,16 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       ),
       lifecycle,
       blockedReason,
+      videoLimit,
+      order: videos.length,
+      spend: overScene
+        ? { ...overScene.spend, estimatedCost: round(uncappedCost, 6) }
+        : evaluateSpendLimits({
+            label: project.title,
+            estimatedCost: uncappedCost,
+            global: { cap: Infinity, used: 0 },
+            video: { limit: videoLimit, used: 0 },
+          }),
       characters,
       paidModels,
       importFingerprint: project.importFingerprint,

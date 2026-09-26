@@ -7,6 +7,7 @@ import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, 
 import { formatUSD } from "@/lib/utils";
 import { approveAndRunBatch, preflightBatch } from "@/app/actions/batch-run";
 import type { ApprovalPreflight } from "@/services/batch-executor";
+import { SpendPlanTable } from "@/components/spend-plan-table";
 
 /**
  * PREFLIGHT, then DUYỆT & CHẠY BATCH - the whole approval, in the UI.
@@ -120,7 +121,9 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
         {pre ? (
           <>
             <div className="grid gap-1 rounded-lg border border-ink-800 p-3 font-mono text-xs md:grid-cols-2">
-              <div>ESTIMATED TOTAL: <strong>{formatUSD(pre.estimatedTotal)}</strong></div>
+              <div>BATCH ESTIMATED (tăng thêm, chỉ video chạy): <strong>{formatUSD(pre.estimatedTotal)}</strong></div>
+              <div>AUTHORIZED MAX: <strong>{Number.isFinite(batchNum) && batchNum > 0 ? formatUSD(batchNum) : "— (chưa nhập)"}</strong></div>
+              <div>VIDEOS TO RUN: <strong>{pre.runnableVideos}</strong> · VIDEOS BLOCKED: <strong>{pre.blockedVideos}</strong></div>
               <div>GLOBAL REMAINING: {formatUSD(pre.globalRemaining)} / cap {formatUSD(pre.globalCap)}</div>
               <div>MAX/BATCH: {Number.isFinite(batchNum) && batchNum > 0 ? formatUSD(batchNum) : "— (chưa nhập)"}</div>
               <div>MAX/VIDEO: {perVideoNum !== undefined ? formatUSD(perVideoNum) : `giữ nguyên (${formatUSD(pre.maxCostPerVideo)})`}</div>
@@ -134,6 +137,8 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
                 {pre.textPosts > 0 ? ` · TEXT API POST: ${pre.textPosts}` : ""}
               </div>
             </div>
+
+            {pre.spendPlan ? <SpendPlanTable plan={pre.spendPlan} preflight={pre.preflight} /> : null}
 
             <div className="space-y-1">
               {pre.checks.map((c) => (
@@ -166,7 +171,9 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
 
             <Button onClick={onRun} disabled={!canRun}>
               {busy === "run" ? <Loader2 className="size-4 animate-spin" /> : null}
-              DUYỆT & CHẠY BATCH
+              {pre.spendPlan && numbersMatch
+                ? `DUYỆT & CHẠY ${pre.runnableVideos} VIDEO — MAX ${formatUSD(batchNum)}`
+                : "DUYỆT & CHẠY BATCH"}
             </Button>
           </>
         ) : null}

@@ -155,15 +155,22 @@ describe("APPROVAL — người dùng nhập trần, không bao giờ tự nâng
     expect((await spendStatus()).cap).toBe(before.cap);
   });
 
-  it("từ chối trần lô thấp hơn dự toán", async () => {
+  // Phase 2 (QĐ-108): a batch ceiling below the TOTAL no longer refuses the
+  // whole batch - the videos that fit run and the rest are BLOCKED by name
+  // (partial batch, tested in spend-limits.gate.test.ts). A ceiling below EVERY
+  // runnable video still refuses, and says why with the reason code.
+  it("từ chối trần lô thấp hơn video rẻ nhất — nêu BATCH_LIMIT_EXCEEDED", async () => {
     const pre = await preflightForApproval(batchId);
+    const cheapest = Math.min(...pre.spendPlan!.runnable.map((v) => v.incrementalCost));
     await expect(
-      approveAndRun({ batchId, maxBatch: Math.max(0.000001, pre.estimatedTotal / 2), lowAutoApproved: false }),
-    ).rejects.toThrow(/Dự toán ≤ trần lô/);
+      approveAndRun({ batchId, maxBatch: Math.max(0.000001, cheapest / 2), lowAutoApproved: false }),
+    ).rejects.toThrow(/BATCH_LIMIT_EXCEEDED/);
   });
 
-  it("từ chối trần/video thấp hơn dự toán của một video chạy được", async () => {
-    await expect(approveAndRun({ batchId, maxBatch: 5, maxPerVideo: 0.000001, lowAutoApproved: false })).rejects.toThrow(/trần\/video/);
+  it("trần/video thấp hơn mọi video: từ chối, nêu VIDEO_LIMIT_EXCEEDED từng video", async () => {
+    await expect(approveAndRun({ batchId, maxBatch: 5, maxPerVideo: 0.000001, lowAutoApproved: false })).rejects.toThrow(
+      /VIDEO_LIMIT_EXCEEDED/,
+    );
   });
 
   it("từ chối trần 0 và số không hợp lệ", async () => {

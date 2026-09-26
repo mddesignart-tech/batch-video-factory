@@ -50,6 +50,7 @@ const AMOUNT_SHORTCUTS = [1, 2, 3, 5, 10];
 const STATUS_TONE: Record<VideoPlanStatus, "ok" | "warn" | "danger"> = {
   OK: "ok",
   OVER_VIDEO_BUDGET: "danger",
+  OVER_SCENE_BUDGET: "danger",
   NEEDS_PROVIDER: "warn",
   NEEDS_CHARACTER_REFERENCE: "danger",
   NEEDS_PROVIDER_CONFIRMATION: "danger",

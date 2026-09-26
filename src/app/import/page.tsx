@@ -1,5 +1,6 @@
 import { Alert, Card, CardContent, CardHeader, CardTitle, PageHeader } from "@/components/ui";
 import { ImportForm } from "./import-form";
+import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,9 @@ export const dynamic = "force-dynamic";
  * spreadsheet, storyboarded elsewhere with the keyframes already drawn - and
  * pays for none of that again. Everything after the import is the same engine.
  */
-export default function ImportPage() {
+
+export default async function ImportPage() {
+  const settings = await getSettings();
   return (
     <div className="space-y-6">
       <PageHeader
@@ -19,7 +22,7 @@ export default function ImportPage() {
         description="Nhập phân cảnh đã soạn sẵn (CSV/JSON, kèm ảnh nếu có) thành một lô video."
       />
 
-      <ImportForm />
+      <ImportForm defaultMaxCostPerVideo={settings.defaultMaxCostPerVideo} />
 
       <Card>
         <CardHeader>

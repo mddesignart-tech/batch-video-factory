@@ -47,6 +47,8 @@ export const DEFAULT_SCENE_DURATION = 4;
 export interface StoryboardScene {
   sceneNumber: number;
   duration: number;
+  /** Scene spend cap (`max_cost`). Null = inherit the policy default. */
+  maxCost: number | null;
   /** Voice-aware timing (V1.2). Missing in the file = AUTO. */
   durationMode: DurationMode;
   minDuration: number | null;
@@ -184,6 +186,8 @@ export interface StoryboardVideo {
   characters: StoryboardCharacter[];
   /** Where this came from, for an error message a person can act on. */
   sourceFile: string;
+  /** Per-video spend cap (`max_cost`; CSV `video_max_cost`). Null = import/Settings default. */
+  maxCost: number | null;
 }
 
 export type IssueLevel = "error" | "warning";
@@ -225,6 +229,24 @@ function warn(
   extra: Partial<ImportIssue> = {},
 ): ImportIssue {
   return { level: "warning", code, message, ...extra };
+}
+
+/** A spend cap from the file: blank = inherit; otherwise a positive dollar amount. */
+export const MAX_COST_CEILING = 1000;
+function parseMaxCost(
+  value: unknown,
+  name: string,
+  at: Partial<ImportIssue>,
+  issues: ImportIssue[],
+): number | null | "invalid" {
+  const t = text(value);
+  if (t.length === 0) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n <= 0 || n > MAX_COST_CEILING) {
+    issues.push(err(`${name}_invalid`, `${name} "${t}" phải là số tiền > 0 và ≤ $${MAX_COST_CEILING}.`, at));
+    return "invalid";
+  }
+  return n;
 }
 
 const text = (v: unknown): string =>
@@ -279,6 +301,8 @@ const RawSceneSchema = z
     duration_mode: z.unknown().optional(),
     min_duration: z.unknown().optional(),
     max_duration: z.unknown().optional(),
+    max_cost: z.unknown().optional(),
+    video_max_cost: z.unknown().optional(),
     narration: z.unknown().optional(),
     dialogue: z.unknown().optional(),
     visual_description: z.unknown().optional(),
@@ -449,6 +473,8 @@ export function normaliseScene(
   const minDuration = bound(raw.min_duration, "min_duration");
   const maxDuration = bound(raw.max_duration, "max_duration");
   if (minDuration === "invalid" || maxDuration === "invalid") return { scene: null, issues };
+  const maxCost = parseMaxCost(raw.max_cost, "max_cost", at, issues);
+  if (maxCost === "invalid") return { scene: null, issues };
   if (minDuration !== null && maxDuration !== null && minDuration > maxDuration) {
     issues.push(
       err("duration_bounds_invalid", `min_duration (${minDuration}s) lớn hơn max_duration (${maxDuration}s).`, at),
@@ -605,6 +631,7 @@ export function normaliseScene(
     scene: {
       sceneNumber,
       duration,
+      maxCost,
       durationMode,
       minDuration,
       maxDuration,
@@ -829,6 +856,8 @@ export function parseStoryboardJson(
     videoTitle: string;
     scenes: RawScene[];
     declared: unknown;
+    /** Video-level `max_cost`, raw. */
+    maxCost?: unknown;
   }[] = [];
   const value = parsed.data as Record<string, unknown>;
   if (Array.isArray(value)) {
@@ -838,6 +867,7 @@ export function parseStoryboardJson(
       video_id?: unknown;
       video_title?: unknown;
       characters?: unknown;
+      max_cost?: unknown;
       scenes: RawScene[];
     }[];
     for (const v of list) {
@@ -846,6 +876,7 @@ export function parseStoryboardJson(
         videoTitle: text(v.video_title),
         scenes: v.scenes,
         declared: v.characters,
+        maxCost: v.max_cost,
       });
     }
   } else {
@@ -854,6 +885,7 @@ export function parseStoryboardJson(
       videoTitle: text(value.video_title),
       scenes: value.scenes as RawScene[],
       declared: value.characters,
+      maxCost: value.max_cost,
     });
   }
 
@@ -862,7 +894,7 @@ export function parseStoryboardJson(
 
   for (const group of groups) {
     // A row may name the video too. That is how one flat array holds several.
-    const byVideo = new Map<string, { title: string; scenes: StoryboardScene[] }>();
+    const byVideo = new Map<string, { title: string; scenes: StoryboardScene[]; maxCostRaw: unknown }>();
     group.scenes.forEach((raw, index) => {
       const videoId = text(raw.video_id) || group.videoId || ctx.fallbackVideoId;
       const videoTitle =
@@ -873,7 +905,9 @@ export function parseStoryboardJson(
       });
       for (const i of sceneIssues) issues.push({ ...i, videoId });
       if (!scene) return;
-      const bucket = byVideo.get(videoId) ?? { title: videoTitle, scenes: [] };
+      const bucket = byVideo.get(videoId) ?? { title: videoTitle, scenes: [], maxCostRaw: group.maxCost };
+      // A flat file (CSV) states the video cap on its rows: the first one wins.
+      if (text(bucket.maxCostRaw).length === 0 && text(raw.video_max_cost).length > 0) bucket.maxCostRaw = raw.video_max_cost;
       bucket.scenes.push(scene);
       byVideo.set(videoId, bucket);
     });
@@ -882,7 +916,9 @@ export function parseStoryboardJson(
     for (const i of cast.issues) issues.push({ ...i, sourceFile: ctx.sourceFile });
 
     for (const [videoId, bucket] of byVideo) {
+      const videoCap = parseMaxCost(bucket.maxCostRaw, "max_cost", { videoId, sourceFile: ctx.sourceFile }, issues);
       videos.push({
+        maxCost: videoCap === "invalid" ? null : videoCap,
         videoId,
         videoTitle: bucket.title,
         scenes: [...bucket.scenes].sort((a, b) => a.sceneNumber - b.sceneNumber),
@@ -1057,7 +1093,11 @@ export function parseStoryboardCsv(
   const videos: StoryboardVideo[] = [...byVideo.entries()].map(([videoId, bucket]) => {
     const cast = collectCharacters(undefined, rawByVideo.get(videoId) ?? []);
     for (const i of cast.issues) out.push({ ...i, videoId, sourceFile: ctx.sourceFile });
+    // CSV states a video cap on its rows (`video_max_cost`); the first non-empty one wins.
+    const capCell = (rawByVideo.get(videoId) ?? []).map((r) => text(r.video_max_cost)).find((t) => t.length > 0);
+    const videoCap = parseMaxCost(capCell, "video_max_cost", { videoId, sourceFile: ctx.sourceFile }, out);
     return {
+      maxCost: videoCap === "invalid" ? null : videoCap,
       videoId,
       videoTitle: bucket.title,
       scenes: [...bucket.scenes].sort((a, b) => a.sceneNumber - b.sceneNumber),

@@ -8,10 +8,14 @@ import { spendStatus } from "./spend-guard";
 import {
   projectReservedAndSpent,
   reservationLedger,
-  reserve,
+  reserveGuarded,
   ReservationError,
+  sceneReservedAndSpent,
+  totalReserved,
   type ReservationLedger,
 } from "./cost-reservation";
+import { getSettings } from "@/lib/settings";
+import { evaluateSpendLimits, type SpendReasonCode, type SpendVerdict } from "@/domain/spend-limits";
 
 /**
  * BATCH_SPEND_AUTHORIZATION - one approval, many requests.
@@ -40,6 +44,37 @@ import {
 
 export const DEFAULT_MAX_COST_PER_VIDEO = 2.5;
 
+/** Gate error code for each budget reason code. */
+const REASON_TO_GATE_CODE: Partial<Record<SpendReasonCode, BatchAuthorizationError["code"]>> = {
+  SCENE_LIMIT_EXCEEDED: "over_scene_budget",
+  VIDEO_LIMIT_EXCEEDED: "over_video_budget",
+  BATCH_LIMIT_EXCEEDED: "over_batch_budget",
+  GLOBAL_LIMIT_EXCEEDED: "global_cap",
+};
+
+/**
+ * The per-video limit for one video: its own (Project.maxBudget, from the
+ * storyboard max_cost or the import form) never above the batch-wide
+ * per-video ceiling the approval carries. The tighter wins; neither is raised.
+ */
+export function videoSpendLimit(batchPerVideo: number, projectMax: number | null): number {
+  return projectMax !== null && projectMax > 0 ? Math.min(batchPerVideo, projectMax) : batchPerVideo;
+}
+
+/**
+ * The scene limit: the storyboard's own max_cost; otherwise the Settings
+ * default, which applies to VIDEO_AI scenes only; otherwise none.
+ */
+export function sceneSpendLimit(
+  scene: { maxCost: number | null; motionMode: string; motionSource: string } | null,
+  defaultVideoAiScene: number | null,
+): number | null {
+  if (!scene) return null;
+  if (scene.maxCost !== null && scene.maxCost > 0) return scene.maxCost;
+  const videoAi = scene.motionMode === "VIDEO_AI" || (scene.motionMode !== "LOCAL_MOTION" && scene.motionSource === "AI_VIDEO");
+  return videoAi && defaultVideoAiScene !== null && defaultVideoAiScene > 0 ? defaultVideoAiScene : null;
+}
+
 export class BatchAuthorizationError extends Error {
   constructor(
     message: string,
@@ -52,7 +87,10 @@ export class BatchAuthorizationError extends Error {
       | "provider_out_of_scope"
       | "global_cap"
       | "provider_wallet"
-      | "low_auto_not_approved",
+      | "low_auto_not_approved"
+      | "over_scene_budget",
+    /** The structured verdict behind a money refusal (reason code, limit, overBy). */
+    readonly verdict?: SpendVerdict,
   ) {
     super(message);
     this.name = "BatchAuthorizationError";
@@ -364,48 +402,61 @@ export async function assertBatchAuthorized(
   // own hold: adding `cost` on top would charge it against the ceiling twice
   // and refuse a resume that costs nothing. That would break the one property
   // the idempotency key exists to provide.
-  const alreadyReserved = await prisma.costReservation.findUnique({
-    where: { idempotencyKey: input.idempotencyKey },
-    select: { id: true },
-  });
-  const newMoney = alreadyReserved ? 0 : cost;
+  //
+  // 4 + 6 + scene cap, judged by the ONE budget function (QĐ-108) INSIDE the
+  // reservation lock - so no other job can read the same headroom between this
+  // check and the reservation, and every figure is read now, not at preflight
+  // (TOCTOU). Order of refusal: scene, video, batch, global.
+  const [project, scene, settings] = await Promise.all([
+    prisma.project.findUnique({ where: { id: input.projectId }, select: { maxBudget: true } }),
+    prisma.scene.findUnique({ where: { id: input.sceneId }, select: { sceneNumber: true, maxCost: true, motionMode: true, motionSource: true } }),
+    getSettings(),
+  ]);
+  const videoLimit = videoSpendLimit(auth.maxCostPerVideo, project?.maxBudget ?? null);
+  const sceneLimit = sceneSpendLimit(scene, settings.defaultMaxCostVideoAiScene);
+  const label = scene ? `Video ${input.projectId.slice(0, 8)} · cảnh ${scene.sceneNumber}` : `Video ${input.projectId.slice(0, 8)}`;
 
-  const alreadyOnVideo = await projectReservedAndSpent(input.projectId);
-  if (round(alreadyOnVideo + newMoney, 6) > auth.maxCostPerVideo) {
-    throw new BatchAuthorizationError(
-      `Video này đã dùng $${alreadyOnVideo.toFixed(6)}; thêm $${newMoney.toFixed(6)} ` +
-        `sẽ vượt hạn mức $${auth.maxCostPerVideo.toFixed(2)} cho MỘT video. ` +
-        `Đánh dấu OVER_VIDEO_BUDGET và dừng video này, các video khác không ảnh hưởng.`,
-      "over_video_budget",
-    );
-  }
-
-  // 6 - the two limits that exist outside this batch entirely. The app-wide cap
-  // says "this tool has spent what I authorised in total"; the provider wallet
-  // says "that account has money". A batch approval overrides neither.
-  const status = await spendStatus();
-  if (round(status.spent + newMoney, 6) > status.cap) {
-    throw new BatchAuthorizationError(
-      `Hạn mức toàn ứng dụng còn $${status.remaining.toFixed(6)}, không đủ cho ` +
-        `yêu cầu $${cost.toFixed(6)}. Quyền chi của lô không vượt qua được hạn ` +
-        `mức tổng.`,
-      "global_cap",
-    );
-  }
-  await assertProviderBudget({
-    provider: input.provider,
-    model: input.model,
-    // Zero on a resume: the vendor wallet was already checked when this request
-    // first reserved, and charging it again would refuse a retry that is about
-    // to spend nothing.
-    estimatedCost: newMoney,
-  });
+  const limitsCheck = async (): Promise<void> => {
+    const alreadyReserved = await prisma.costReservation.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      select: { id: true },
+    });
+    const newMoney = alreadyReserved ? 0 : cost;
+    const [onVideo, onScene, status, held] = await Promise.all([
+      projectReservedAndSpent(input.projectId),
+      sceneReservedAndSpent(input.sceneId),
+      spendStatus(),
+      totalReserved(),
+    ]);
+    // The batch layer is judged by `reserveOnce` right after, in the same lock:
+    // running out of batch money also closes the approval (EXHAUSTED) so the
+    // remaining jobs stop asking.
+    const verdict = evaluateSpendLimits({
+      label,
+      estimatedCost: newMoney,
+      global: { cap: status.cap, used: round(status.spent + held, 6) },
+      video: { limit: videoLimit, used: onVideo },
+      scene: { limit: sceneLimit, used: onScene },
+    });
+    if (verdict.status === "BLOCKED") {
+      throw new BatchAuthorizationError(
+        `${verdict.reasonCode}: ${verdict.message} ` +
+          `Dừng riêng phần này, các video khác không ảnh hưởng. KHÔNG gửi request.`,
+        REASON_TO_GATE_CODE[verdict.reasonCode] ?? "over_batch_budget",
+        verdict,
+      );
+    }
+    // The provider's own wallet. Zero on a resume: already checked when this
+    // request first reserved, and charging it again would refuse a retry that
+    // is about to spend nothing.
+    await assertProviderBudget({ provider: input.provider, model: input.model, estimatedCost: newMoney });
+  };
 
   // 3 - the batch ceiling, and the reservation that makes the answer stick.
   // Last on purpose: it is the only step with a side effect, so every cheaper
   // refusal happens before anything is written.
   try {
-    const { reused, ledger } = await reserve(
+    const { reused, ledger } = await reserveGuarded(
       {
         batchId: input.batchId,
         projectId: input.projectId,
@@ -417,6 +468,7 @@ export async function assertBatchAuthorized(
         estimatedCost: cost,
       },
       auth.authorizedMaxSpend,
+      limitsCheck,
     );
     return { ledger, reused };
   } catch (err) {

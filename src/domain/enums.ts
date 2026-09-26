@@ -299,6 +299,8 @@ export const VIDEO_PLAN_STATUSES = [
   "OK",
   /** Estimate exceeds the per-video ceiling. Never auto-started. */
   "OVER_VIDEO_BUDGET",
+  /** A scene's estimate exceeds its own scene cap (V1.2, QĐ-108). Never auto-started. */
+  "OVER_SCENE_BUDGET",
   /** A scene wants AI video but no approved model can serve it. */
   "NEEDS_PROVIDER",
   /**
@@ -411,6 +413,7 @@ export const VI_MOTION_SOURCE: Record<MotionSource, string> = {
 export const VI_VIDEO_PLAN_STATUS: Record<VideoPlanStatus, string> = {
   OK: "Sẵn sàng",
   OVER_VIDEO_BUDGET: "Vượt hạn mức/video",
+  OVER_SCENE_BUDGET: "Vượt hạn mức/cảnh",
   NEEDS_PROVIDER: "Thiếu provider được duyệt",
   NEEDS_CHARACTER_REFERENCE: "Thiếu nhận dạng nhân vật",
   NEEDS_PROVIDER_CONFIRMATION: "Chưa xác nhận giá model",

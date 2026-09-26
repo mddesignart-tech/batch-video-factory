@@ -504,6 +504,11 @@ model Scene {
   /// Stable reason code from scene-timing.ts (VOICE_PADDED, CLIP_TRIMMED_LOCAL, ...).
   timingReason        String?
 
+  /// Scene spend cap (V1.2 Phase 2, QĐ-108): the most this scene's paid assets
+  /// together may cost. Null = inherit (Settings default for a VIDEO_AI scene,
+  /// otherwise no scene cap). From the storyboard's scene `max_cost`.
+  maxCost             Float?
+
   /// What the OPERATOR asked for, as opposed to what was decided.
   ///
   /// AUTO leaves the motion decision to the planner, which is V1's behaviour and

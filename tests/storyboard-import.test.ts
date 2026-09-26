@@ -22,6 +22,7 @@ import { preflightImportedBatch } from "@/services/import-preflight";
 import { buildBatchReport } from "@/services/batch-report";
 import { generateSceneImage } from "@/services/generation";
 import { toAbsolute } from "@/lib/paths";
+import { usd } from "@/domain/spend-limits";
 
 /**
  * Import Storyboard / Batch From Scenes V1.
@@ -681,7 +682,11 @@ describe("tạo lô từ storyboard (mock mode, $0)", () => {
     // `uncappedCost`, và chính nó mới nói được "phải nâng trần thêm bao nhiêu".
     expect(pricey.uncappedCost).toBeGreaterThan(pricey.estimatedCost);
     expect(pricey.uncappedCost).toBeGreaterThan(0.5);
-    expect(pricey.blockedReason).toContain("thật ra tốn");
+    // QĐ-108: the reason names the code and the UNCAPPED figure, not the part
+    // that fitted - "phải nâng trần thêm bao nhiêu" is still answerable.
+    expect(pricey.blockedReason).toContain("VIDEO_LIMIT_EXCEEDED");
+    expect(pricey.blockedReason).toContain(`dự toán ${usd(pricey.uncappedCost)}`);
+    expect(pricey.spend.reasonCode).toBe("VIDEO_LIMIT_EXCEEDED");
     // Video chạy được thì hai con số bằng nhau — không có gì bị cắt.
     expect(cheap.uncappedCost).toBeCloseTo(cheap.estimatedCost, 6);
     expect(pre.estimatedTotalUncapped).toBeGreaterThan(pre.estimatedTotalIncludingBlocked);

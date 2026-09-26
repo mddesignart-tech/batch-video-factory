@@ -153,6 +153,26 @@ export function reserve(
   return serialise(() => reserveOnce(input, ceiling));
 }
 
+/**
+ * Check every OTHER limit and reserve, as ONE step under the same lock.
+ *
+ * `reserve` alone serialises the batch ceiling. The per-video, per-scene and
+ * global limits were checked before it, outside the lock - so two jobs for the
+ * same video could both read the same headroom and both take it (QĐ-108). Here
+ * `check` runs inside the critical section, against the ledger as it is at
+ * that instant, reservations included; if it throws, nothing is written.
+ */
+export function reserveGuarded(
+  input: ReserveInput,
+  ceiling: number,
+  check: () => Promise<void>,
+): Promise<{ reused: boolean; ledger: ReservationLedger }> {
+  return serialise(async () => {
+    await check();
+    return reserveOnce(input, ceiling);
+  });
+}
+
 async function reserveOnce(
   input: ReserveInput,
   ceiling: number,
@@ -380,6 +400,25 @@ export async function projectReservedAndSpent(projectId: string): Promise<number
   return money(
     (committedAgg._sum.actualCost ?? 0) + (reservedAgg._sum.estimatedCost ?? 0),
   );
+}
+
+/** Everything held or spent on one scene (all its paid assets), for a scene cap. */
+export async function sceneReservedAndSpent(sceneId: string): Promise<number> {
+  const [committedAgg, reservedAgg] = await Promise.all([
+    prisma.costReservation.aggregate({ where: { sceneId, status: "COMMITTED" }, _sum: { actualCost: true } }),
+    prisma.costReservation.aggregate({ where: { sceneId, status: "RESERVED" }, _sum: { estimatedCost: true } }),
+  ]);
+  return money((committedAgg._sum.actualCost ?? 0) + (reservedAgg._sum.estimatedCost ?? 0));
+}
+
+/**
+ * Money promised to requests still in flight, across EVERY batch. The global
+ * cap must count it: committed spend alone lets two batches promise the same
+ * last dollar of the app-wide limit.
+ */
+export async function totalReserved(): Promise<number> {
+  const agg = await prisma.costReservation.aggregate({ where: { status: "RESERVED" }, _sum: { estimatedCost: true } });
+  return money(agg._sum.estimatedCost ?? 0);
 }
 
 function isUniqueViolation(err: unknown): boolean {

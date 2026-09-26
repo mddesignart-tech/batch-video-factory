@@ -380,6 +380,8 @@ export interface ResolvedVideo {
   videoId: string;
   title: string;
   sourceFile: string;
+  /** Storyboard `max_cost` for this video; null = the import's default. */
+  maxCost: number | null;
   characters: ResolvedCharacter[];
   scenes: ResolvedScene[];
   suppliedImages: number;
@@ -658,6 +660,7 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
       videoId: video.videoId,
       title: video.videoTitle || video.videoId,
       sourceFile: video.sourceFile,
+      maxCost: video.maxCost,
       characters: cast,
       scenes: resolved,
       suppliedImages: supplied,
@@ -842,7 +845,10 @@ export async function materialiseImport(
         qualityMode: opts.qualityMode ?? "BALANCED",
         stylePresetId: opts.stylePresetId ?? null,
         targetDuration: opts.targetDuration ?? 25,
-        maxBudget: opts.maxCostPerVideo,
+        // Per-video spend limit: the storyboard's own `max_cost` when it has one,
+        // otherwise what the import form set (itself defaulted from Settings).
+        // Never above the batch-wide per-video ceiling - see videoSpendLimit.
+        maxBudget: video.maxCost ?? opts.maxCostPerVideo,
         scriptJson: JSON.stringify({
           source: "IMPORT",
           videoId: video.videoId,
@@ -1039,6 +1045,7 @@ export async function materialiseImport(
           motionMode: scene.motionMode,
           motionSource: scene.motionMode === "LOCAL_MOTION" ? "LOCAL_MOTION" : "AI_VIDEO",
           // Voice-aware timing instruction; `duration` above stays the plan.
+          maxCost: scene.maxCost,
           durationMode: scene.durationMode,
           minDuration: scene.minDuration,
           maxDuration: scene.maxDuration,

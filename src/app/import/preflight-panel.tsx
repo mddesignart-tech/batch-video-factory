@@ -175,6 +175,10 @@ function VideoBlock({ video, onUpdate }: { video: ImportVideoPreview; onUpdate?:
         </span>
         <span className="ml-auto font-medium">
           {formatUSD(video.estimatedCost)}
+          <span className="ml-1 text-xs text-ink-500">/ giới hạn video {formatUSD(video.videoLimit)}</span>
+          {video.spend.status === "BLOCKED" ? (
+            <span className="ml-1 font-mono text-[10px] text-danger-500">{video.spend.reasonCode}</span>
+          ) : null}
           {video.uncappedCost > video.estimatedCost ? (
             <span className="ml-1 text-warn-500">
               (thật ra {formatUSD(video.uncappedCost)})
@@ -284,7 +288,15 @@ function VideoBlock({ video, onUpdate }: { video: ImportVideoPreview; onUpdate?:
                 <PlanBadge plan={s.plan.voice} />
               </Td>
               <Td className="font-mono text-[11px]">{s.videoModel ?? "—"}</Td>
-              <Td>{formatUSD(s.estimatedCost)}</Td>
+              <Td>
+                {formatUSD(s.estimatedCost)}
+                {s.spendLimit !== null ? (
+                  <span className="block text-[10px] text-ink-500">giới hạn cảnh {formatUSD(s.spendLimit)}</span>
+                ) : null}
+                {s.spend.status === "BLOCKED" ? (
+                  <span className="block font-mono text-[10px] text-danger-500">{s.spend.reasonCode}</span>
+                ) : null}
+              </Td>
             </tr>
           ))}
         </tbody>

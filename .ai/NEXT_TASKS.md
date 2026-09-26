@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-26 — V1.2 Phase 1 (voice-aware timing) PASS; chờ duyệt Phase 2
+**Cập nhật:** 2026-09-26 — V1.2 Phase 2 (ngân sách nhiều tầng) PASS; chờ duyệt Phase 3
 
 ---
 
@@ -11,6 +11,12 @@
 3. Nút TIẾP TỤC / KIỂM TRA LẠI theo từng video COMPLETED (hiện có ở mức lô).
 4. Kiểm REUSE clip thật giữa hai lần nhập cùng storyboard (hiện mỗi lần nhập là video riêng, mua clip riêng).
 5. Test E2E trình duyệt tự động (Playwright) cho luồng Nhập → DUYỆT & CHẠY → Output, chạy mock.
+
+## ✅ V1.2 Phase 2 COMPLETE — ngân sách nhiều tầng (QĐ-108, QĐ-109)
+
+Toàn cục → lô → video → cảnh; REUSE = $0 tăng thêm; chạy một phần lô theo thứ tự xác định; kiểm mọi tầng
+trong khoá reservation (chống race) và đọc lại ngay trước POST (TOCTOU). 1282/1282 test. Phase 3: CHỜ DUYỆT.
+Quy tắc vận hành: chỉ MỘT bộ test đầy đủ tại một thời điểm; đóng ứng dụng nặng (Illustrator) trước khi chạy.
 
 ## ✅ V1.1 QA COMPLETE (2026-09-26) — xem QĐ-106
 

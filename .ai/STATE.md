@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-26 (V1.2 Phase 1 — voice-aware scene timing PASS, $0; chờ duyệt Phase 2)
+**Cập nhật:** 2026-09-26 (V1.2 Phase 2 COMPLETE — ngân sách nhiều tầng, $0; chờ duyệt Phase 3)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,21 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.2 PHASE 2 — NGÂN SÁCH NHIỀU TẦNG (2026-09-26, $0, không POST trả phí)
+
+Một nguồn logic: src/domain/spend-limits.ts. Tầng, mã lý do, tăng thêm, chạy một phần lô, khoá đồng thời,
+TOCTOU: QĐ-108. Migration 20260926010000_scene_spend_limit (Scene.maxCost, chỉ thêm cột).
+QA UI (server nháp, bản sao DB, mock): lô 4 video A/B/C/D — B có max_cost riêng thấp hơn dự toán →
+BLOCKED VIDEO_LIMIT_EXCEEDED; ĐƯỢC CHẠY A + C + D; nút "DUYỆT & CHẠY 3 VIDEO — MAX $0.0010"; A/C/D COMPLETED,
+B 0 ProviderJob · 0 reservation; quyền chi ghi runnableProjectIds; không khoản giữ chỗ treo.
+Sửa lỗ thật: trần video + toàn cục trước đây kiểm NGOÀI khoá reservation; toàn cục bỏ qua tiền đang giữ chỗ.
+Test mới: tests/spend-limits.test.ts (15), tests/spend-limits.gate.test.ts (12).
+ĐÓNG PHASE 2 (2026-09-26): bộ test đầy đủ 62/62 file · 1282/1282 test · 0 hỏng · 0 skip · 0 ngắt (2701s,
+một process). pipeline.e2e chạy riêng 3/3 PASS. Lỗi FFmpeg trước đó = va chạm môi trường test (vitest thứ hai
+xoá data/.test) → mỗi lần chạy có thư mục riêng (QĐ-109). Migration 20260926010000_scene_spend_limit ĐÃ ÁP lên
+data/app.db (sao lưu backups/app-before-scene-spend-limit-20260926-200626.db); trước/sau: ProviderJob 156/156 ·
+CostEntry 193/193 · CostReservation 57/57 · chi $8.413060/$8.413060 · cap $8.50/$8.50. Paid POST 0, $0.
 
 ## ✅ V1.2 PHASE 1 — VOICE-AWARE SCENE TIMING (2026-09-26, $0, không POST trả phí)
 

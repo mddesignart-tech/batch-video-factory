@@ -2948,3 +2948,84 @@ Thay đổi hành vi so với V1.1 (test cũ đã cập nhật theo):
 - Clip VIDEO_AI ngắn hơn lời > 1s: trước đây giữ khung cuối tới 10s (thử nghiệm: 4s đứng hình); nay
   BLOCK render với MEDIA_REGEN_REQUIRED. Cảnh ảnh tĩnh / LOCAL_MOTION vẫn kéo dài cho đủ lời.
   Một video cũ đã xong KHÔNG bị ảnh hưởng trừ khi được render lại.
+
+## QĐ-108 — Ngân sách nhiều tầng: toàn cục → lô → video → cảnh (V1.2 Phase 2)
+
+**Một nguồn logic:** `src/domain/spend-limits.ts` (thuần). `evaluateSpendLimits` xét MỘT khoản tăng
+thêm qua 4 tầng, báo tầng cụ thể nhất trước (cảnh → video → lô → toàn cục); `planBatchSpend` quyết
+định video nào của lô được chạy. Kết quả luôn có `status` (PASS/BLOCKED/WARNING), `reasonCode`,
+`estimatedCost`, `limit`, `remainingBefore/After`, `overBy`, và câu tiếng Việt nêu tên + số, vd.
+"Video B vượt giới hạn video $0.11 — dự toán $0.81, giới hạn $0.70."
+
+**Mã lý do:** OK · GLOBAL_LIMIT_EXCEEDED · BATCH_LIMIT_EXCEEDED · VIDEO_LIMIT_EXCEEDED ·
+SCENE_LIMIT_EXCEEDED · PROVIDER_NOT_CONFIRMED · MODEL_NOT_CONFIRMED · PAID_ASSET_REQUIRES_APPROVAL ·
+PAID_ASSET_NEEDS_RECOVERY · NOT_RUNNABLE (chặn vì lý do không phải tiền, vd. thiếu tham chiếu nhân vật).
+
+**Các tầng:**
+- Toàn cục = GLOBAL PROJECT SPEND LIMIT (hard safety ceiling, không thay đổi); nay tính CẢ tiền đang
+  giữ chỗ (RESERVED) của mọi lô, không chỉ tiền đã chi.
+- Lô = trần người gõ ở màn duyệt (`authorizedMaxSpend`).
+- Video = `Project.maxBudget` (storyboard `max_cost` cấp video; CSV `video_max_cost`; không có → trần
+  /video của form Nhập, mặc định Settings DEFAULT MAX COST / VIDEO = $1.50), không bao giờ vượt trần
+  /video chung của lô (`videoSpendLimit` = min). Video có trần "mặc định" đi theo trần/video mới gõ ở
+  màn duyệt (`approvalVideoLimit`); video có `max_cost` riêng giữ trần riêng.
+- Cảnh = `Scene.maxCost` (storyboard `max_cost` cấp cảnh; migration `20260926010000_scene_spend_limit`);
+  không có → Settings DEFAULT MAX COST / VIDEO AI SCENE (mặc định trống = không giới hạn), chỉ áp cho
+  cảnh VIDEO_AI. Tính trên TỔNG tài sản trả phí của cảnh.
+
+**Tăng thêm (incremental):** asset đã mua & dùng lại được = $0; resume chỉ định giá phần còn thiếu;
+duyệt dùng số tăng thêm, không bao giờ dùng tổng lịch sử.
+
+**Chạy một phần lô:** preflight xét trần cảnh/video của từng video (vượt → BLOCKED riêng, không
+chiếm tiền), rồi first-fit theo thứ tự xác định (ưu tiên người dùng ↓, thứ tự nhập ↑, id ↑) vào
+min(trần lô, toàn cục còn lại); video không vừa → BLOCKED (BATCH_/GLOBAL_LIMIT_EXCEEDED) và video
+sau vẫn được thử. Số duyệt = tổng video chạy. Danh sách video được duyệt lưu trong
+`BatchAuthorization.note.runnableProjectIds`; runBatch/resume KHÔNG chạy video ngoài danh sách
+(kể cả khi còn tiền). Lô ý tưởng (IDIOM_GENERATED, chưa có dự án) giữ kiểm tra cũ tất-cả-hoặc-không.
+
+**Đồng thời + TOCTOU:** trước mỗi POST trả phí, cổng `assertBatchAuthorized` chạy
+`reserveGuarded`: kiểm trần cảnh / video / toàn cục (có giữ chỗ) / ví provider VÀ ghi reservation
+trong CÙNG vùng khoá (trước đây chỉ trần lô nằm trong khoá → hai job cùng video có thể cùng vượt
+trần video; hai lô có thể cùng lấy đồng cuối của hạn mức toàn cục). Mọi con số đọc lại ngay lúc đó,
+không tin số của preflight. Giới hạn đã nêu từ trước vẫn đúng: khoá theo tiến trình (một app, một DB).
+
+**Request trả phí lỗi:** giữ cơ chế có sẵn — job completed → REUSE; request đã có externalId → bám
+theo, không POST lần hai; chỉ trả tiền giữ chỗ khi request chưa rời máy; job trả phí không tự retry.
+Logic ngân sách không bao giờ là lý do để thử lại.
+
+UI: bảng kế hoạch chi ở màn duyệt (Video | Cảnh | Ảnh | Video AI | Giọng | Render | Dự toán tăng thêm |
+Giới hạn | Trạng thái + mã lý do; bấm để xem từng cảnh), dòng ĐƯỢC CHẠY / BỊ CHẶN, nút
+"DUYỆT & CHẠY N VIDEO — MAX $X"; trang Nhập hiện giới hạn video/cảnh + mã lý do; Settings có 2 ô
+mặc định. Số dưới 1 cent hiện 6 chữ số (không còn "$0.00" vô nghĩa).
+
+## QĐ-109 — Mỗi lần chạy vitest có thư mục dữ liệu riêng; một bộ test đầy đủ tại một thời điểm
+
+Sự cố 2026-09-26: trong lúc bộ test đầy đủ đang chạy, một lệnh vitest thứ hai được khởi động. Global
+setup luôn `rmSync(data/.test, {recursive})` ở đầu mỗi lần chạy → xoá DB/ảnh/MP4 của bộ đang chạy (dừng
+ở EPERM trên file DB bị khoá, sau khi đã xoá file con) → `pipeline.e2e › excludes a skipped scene`
+hỏng "FFmpeg thoát với mã 1" (input đã mất). Chạy lại `pipeline.e2e` một mình 3 lần: 3/3 PASS (23/23).
+
+Sửa hạ tầng TEST (không đụng code production): `tests/test-env.ts` đặt `TEST_DATA =
+data/.test/run-<pid>-<id>`, truyền qua biến môi trường `VIDEO_FACTORY_TEST_DATA` từ global setup
+(tiến trình chính) sang các worker fork. Global setup chỉ xoá thư mục của CHÍNH nó, dọn các thư mục
+run cũ hơn 24h (bỏ qua cái đang bị khoá), và xoá thư mục của nó ở teardown.
+
+Quy tắc vận hành vẫn giữ: một bộ test đầy đủ tại một thời điểm (máy này từng bị hệ thống dừng bộ test
+vì thiếu RAM); không chạy test lẻ song song với bộ đầy đủ.
+
+Thay đổi ngữ nghĩa Phase 2 phản ánh vào test cũ: `batch-executor` — trần lô thấp hơn TỔNG không còn từ
+chối cả lô (chạy một phần); chỉ từ chối khi thấp hơn video rẻ nhất (BATCH_LIMIT_EXCEEDED) hoặc trần
+/video thấp hơn mọi video (VIDEO_LIMIT_EXCEEDED). Khi không còn video nào chạy được, lời từ chối nêu
+từng video và mã lý do.
+
+Bộ đầy đủ lần 1 sau khi cách ly (2026-09-26 18:17→19:06, chạy trọn): 3 hỏng, đều do ngữ nghĩa Phase 2,
+đã sửa ở TEST, không đổi code production:
+- `batch-factory` 3 video: GLOBAL_LIMIT_EXCEEDED "đã dùng $4.53/$5.00" — tiền GIỮ CHỖ do chính các
+  test reservation phía trên cố ý để lại. Hạn mức toàn cục nay tính cả tiền giữ chỗ (đúng ý đồ) →
+  test đặt hạn mức = đã chi + đang giữ + $5. Lưu ý vận hành: một lần chạy bị sập để lại RESERVED sẽ
+  chiếm hạn mức toàn cục cho tới khi lô đó được TIẾP TỤC (runBatch trả lại phần treo của lô ở cuối).
+  DB production lúc này: 0 RESERVED.
+- `spend-limits.gate` E: trần lô = đúng dự toán video A (+$0.000001) quá sát — giữ chỗ lúc chạy nhích
+  hơn dự toán → EXHAUSTED giữa chừng. Test dùng 1.5×A (vẫn < A+B). UI vẫn đề xuất trần = dự toán +10%.
+- `storyboard-import`: bám câu chữ cũ "thật ra tốn"; nay kiểm VIDEO_LIMIT_EXCEEDED + đúng số dự toán
+  không cắt (QĐ-081 vẫn được giữ: con số thật vẫn hiện).

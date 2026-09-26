@@ -30,7 +30,7 @@ import {
   settleBatchIfDone,
   storedPlan,
 } from "@/services/batch-runner";
-import { setSpendCap } from "@/services/spend-guard";
+import { setSpendCap, spendStatus } from "@/services/spend-guard";
 import { setProviderBudget } from "@/services/provider-budget";
 import { runJob } from "@/jobs/handlers";
 import { runBatch } from "@/services/batch-executor";
@@ -985,6 +985,11 @@ describe("three-video mock batch, end to end", () => {
       maxCostPerVideo: 2.5,
     });
     expect(plan.runnableCount).toBe(3);
+
+    // Money still HELD by the reservation tests above counts against the
+    // global cap too (QĐ-108): give this run $5 of headroom above spent + held.
+    const held = (await prisma.costReservation.aggregate({ where: { status: "RESERVED" }, _sum: { estimatedCost: true } }))._sum.estimatedCost ?? 0;
+    await setSpendCap(Math.round(((await spendStatus()).spent + held + 5) * 1e6) / 1e6);
 
     // Nothing has been spent, and nothing can be, until this call.
     await approveAuthorization({ batchId: batch.id, authorizedMaxSpend: 4 });

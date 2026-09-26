@@ -68,10 +68,11 @@ async function collectDropped(items: DataTransferItemList): Promise<{ file: File
  * batch goes through, because an "import and run" button is exactly the thing
  * that turns a typo in a spreadsheet into a bill.
  */
-export function ImportForm() {
+export function ImportForm({ defaultMaxCostPerVideo = 1.5 }: { defaultMaxCostPerVideo?: number } = {}) {
   const [source, setSource] = useState("");
   const [name, setName] = useState("");
-  const [perVideo, setPerVideo] = useState("1.50");
+  // Settings > DEFAULT MAX COST / VIDEO; a storyboard max_cost overrides it per video.
+  const [perVideo, setPerVideo] = useState(defaultMaxCostPerVideo.toFixed(2));
   const [perBatch, setPerBatch] = useState("5.00");
   // Off by default: importing less than the operator handed over is a choice
   // they make, not a convenience the tool grants itself. QĐ-073.

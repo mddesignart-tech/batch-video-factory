@@ -48,6 +48,35 @@ export function SettingsForm({ settings }: { settings: AppSettings }) {
           </div>
         </section>
 
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-400">Trần chi mặc định (nâng cao)</h3>
+          <p className="text-[11px] text-ink-500">
+            Dùng khi storyboard không ghi <code>max_cost</code>. Đây là GIỚI HẠN, không phải mục tiêu: không nâng gì,
+            không đổi model, và luôn nằm dưới GLOBAL PROJECT SPEND LIMIT.
+          </p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="DEFAULT MAX COST / VIDEO (USD)">
+              <Input
+                name="defaultMaxCostPerVideo"
+                type="number"
+                min={0.01}
+                step="0.01"
+                defaultValue={settings.defaultMaxCostPerVideo}
+              />
+            </Field>
+            <Field label="DEFAULT MAX COST / VIDEO AI SCENE (USD, để trống = không giới hạn cảnh)">
+              <Input
+                name="defaultMaxCostVideoAiScene"
+                type="number"
+                min={0.01}
+                step="0.01"
+                defaultValue={settings.defaultMaxCostVideoAiScene ?? ""}
+                placeholder="không giới hạn"
+              />
+            </Field>
+          </div>
+        </section>
+
         <section>
           <h3 className="mb-2 text-xs font-semibold tracking-wide text-ink-300 uppercase">
             Hàng đợi công việc
