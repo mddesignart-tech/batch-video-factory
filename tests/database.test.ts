@@ -223,8 +223,15 @@ describe("job queue", () => {
     if (first) await completeJob(first.id);
   });
 
-  it("re-queues a failed job with backoff while attempts remain", async () => {
+  it("never re-queues a paid job on its own (QĐ-103)", async () => {
     const job = await enqueue({ type: "generate_script", projectId, maxAttempts: 3 });
+    await claimNext();
+    expect(await failJob(job.id, new Error("boom"))).toBe(false);
+    expect((await prisma.job.findUnique({ where: { id: job.id } }))?.status).toBe("failed");
+  });
+
+  it("re-queues a failed local job with backoff while attempts remain", async () => {
+    const job = await enqueue({ type: "render_final", projectId, maxAttempts: 3 });
     await claimNext();
     const willRetry = await failJob(job.id, new Error("boom"));
     expect(willRetry).toBe(true);

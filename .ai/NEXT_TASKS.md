@@ -1,8 +1,17 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-25 — baseline **v1.1.0** (storyboard thật PASSED); v1.0.0 không đổi
+**Cập nhật:** 2026-09-26 — PAID UI RUN PASS; hạn mức còn $0,086940
 
 ---
+
+## ✅ READY FOR DAILY USE (2026-09-26)
+
+1. ✅ GLOBAL PROJECT SPEND LIMIT = $8,50 trong `data/app.db` (đọc lại + audit, QĐ-104).
+2. ✅ Preflight examples/storyboard-import-5 (trần lô $0,46, trần/video $0,70) → READY.
+3. ✅ Paid UI test PASS — lô 6f4ec6e3, $0,400067 / $0,46, POST 0/1/5, retry 0.
+4. ✅ Resume trên UI: +0 ProviderJob/CostEntry/POST, $0, final không render lại.
+5. ✅ QA cuối, commit "feat: unify production executor and complete daily-use workflow", push main. KHÔNG tag.
+6. Lô trả phí tiếp theo cần nâng hạn mức: còn $0,086940 < một clip h3_max ($0,40).
 
 ## ✅ BATCH VIDEO FACTORY V1 = RELEASED + GITHUB RELEASE PUBLISHED — 2026-09-25
 

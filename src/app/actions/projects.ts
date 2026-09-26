@@ -87,6 +87,18 @@ export async function startMedia(projectId: string): Promise<ActionResult> {
     const result = await startMediaGeneration(projectId);
     revalidatePath(`/projects/${projectId}`);
     revalidatePath("/projects");
+    if (result.needsApproval && result.batchId) {
+      // One engine: the project runs as a batch of one, after PREFLIGHT and
+      // DUYỆT & CHẠY on the batch page. Nothing was spent or queued here.
+      revalidatePath(`/batches/${result.batchId}`);
+      return {
+        ok: true,
+        message:
+          `Dự toán $${result.budget.estimatedTotal.toFixed(4)}. Mở trang lô để PREFLIGHT và ` +
+          `DUYỆT & CHẠY: /batches/${result.batchId}`,
+        redirectTo: `/batches/${result.batchId}`,
+      };
+    }
     if (!result.started) {
       return {
         ok: false,

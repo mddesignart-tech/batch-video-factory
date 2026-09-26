@@ -12,21 +12,21 @@ import {
   approveAuthorization,
   assertBatchAuthorized,
   createAuthorization,
+  resumeAuthorization,
 } from "@/services/batch-authorization";
 import { reservationLedger } from "@/services/cost-reservation";
 import { planBatch, type BatchPlan } from "@/services/batch-planner";
 import {
   batchProgress,
   cancelBatch,
-  resumeBatch,
   retryScene,
   savePlan,
 } from "@/services/batch-runner";
 import { setSpendCap, totalRealSpend } from "@/services/spend-guard";
 import { setProviderBudget } from "@/services/provider-budget";
 import { costSummary } from "@/services/cost-tracker";
-import { claimNext, completeJob, failJob, requeueStaleJobs } from "@/jobs/queue";
-import { onJobExhausted, runJob } from "@/jobs/handlers";
+import { executeScene, runBatch } from "@/services/batch-executor";
+import { materializeIdiomVideos } from "@/services/batch-sources";
 import { probeDuration } from "@/media/ffmpeg";
 import { resetMockJobs, MOCK_FAILURE_ENV } from "@/providers/mock/mock-visual-providers";
 
@@ -138,59 +138,6 @@ let failedSceneId = "";
  */
 const AUTHORIZED = 3.5;
 const MAX_PER_VIDEO = 1.5;
-
-/**
- * Drain the queue the way the worker does, with a hook that can fail one job.
- *
- * `failSceneOnce` is how a single scene is made to fail deterministically: the
- * mock providers decide failure from a hash of the request key, so flipping the
- * rate for exactly one job is the only way to pick WHICH scene breaks rather
- * than breaking all of them.
- */
-async function drain(
-  maxJobs = 400,
-  opts: { failSceneOnce?: string } = {},
-): Promise<{ completed: number; failed: number }> {
-  let completed = 0;
-  let failed = 0;
-  let injected = false;
-
-  for (let i = 0; i < maxJobs; i++) {
-    await prisma.job.updateMany({
-      where: { status: "queued", nextRunAt: { gt: new Date() } },
-      data: { nextRunAt: new Date() },
-    });
-
-    const job = await claimNext();
-    if (!job) break;
-
-    const injectHere =
-      !injected &&
-      opts.failSceneOnce !== undefined &&
-      job.sceneId === opts.failSceneOnce;
-    if (injectHere) {
-      process.env[MOCK_FAILURE_ENV] = "1";
-      injected = true;
-    }
-
-    try {
-      const outcome = await runJob(job);
-      if (!outcome.deferred) {
-        await completeJob(job.id, outcome.result);
-        completed++;
-      }
-    } catch (err) {
-      const willRetry = await failJob(job.id, err);
-      if (!willRetry) {
-        await onJobExhausted(job, err);
-        failed++;
-      }
-    } finally {
-      if (injectHere) delete process.env[MOCK_FAILURE_ENV];
-    }
-  }
-  return { completed, failed };
-}
 
 beforeAll(async () => {
   resetMockJobs();
@@ -425,13 +372,11 @@ describe("2. APPROVE - the only step that authorises money", () => {
 
 // -------------------------------------------- QUEUE / PROCESS / FAILURE ---
 
-describe("3. QUEUE and PROCESS, with one scene deliberately broken", () => {
+describe("3. RUN through the one production executor, with one scene deliberately broken", () => {
   it("expands the approved plan into three projects", async () => {
-    const job = await prisma.job.create({
-      data: { type: "batch_expand", batchId, status: "processing" },
-    });
-    await runJob(job);
-    await completeJob(job.id);
+    // IDIOM_GENERATED: the executor's source step writes the scripts. Nothing
+    // is enqueued - the same executor runs imported storyboards. QĐ-103.
+    await materializeIdiomVideos(batchId);
 
     const projects = await prisma.project.findMany({ where: { batchId } });
     expect(projects).toHaveLength(3);
@@ -462,47 +407,47 @@ describe("3. QUEUE and PROCESS, with one scene deliberately broken", () => {
     });
     failedSceneId = target.id;
 
-    await drain(400, { failSceneOnce: failedSceneId });
+    // The broken scene goes through the executor's own scene step, with the
+    // vendor failing. ONE attempt - the executor never retries a paid request.
+    process.env[MOCK_FAILURE_ENV] = "1";
+    try {
+      await expect(executeScene(failedSceneId)).rejects.toBeTruthy();
+    } finally {
+      delete process.env[MOCK_FAILURE_ENV];
+    }
+    // What the executor records when a scene stops its video.
+    await prisma.scene.update({ where: { id: failedSceneId }, data: { status: "failed", errorMessage: "injected" } });
+    await prisma.project.update({ where: { id: projects[0]!.id }, data: { status: "failed", errorMessage: "injected" } });
 
-    const scene = await prisma.scene.findUniqueOrThrow({
-      where: { id: failedSceneId },
-    });
-    // The queue retries before giving up, so the scene may have recovered on a
-    // later attempt - what matters is that the failure was recorded and that
-    // the rest of the batch was unaffected.
+    // The other two videos run to the end through the SAME executor; the broken
+    // one does not stop them.
+    await runBatch(batchId, { resume: true, onlyProjectIds: [projects[1]!.id, projects[2]!.id] });
+
     const failedElsewhere = await prisma.scene.count({
-      where: {
-        projectId: { in: projects.map((p) => p.id) },
-        status: "failed",
-        id: { not: failedSceneId },
-      },
+      where: { projectId: { in: projects.map((p) => p.id) }, status: "failed", id: { not: failedSceneId } },
     });
     expect(failedElsewhere).toBe(0);
-
-    const providerJobs = await prisma.providerJob.findMany({
-      where: { sceneId: failedSceneId, kind: "video" },
-    });
+    for (const p of projects.slice(1)) {
+      expect((await prisma.project.findUniqueOrThrow({ where: { id: p.id } })).status).toBe("completed");
+    }
+    // It stops at its FIRST paid step, whichever kind that is.
+    const providerJobs = await prisma.providerJob.findMany({ where: { sceneId: failedSceneId } });
     expect(providerJobs.length).toBeGreaterThan(0);
-    void scene;
-    // This single step drains the WHOLE batch: 18 mock scene jobs plus three
-    // real FFmpeg renders. That is minutes of genuine work, not a hang - the
-    // same shape of run took 431s in tests/batch-factory. The default 300s
-    // ceiling was simply too short for it.
+    expect(providerJobs.some((j) => j.status === "failed")).toBe(true);
+    // No automatic paid retry: one attempt, recorded once.
+    expect(providerJobs.every((j) => j.attempts <= 1)).toBe(true);
   }, 900_000);
 
   it("never records a failed request as a second purchase", async () => {
-    // One idempotency key per real purchase. Retries inside a key are attempts,
-    // not new clips - which is what stops a flaky vendor being billed twice.
     const rows = await prisma.providerJob.findMany({
-      where: { sceneId: failedSceneId, kind: "video" },
+      where: { sceneId: failedSceneId },
     });
     const keys = new Set(rows.map((r) => r.idempotencyKey));
     expect(keys.size).toBe(rows.length);
 
     const reservations = await prisma.costReservation.findMany({
-      where: { sceneId: failedSceneId, kind: "video" },
+      where: { sceneId: failedSceneId },
     });
-    // Exactly one reservation per provider job, never more.
     expect(reservations.length).toBeLessThanOrEqual(rows.length);
     const resKeys = new Set(reservations.map((r) => r.idempotencyKey));
     expect(resKeys.size).toBe(reservations.length);
@@ -512,31 +457,35 @@ describe("3. QUEUE and PROCESS, with one scene deliberately broken", () => {
 // ------------------------------------------------------------- RETRY ---
 
 describe("4. RETRY - one scene, without re-buying the rest", () => {
-  it("re-queues just that scene and does not duplicate the paid job", async () => {
-    const before = await prisma.providerJob.count();
-    const beforeForScene = await prisma.providerJob.count({
-      where: { sceneId: failedSceneId },
+  it("retries that scene through the executor and re-buys nothing already done", async () => {
+    // Every asset that was already bought, by scene and kind, before the retry.
+    const batchProjects = (await prisma.project.findMany({ where: { batchId }, select: { id: true } })).map((p) => p.id);
+    const done = await prisma.providerJob.findMany({
+      where: { status: "completed", projectId: { in: batchProjects } },
+      select: { sceneId: true, kind: true },
     });
+    const doneBefore = new Map<string, number>();
+    for (const j of done) doneBefore.set(`${j.sceneId}|${j.kind}`, (doneBefore.get(`${j.sceneId}|${j.kind}`) ?? 0) + 1);
 
     await retryScene(failedSceneId);
-    await drain();
 
-    const scene = await prisma.scene.findUniqueOrThrow({
-      where: { id: failedSceneId },
-    });
+    const scene = await prisma.scene.findUniqueOrThrow({ where: { id: failedSceneId } });
     expect(scene.retryCount).toBeGreaterThan(0);
-    expect(["completed", "video_ready", "audio_ready", "image_ready"]).toContain(
-      scene.status,
-    );
+    expect(scene.status).toBe("completed");
 
-    // A retry is allowed to buy a NEW generation for the retried scene - that
-    // is what the operator asked for - but it must not disturb anything else.
-    const after = await prisma.providerJob.count();
-    const afterForScene = await prisma.providerJob.count({
-      where: { sceneId: failedSceneId },
+    // The operator asked for THIS scene again, so it may be bought again. No
+    // asset that was already completed anywhere else is bought a second time.
+    const after = await prisma.providerJob.findMany({
+      where: { status: "completed", projectId: { in: batchProjects } },
+      select: { sceneId: true, kind: true },
     });
-    expect(after - before).toBe(afterForScene - beforeForScene);
-  });
+    const doneAfter = new Map<string, number>();
+    for (const j of after) doneAfter.set(`${j.sceneId}|${j.kind}`, (doneAfter.get(`${j.sceneId}|${j.kind}`) ?? 0) + 1);
+    for (const [key, n] of doneBefore) {
+      if (key.startsWith(`${failedSceneId}|`)) continue;
+      expect(doneAfter.get(key)).toBe(n);
+    }
+  }, 900_000);
 
   it("keeps every reservation settled - none left holding money", async () => {
     const stuck = await prisma.costReservation.count({
@@ -570,9 +519,6 @@ describe("5. CANCEL and RESUME", () => {
   });
 
   it("leaves a request already sent to the vendor alone", async () => {
-    // A job the vendor has accepted is going to be billed whether or not this
-    // app is still watching, and most of these vendors expose no cancel. Killing
-    // it locally would say "cancelled" while the money left anyway.
     const inFlight = await prisma.job.create({
       data: { type: "generate_scene_media", batchId, status: "processing" },
     });
@@ -585,26 +531,17 @@ describe("5. CANCEL and RESUME", () => {
   });
 
   it("resumes on the same ceiling and the same tally", async () => {
-    const before = await prisma.batchAuthorization.findUniqueOrThrow({
-      where: { batchId },
-    });
-    await resumeBatch(batchId);
-    const after = await prisma.batchAuthorization.findUniqueOrThrow({
-      where: { batchId },
-    });
-
+    const before = await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId } });
+    // TIẾP TỤC re-opens the SAME approval - exactly what the executor's resume
+    // does before it runs. No new permission, no reset tally.
+    await resumeAuthorization(batchId);
+    const after = await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId } });
     expect(after.status).toBe("APPROVED");
     expect(after.authorizedMaxSpend).toBeCloseTo(before.authorizedMaxSpend, 6);
-    // Resuming grants no new money. A tally reset here would let one batch
-    // spend its ceiling twice and look well-behaved both times.
     expect(after.actualSpend).toBeCloseTo(before.actualSpend, 6);
   });
 
   it("repairs a video whose script generation died, instead of stranding it", async () => {
-    // Seen for real during the UI run: a transient SQLite timeout killed the
-    // third video's script. The row survived at `draft` with no scenes, and
-    // every recovery path refused it - startMediaGeneration wants a script, and
-    // so does the retry button. The error was transient; being stranded was not.
     const victim = await prisma.project.findFirstOrThrow({
       where: { batchId },
       orderBy: { createdAt: "desc" },
@@ -615,82 +552,48 @@ describe("5. CANCEL and RESUME", () => {
       data: { status: "draft", scriptJson: null, finalVideoPath: null },
     });
 
-    const job = await prisma.job.create({
-      data: { type: "batch_expand", batchId, status: "processing" },
-    });
-    await runJob(job);
-    await completeJob(job.id);
+    await runBatch(batchId, { resume: true });
 
-    const repaired = await prisma.project.findUniqueOrThrow({
-      where: { id: victim.id },
-    });
+    const repaired = await prisma.project.findUniqueOrThrow({ where: { id: victim.id } });
     expect(repaired.scriptJson).toBeTruthy();
     expect(repaired.status).not.toBe("draft");
-    expect(
-      await prisma.scene.count({ where: { projectId: victim.id } }),
-    ).toBeGreaterThanOrEqual(4);
-
-    await drain();
-  });
+    expect(await prisma.scene.count({ where: { projectId: victim.id } })).toBeGreaterThanOrEqual(4);
+  }, 900_000);
 
   it("creates no second project for an idiom it already expanded", async () => {
-    const before = await prisma.project.findMany({
-      where: { batchId },
-      select: { id: true },
-    });
-    await drain();
-    const after = await prisma.project.findMany({
-      where: { batchId },
-      select: { id: true },
-    });
+    const before = await prisma.project.findMany({ where: { batchId }, select: { id: true } });
+    await runBatch(batchId, { resume: true });
+    const after = await prisma.project.findMany({ where: { batchId }, select: { id: true } });
     expect(after.map((p) => p.id).sort()).toEqual(before.map((p) => p.id).sort());
-  });
+  }, 900_000);
 });
 
 // ------------------------------------------------------------- RESTART ---
 
 describe("6. RESTART simulation", () => {
-  it("recovers in-flight jobs and buys nothing a second time", async () => {
-    // Scoped to ONE project's scene jobs on purpose.
-    //
-    // Requeueing every completed job in the batch also requeues three
-    // `render_final` jobs, so the "restart" would re-run three real FFmpeg
-    // renders - minutes of work that prove nothing about the property under
-    // test. What matters is that a recomputed idempotency key finds its own
-    // finished ProviderJob instead of buying a second one, and one project's
-    // scenes demonstrate that exactly as well as nine do.
+  it("recovers a video interrupted mid-run and buys nothing a second time", async () => {
+    // Pretend the process died while this video was generating: the row says
+    // media_generating and the MP4 is not recorded. Resume runs it again.
     const project = await prisma.project.findFirstOrThrow({
       where: { batchId, status: "completed" },
       orderBy: { createdAt: "asc" },
     });
-
-    // Pretend the process died mid-generation: leave jobs in `processing`, then
-    // run the same recovery the worker runs at startup.
-    const stale = await prisma.job.updateMany({
-      where: {
-        projectId: project.id,
-        type: "generate_scene_media",
-        status: "completed",
-      },
-      data: { status: "processing", finishedAt: null },
+    await prisma.project.update({
+      where: { id: project.id },
+      data: { status: "media_generating", finalVideoPath: null },
     });
-    expect(stale.count).toBeGreaterThan(0);
 
     const providerJobsBefore = await prisma.providerJob.count();
-    const reservationsBefore = await prisma.costReservation.count({
-      where: { batchId },
-    });
+    const reservationsBefore = await prisma.costReservation.count({ where: { batchId } });
 
-    const requeued = await requeueStaleJobs();
-    expect(requeued).toBeGreaterThanOrEqual(stale.count);
-    await drain();
+    await runBatch(batchId, { resume: true, onlyProjectIds: [project.id] });
 
-    // Every recomputed idempotency key found its own finished ProviderJob and
-    // its own reservation. Nothing new was bought.
+    // Every idempotency key found its own finished ProviderJob and reservation.
     expect(await prisma.providerJob.count()).toBe(providerJobsBefore);
-    expect(
-      await prisma.costReservation.count({ where: { batchId } }),
-    ).toBe(reservationsBefore);
+    expect(await prisma.costReservation.count({ where: { batchId } })).toBe(reservationsBefore);
+    const after = await prisma.project.findUniqueOrThrow({ where: { id: project.id } });
+    expect(after.status).toBe("completed");
+    expect(after.finalVideoPath).toBeTruthy();
   }, 600_000);
 });
 

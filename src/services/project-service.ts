@@ -393,6 +393,57 @@ export interface StartMediaResult {
   jobsQueued: number;
   budget: BudgetCheck;
   errors: string[];
+  /**
+   * The batch this project now runs in. Media is never started from here any
+   * more: a project is run by the production executor, after PREFLIGHT and
+   * DUYỆT & CHẠY on this batch's page - the same approval every batch gets.
+   */
+  batchId?: string;
+  needsApproval?: boolean;
+}
+
+/**
+ * Freeze the costed plan onto the scenes: motion decision and models. The run
+ * reads these rather than deciding again, so a registry change between
+ * approval and execution cannot turn a free scene into a paid one. Used by a
+ * single project and by every idiom video the executor writes (QĐ-103).
+ */
+export async function freezeScenePlan(
+  projectId: string,
+  preview: Awaited<ReturnType<typeof previewProjectCost>>,
+): Promise<void> {
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: projectId },
+    include: { scenes: true },
+  });
+  for (const plan of preview.current.scenes) {
+    const scene = project.scenes.find((s) => s.sceneNumber === plan.sceneNumber);
+    if (!scene) continue;
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: {
+        estimatedCost: plan.estimatedCost,
+        // Freeze the movement decision. Generation reads this rather than
+        // deciding again, so a registry change between approval and execution
+        // cannot turn a free scene into a paid one behind the operator.
+        motionSource: plan.motionSource,
+        imageProvider: plan.image?.provider ?? scene.imageProvider,
+        imageModel: plan.image?.modelId ?? scene.imageModel,
+        // A locally animated scene has no video model, and must not keep a
+        // stale one from an earlier plan - generation would read it as a pin.
+        videoProvider:
+          plan.motionSource === "LOCAL_MOTION"
+            ? null
+            : (plan.video?.provider ?? scene.videoProvider),
+        videoModel:
+          plan.motionSource === "LOCAL_MOTION"
+            ? null
+            : (plan.video?.modelId ?? scene.videoModel),
+        voiceProvider: plan.voice?.provider ?? scene.voiceProvider,
+        voiceModel: plan.voice?.modelId ?? scene.voiceModel,
+      },
+    });
+  }
 }
 
 /**
@@ -468,72 +519,60 @@ export async function startMediaGeneration(
   }
 
   // Persist the plan so the storyboard shows exactly what will run.
-  for (const plan of preview.current.scenes) {
-    const scene = project.scenes.find((s) => s.sceneNumber === plan.sceneNumber);
-    if (!scene) continue;
-    await prisma.scene.update({
-      where: { id: scene.id },
-      data: {
-        estimatedCost: plan.estimatedCost,
-        // Freeze the movement decision. Generation reads this rather than
-        // deciding again, so a registry change between approval and execution
-        // cannot turn a free scene into a paid one behind the operator.
-        motionSource: plan.motionSource,
-        imageProvider: plan.image?.provider ?? scene.imageProvider,
-        imageModel: plan.image?.modelId ?? scene.imageModel,
-        // A locally animated scene has no video model, and must not keep a
-        // stale one from an earlier plan - generation would read it as a pin.
-        videoProvider:
-          plan.motionSource === "LOCAL_MOTION"
-            ? null
-            : (plan.video?.provider ?? scene.videoProvider),
-        videoModel:
-          plan.motionSource === "LOCAL_MOTION"
-            ? null
-            : (plan.video?.modelId ?? scene.videoModel),
-        voiceProvider: plan.voice?.provider ?? scene.voiceProvider,
-        voiceModel: plan.voice?.modelId ?? scene.voiceModel,
-      },
-    });
-  }
+  await freezeScenePlan(projectId, preview);
 
   await prisma.project.update({
     where: { id: projectId },
     data: {
-      status: "media_generating",
+      status: "script_ready",
       estimatedCost: preview.current.breakdown.total,
       errorMessage: null,
     },
   });
 
-  let jobsQueued = 0;
-  for (const scene of project.scenes) {
-    if (scene.skipped) continue;
-    await enqueue({
-      type: "generate_scene_media",
-      sceneId: scene.id,
-      projectId,
-      // Earlier scenes first: the hook is what gets reviewed first.
-      priority: 100 + scene.sceneNumber,
-    });
-    jobsQueued++;
-  }
-
-  await enqueue({
-    type: "render_final",
-    projectId,
-    priority: 500, // always after the scene jobs
-  });
-  jobsQueued++;
-
+  // ONE ENGINE. A project on its own is wrapped into a batch of one and goes
+  // through the same PREFLIGHT -> DUYỆT & CHẠY -> executor as any batch: same
+  // gates, same retry policy, same ledger, same output. Nothing is enqueued and
+  // nothing is spent here. QĐ-103.
+  const batchId = project.batchId ?? (await wrapProjectInBatch(projectId));
+  const { preflightImportedBatch } = await import("@/services/import-preflight");
+  await preflightImportedBatch(batchId);
   await logger.info({
-    event: "project.media_started",
+    event: "project.media_needs_approval",
     projectId,
     estimatedCost: preview.current.breakdown.total,
-    message: `Đưa ${jobsQueued} job vào hàng đợi.`,
+    message: `Dự án chạy qua lô ${batchId}: PREFLIGHT rồi DUYỆT & CHẠY ở trang lô.`,
   });
+  return { started: false, jobsQueued: 0, budget: preview.budget, errors: [], batchId, needsApproval: true };
+}
 
-  return { started: true, jobsQueued, budget: preview.budget, errors: [] };
+/** A batch of one for a project made outside any batch. Spends nothing. */
+async function wrapProjectInBatch(projectId: string): Promise<string> {
+  const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+  const batch = await prisma.batch.create({
+    data: {
+      name: `Dự án: ${project.title}`,
+      amount: 1,
+      qualityMode: project.qualityMode,
+      stylePresetId: project.stylePresetId,
+      targetDuration: project.targetDuration,
+      maxBudget: project.maxBudget,
+      maxCostPerVideo: project.maxBudget,
+      status: "PLANNED",
+    },
+  });
+  await prisma.project.update({ where: { id: projectId }, data: { batchId: batch.id } });
+  await prisma.batchAuthorization.create({
+    data: {
+      batchId: batch.id,
+      status: "DRAFT",
+      authorizedMaxSpend: 0,
+      estimatedCost: 0,
+      maxCostPerVideo: project.maxBudget,
+      videoCount: 1,
+    },
+  });
+  return batch.id;
 }
 
 /** Re-render an existing project without regenerating any paid media. */

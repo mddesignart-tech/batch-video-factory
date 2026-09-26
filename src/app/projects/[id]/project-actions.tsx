@@ -94,12 +94,17 @@ export function ProjectActions({
 
           <ActionButton
             variant="primary"
-            action={() => startMedia(projectId)}
+            action={async () => {
+              const r = await startMedia(projectId);
+              // Media runs through the batch page's PREFLIGHT / DUYỆT & CHẠY.
+              if (r.ok && r.redirectTo) window.location.href = r.redirectTo;
+              return r;
+            }}
             onDone={setResult}
             disabled={busy}
-            confirm={`Bắt đầu tạo media? Ngân sách tối đa của dự án là $${maxBudget.toFixed(
+            confirm={`Dự toán và mở trang duyệt chi cho dự án này? Chưa chi đồng nào — tiền chỉ được duyệt ở bước DUYỆT & CHẠY (ngân sách tối đa $${maxBudget.toFixed(
               2,
-            )}. Ở chế độ mock sẽ không tốn phí.`}
+            )}).`}
           >
             <Film className="h-3.5 w-3.5" />
             TẠO MEDIA

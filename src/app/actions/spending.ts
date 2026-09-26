@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { isMockMode } from "@/lib/env";
 import { errorMessage } from "@/lib/utils";
@@ -12,9 +11,11 @@ import {
 import {
   confirmProvider,
   revokeProvider,
-  setSpendCap,
+  changeSpendCap,
   spendStatus,
+  SpendCapChangeError,
 } from "@/services/spend-guard";
+import { isProductionDatabase, resolveDatabaseFile } from "@/lib/db-location";
 import type { ActionResult } from "./idioms";
 
 /**
@@ -161,31 +162,60 @@ export async function revokeRealSpending(
   };
 }
 
-export async function updateSpendCap(formData: FormData): Promise<ActionResult> {
-  const parsed = z
-    .object({ cap: z.coerce.number().min(0).max(1000) })
-    .safeParse(Object.fromEntries(formData.entries()));
-  if (!parsed.success) {
-    return { ok: false, message: "Hạn mức không hợp lệ (0 - 1000 USD)." };
+export interface SpendCapResult extends ActionResult {
+  /** What the database holds after the call - read back, never the typed number. */
+  readBack?: { cap: number; spent: number; remaining: number; changedAt: string };
+  /** The SQLite file this server wrote to. */
+  databaseFile: string | null;
+  productionDatabase: boolean;
+}
+
+/**
+ * GLOBAL PROJECT SPEND LIMIT, from the settings page.
+ *
+ * The number is parsed strictly (blank or "8.5abc" is refused, not read as 0 or
+ * 8.5), the write and its audit row share one transaction, and success is
+ * reported only with the value read back from the database this server actually
+ * opened. A failure says SAVE FAILED and leaves the old value where it was.
+ */
+export async function updateSpendCap(formData: FormData): Promise<SpendCapResult> {
+  const where = { databaseFile: resolveDatabaseFile(), productionDatabase: isProductionDatabase() };
+  const raw = String(formData.get("cap") ?? "").trim().replace(",", ".");
+  const requested = /^\d+(\.\d+)?$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(requested)) {
+    return { ok: false, message: `SAVE FAILED: "${raw}" không phải số hợp lệ. Hạn mức giữ nguyên.`, ...where };
   }
 
-  const status = await spendStatus();
-  if (parsed.data.cap < status.spent) {
+  // Changing what the whole app may spend is a decision; the page asks first,
+  // and the server refuses a change that did not go through that question.
+  if (formData.get("confirm") !== "yes") {
+    return { ok: false, message: "SAVE FAILED: chưa xác nhận thay đổi hạn mức. Không lưu gì.", ...where };
+  }
+
+  try {
+    const change = await changeSpendCap(requested, "SETTINGS_UI");
+    // Raising the limit authorises nothing and starts nothing: every batch still
+    // needs its own PREFLIGHT and DUYỆT & CHẠY. No provider is called here.
+    revalidatePath("/settings");
+    revalidatePath("/");
+    revalidatePath("/providers");
     return {
-      ok: false,
+      ok: true,
       message:
-        `Hạn mức mới ($${parsed.data.cap.toFixed(2)}) thấp hơn số đã chi ` +
-        `($${status.spent.toFixed(4)}). Mọi yêu cầu trả phí sẽ bị chặn ngay lập tức.`,
+        `Đã lưu và đọc lại từ DB: hạn mức $${change.cap.toFixed(2)} ` +
+        `(trước $${change.previous.toFixed(2)}, còn $${change.remaining.toFixed(6)}).`,
+      readBack: {
+        cap: change.cap,
+        spent: change.spent,
+        remaining: change.remaining,
+        changedAt: change.changedAt.toISOString(),
+      },
+      ...where,
     };
+  } catch (err) {
+    const message = err instanceof SpendCapChangeError ? err.message : errorMessage(err);
+    return { ok: false, message: `SAVE FAILED: ${message} Hạn mức giữ nguyên.`, ...where };
   }
-
-  await setSpendCap(parsed.data.cap);
-  revalidatePath("/settings");
-  revalidatePath("/providers");
-  return {
-    ok: true,
-    message: `Đã đặt hạn mức chi tiêu API thật là $${parsed.data.cap.toFixed(2)}.`,
-  };
 }
 
 /**

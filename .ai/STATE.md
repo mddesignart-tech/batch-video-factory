@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-25 (Import Storyboard đầy đủ — sau V1)
+**Cập nhật:** 2026-09-26 (PAID UI RUN PASS — executor hợp nhất, dùng hằng ngày qua UI)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,51 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ PAID UI RUN — PASS (2026-09-26, lô 6f4ec6e3, project a1b501c2)
+
+Chạy hoàn toàn qua UI (`next start`, AI_MOCK_MODE=false): Nhập Storyboard (đường dẫn) → KIỂM TRA →
+DỰ TOÁN & TẠO LÔ → PREFLIGHT (trần lô $0,46, trần/video $0,70) → tick LOW_AUTO h3_max + đồng ý
+chi → DUYỆT & CHẠY BATCH → COMPLETED. Không script.
+
+```
+AUTHORIZED $0,46 · ACTUAL $0,400067 (video runway $0,400000 + voice openai $0,000067) · UNUSED $0,059933
+Image POST 0 · Video POST 1 (runway/h3_max:768x1280, task d03975a3) · Voice POST 5 · LOCAL 4 ($0)
+ProviderJob +6 (150→156) · CostEntry +6 (187→193) · retry 0 · trùng 0 · reservation treo 0
+Global: đã chi $8,012993 → $8,413060 / $8,50 · còn $0,086940
+Runway LIVE 471 → 431 credit (−40 = $0,40, khớp tuyệt đối)
+MP4 data/output/break-the-ice-5-anh-nhap-san-a1b501c2/final.mp4 · 22,000s · 1080x1920 · 30fps ·
+h264 + aac 48 kHz mono · 1 522 326 byte · không đoạn đen · keyframe clip = ảnh nhập (5723 byte PNG)
+RESUME (UI, TIẾP TỤC trên lô COMPLETED): PJ +0 · CE +0 · POST +0 · $0 · retryCount 0 · final không render lại (sha giữ nguyên)
+```
+
+Sửa trong lúc test: COPY PATH trước đây nuốt lỗi Clipboard (không báo gì) → nay báo ĐÃ COPY /
+COPY LỖI, có đường dự phòng; nút TIẾP TỤC nay hiện cả ở lô COMPLETED ("kiểm tra lại — $0 nếu đã
+đủ"). QĐ-105. Ghi chú: 5 ảnh trong examples/storyboard-import-5 giống hệt nhau từng byte → 1 Asset.
+
+## Sửa lưu GLOBAL PROJECT SPEND LIMIT — 2026-09-26, $0
+
+- `data/app.db`: `spend.cap` = **8.5** (đọc lại trực tiếp), audit `spend.cap_changed` 8.08 → 8.50,
+  nguồn SETTINGS_UI, 2026-09-26T00:35:44Z. Sao lưu trước: `backups/app-before-cap-850-20260926-073436.db`.
+- Preflight thật (chỉ đọc) examples/storyboard-import-5: **READY** · ước $0,4121 · đề xuất trần $0,46 ·
+  còn $0,487007 · Runway LIVE 471 credit ($4,71) · POST ảnh/video/giọng 0/1/5 · LOCAL 4.
+- QĐ-104. Test mới `tests/spend-cap-settings.test.ts` (8).
+- Chờ người dùng ra lệnh chạy paid UI test.
+
+## Hợp nhất executor + daily-use — 2026-09-26, $0 (chưa commit)
+
+- Push `0d5a3ad` lên main: PASS.
+- **REFRESH BALANCE** (bấm tay, chỉ GET /organization): live 471 credit ≈ $4,71. Lỗi GET giữ số cũ, báo STALE.
+- **Một executor** cho IDIOM_GENERATED và STORYBOARD_IMPORTED (QĐ-103). "TẠO MEDIA" của dự án
+  đơn lẻ = lô một video → DUYỆT & CHẠY. Hàng đợi chỉ lập lịch. Job trả phí không tự retry.
+  Sửa lỗi: lô idiom phải ghi kế hoạch cảnh (`freezeScenePlan`) — nếu không mọi cảnh thành LOCAL.
+- **GLOBAL PROJECT SPEND LIMIT** ở Settings: Spent/Limit/Remaining, người gõ số, ≥ đã chi,
+  xác nhận, log cũ → mới, không chạy lô.
+- Test mới: unified-executor (7), global-budget (4), runway-balance-refresh (8).
+- Preflight thật (read-only) examples/storyboard-import-5: IMAGE 0 · VIDEO 1 (h3_max) · VOICE 5 ·
+  LOCAL 4 · ước $0,412100 · đề xuất trần $0,46 · trần/video $0,70. **BLOCKER DUY NHẤT:** hạn
+  mức toàn cục còn $0,067007 (cap $8,08, chi $8,012993) → người dùng cần tự đặt ≥ $8,473 (vd $8,50).
+- Chưa làm: paid UI test (Phase 6), resume test (Phase 7), commit/push cuối (Phase 9). Không tag mới.
 
 ## Vận hành hằng ngày bằng UI — 2026-09-25 (sau v1.1.0), $0
 

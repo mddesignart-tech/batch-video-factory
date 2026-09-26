@@ -121,16 +121,4 @@ export function ResumeRunButton({ batchId, projectId, label = "TIẾP TỤC" }: 
   );
 }
 
-/** Copy an output path to the clipboard. Local, free. */
-export function CopyPathButton({ path }: { path: string }) {
-  return (
-    <button
-      type="button"
-      className="rounded border border-ink-700 px-2 py-0.5 text-[11px] text-ink-300 hover:border-brand-500"
-      onClick={() => void navigator.clipboard?.writeText(path)}
-      title={path}
-    >
-      COPY PATH
-    </button>
-  );
-}
+export { CopyPathButton } from "@/components/copy-path-button";

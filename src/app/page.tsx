@@ -24,6 +24,7 @@ import { costSummary } from "@/services/cost-tracker";
 import { queueStats } from "@/jobs/queue";
 import { spendStatus } from "@/services/spend-guard";
 import { recentBatches, todayDashboard } from "@/services/dashboard";
+import { RefreshBalanceButton } from "@/components/refresh-balance-button";
 
 export const dynamic = "force-dynamic";
 
@@ -114,17 +115,24 @@ export default async function DashboardPage() {
               label="Chi TB / video"
               value={day.averageCostPerVideo === null ? "—" : formatUSD(day.averageCostPerVideo, 4)}
             />
-            <Stat
-              label="Runway credit"
-              value={day.runwayCredits === null ? "không rõ" : String(day.runwayCredits)}
-              hint={
-                `${day.runwaySource ?? "?"}` +
-                (day.runwayCheckedAt
-                  ? ` · đọc live lần cuối ${new Date(day.runwayCheckedAt).toLocaleString("vi-VN")}`
-                  : " · chưa đọc live") +
-                " — không phải số dư lúc này"
-              }
-            />
+            <div className="space-y-1.5">
+              <Stat
+                label={`Runway credit · ${day.runwayFreshness ?? "?"}`}
+                value={
+                  day.runwayCredits === null
+                    ? "không rõ"
+                    : `${day.runwayCredits} (≈ ${formatUSD(day.runwayRemainingUsd ?? 0, 2)})`
+                }
+                hint={
+                  day.runwayCheckedAt
+                    ? `đọc live lúc ${new Date(day.runwayCheckedAt).toLocaleString("vi-VN")}` +
+                      (day.runwayFreshness === "LIVE" ? "" : " — số cũ, bấm REFRESH")
+                    : "chưa từng đọc live"
+                }
+                tone={day.runwayFreshness === "LIVE" ? "ok" : "warn"}
+              />
+              <RefreshBalanceButton />
+            </div>
             <Stat
               label="Ngân sách còn"
               value={formatUSD(day.globalRemaining, 4)}

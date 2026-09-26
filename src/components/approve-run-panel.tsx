@@ -123,12 +123,16 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
               <div>ESTIMATED TOTAL: <strong>{formatUSD(pre.estimatedTotal)}</strong></div>
               <div>GLOBAL REMAINING: {formatUSD(pre.globalRemaining)} / cap {formatUSD(pre.globalCap)}</div>
               <div>MAX/BATCH: {Number.isFinite(batchNum) && batchNum > 0 ? formatUSD(batchNum) : "— (chưa nhập)"}</div>
-              <div>MAX/VIDEO: {perVideoNum !== undefined ? formatUSD(perVideoNum) : `giữ nguyên (${formatUSD(pre.preflight.maxCostPerVideo)})`}</div>
+              <div>MAX/VIDEO: {perVideoNum !== undefined ? formatUSD(perVideoNum) : `giữ nguyên (${formatUSD(pre.maxCostPerVideo)})`}</div>
               <div>VIDEO: {pre.runnableVideos} chạy được · {pre.blockedVideos} BLOCKED</div>
               <div>PROVIDER/MODEL: {pre.plannedVideoModels.join(", ") || "không có clip trả phí"}</div>
               <div>IMAGE API POST: <strong>{pre.imagePosts}</strong> · VIDEO API POST: <strong>{pre.videoPosts}</strong> · VOICE API POST: <strong>{pre.voicePosts}</strong></div>
               <div>ẢNH IMPORTED/REUSE: {pre.importedImages} · WILL_CREATE: {pre.willCreateImages}</div>
               <div>Cơ sở giá: {pre.mockMode ? "MOCK (không tốn tiền)" : "GIÁ THẬT"}</div>
+              <div>
+                NGUỒN: {pre.source === "IDIOM_GENERATED" ? "thành ngữ → kịch bản AI" : "storyboard / dự án có sẵn"}
+                {pre.textPosts > 0 ? ` · TEXT API POST: ${pre.textPosts}` : ""}
+              </div>
             </div>
 
             <div className="space-y-1">

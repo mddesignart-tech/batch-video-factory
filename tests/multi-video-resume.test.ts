@@ -11,7 +11,7 @@ import {
 } from "@/data/seed-config";
 import { approveAuthorization, createAuthorization } from "@/services/batch-authorization";
 import { reservationLedger } from "@/services/cost-reservation";
-import { resumeBatch } from "@/services/batch-runner";
+import { resumeAuthorization } from "@/services/batch-authorization";
 import { setSpendCap } from "@/services/spend-guard";
 import { setProviderBudget } from "@/services/provider-budget";
 import { claimNext, completeJob, enqueue, failJob } from "@/jobs/queue";
@@ -334,7 +334,8 @@ describe("ba video, ba trạng thái, một lần khởi động lại", () => {
 
   it("resume KHÔNG cấp thêm quyền chi, chỉ xếp lại hàng đợi", async () => {
     const before = await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId } });
-    await resumeBatch(batchId);
+    // The executor's resume starts by re-opening the SAME approval.
+    await resumeAuthorization(batchId);
     const after = await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId } });
     expect(after.authorizedMaxSpend).toBe(before.authorizedMaxSpend);
     expect(after.status).toBe("APPROVED");
@@ -522,7 +523,10 @@ describe("lỗi đã nói rõ là KHÔNG thử lại thì không đốt lượt 
     expect(after.attempts).toBeLessThan(after.maxAttempts);
   });
 
-  it("lỗi KHÔNG khai báo gì -> vẫn thử lại như cũ", async () => {
+  // ONE retry policy (QĐ-103): a job that can send a PAID request is never
+  // retried by the queue - the person retries it, and the same idempotency key
+  // reuses whatever was bought. Local work still retries.
+  it("job trả phí + lỗi không khai báo -> KHÔNG tự thử lại", async () => {
     const scene = await prisma.scene.findFirstOrThrow({ where: { projectId: videoA } });
     const job = await enqueue({
       type: "generate_scene_media",
@@ -531,12 +535,21 @@ describe("lỗi đã nói rõ là KHÔNG thử lại thì không đốt lượt 
       priority: 901,
     });
     const willRetry = await failJob(job.id, new Error("mạng chập chờn"));
+    expect(willRetry).toBe(false);
+    const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } });
+    expect(after.status).toBe("failed");
+  });
+
+  it("job tại máy (render) + lỗi không khai báo -> vẫn thử lại như cũ", async () => {
+    const job = await enqueue({ type: "render_final", projectId: videoA, priority: 903 });
+    const willRetry = await failJob(job.id, new Error("ổ đĩa bận"));
     expect(willRetry).toBe(true);
     const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } });
     expect(after.status).toBe("queued");
+    await prisma.job.delete({ where: { id: job.id } });
   });
 
-  it("retryable=true -> thử lại, không bị nhầm sang không-thử-lại", async () => {
+  it("job trả phí + retryable=true -> VẪN không tự thử lại (sẽ là lần mua thứ hai)", async () => {
     const scene = await prisma.scene.findFirstOrThrow({ where: { projectId: videoA } });
     const job = await enqueue({
       type: "generate_scene_media",
@@ -549,6 +562,6 @@ describe("lỗi đã nói rõ là KHÔNG thử lại thì không đốt lượt 
       job.id,
       new GenerationError("nhà cung cấp quá tải", "image", "mock", true),
     );
-    expect(willRetry).toBe(true);
+    expect(willRetry).toBe(false);
   });
 });

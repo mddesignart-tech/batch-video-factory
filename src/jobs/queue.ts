@@ -101,6 +101,17 @@ export async function completeJob(
  * backoff (10s / 30s / 90s) rather than being retried immediately - a provider
  * that just rate-limited us will not have recovered a millisecond later.
  */
+/** Job types that may send a paid provider request. Never auto-retried. */
+export const PAID_JOB_TYPES: ReadonlySet<string> = new Set([
+  "generate_scene_media",
+  "generate_scene_image",
+  "generate_scene_video",
+  "generate_scene_voice",
+  "generate_script",
+  "evaluate_scene_quality",
+  "batch_expand",
+]);
+
 export async function failJob(jobId: string, error: unknown): Promise<boolean> {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) return false;
@@ -123,7 +134,14 @@ export async function failJob(jobId: string, error: unknown): Promise<boolean> {
     typeof error === "object" && error !== null && "retryable" in error
       ? (error as { retryable: unknown }).retryable
       : undefined;
-  const willRetry = declaredRetryable === false ? false : job.attempts < job.maxAttempts;
+  // ONE RETRY POLICY, the executor's: a job that can send a PAID request is
+  // never retried automatically. A retryable vendor error (a 5xx after the POST
+  // was accepted) retried here would be a second purchase nobody approved. The
+  // person retries it - TIẾP TỤC / Thử lại - where the same idempotency key
+  // reuses whatever was already bought. Local work (render) still retries.
+  const paid = PAID_JOB_TYPES.has(job.type);
+  const willRetry =
+    paid || declaredRetryable === false ? false : job.attempts < job.maxAttempts;
 
   await prisma.job.update({
     where: { id: jobId },

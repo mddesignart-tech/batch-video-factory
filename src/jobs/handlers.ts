@@ -1,24 +1,17 @@
 import path from "node:path";
 import type { Job } from "@prisma/client";
-import type { JobType, QualityMode } from "@/domain/enums";
+import type { JobType } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { errorMessage, parseJson } from "@/lib/utils";
 import { ProviderError } from "@/providers/types";
 import { getSettings } from "@/lib/settings";
 import { projectSubdir, toAbsolute, toRelative } from "@/lib/paths";
-import {
-  evaluateScene,
-  generateSceneImage,
-  generateSceneVideo,
-  generateSceneVoice,
-} from "@/services/generation";
+import { evaluateScene } from "@/services/generation";
 import { syncBatchActualCost, syncProjectActualCost } from "@/services/cost-tracker";
-import { closeAuthorization } from "@/services/batch-authorization";
-import { reservationLedger } from "@/services/cost-reservation";
-import { isRunnable, settleBatchIfDone, storedPlan } from "@/services/batch-runner";
+import { settleBatchIfDone } from "@/services/batch-runner";
 import { renderProject, targetForAspect } from "@/media/render";
-import { deferJob, enqueue } from "./queue";
+import { deferJob } from "./queue";
 
 /**
  * Job handlers.
@@ -38,12 +31,14 @@ export async function runJob(job: Job): Promise<HandlerResult> {
   switch (type) {
     case "generate_scene_media":
       return handleSceneMedia(job);
+    // The operator's "Tạo lại ảnh / video / giọng": one asset, through the
+    // executor's step so it gets the same ceilings re-read before the POST.
     case "generate_scene_image":
-      return single(job, generateSceneImage);
+      return single(job, (id) => executorAsset(id, "image"));
     case "generate_scene_video":
-      return single(job, generateSceneVideo);
+      return single(job, (id) => executorAsset(id, "video"));
     case "generate_scene_voice":
-      return single(job, generateSceneVoice);
+      return single(job, (id) => executorAsset(id, "voice"));
     case "evaluate_scene_quality":
       return single(job, async (sceneId) => {
         const outcome = await evaluateScene(sceneId);
@@ -60,6 +55,11 @@ export async function runJob(job: Job): Promise<HandlerResult> {
     default:
       throw new Error(`Loại job không được hỗ trợ: ${job.type}`);
   }
+}
+
+async function executorAsset(sceneId: string, kind: "image" | "video" | "voice"): Promise<unknown> {
+  const { executeSceneAsset } = await import("@/services/batch-executor");
+  return executeSceneAsset(sceneId, kind);
 }
 
 async function single(
@@ -94,35 +94,13 @@ async function handleSceneMedia(job: Job): Promise<HandlerResult> {
     return DONE;
   }
 
-  await generateSceneImage(sceneId);
-  await generateSceneVideo(sceneId);
-  await generateSceneVoice(sceneId);
-
-  const outcome = await evaluateScene(sceneId);
-  if (outcome?.shouldRetry) {
-    await prisma.scene.update({
-      where: { id: sceneId },
-      data: { retryCount: { increment: 1 }, status: "pending" },
-    });
-    await logger.warn({
-      event: "scene.quality_retry",
-      sceneId,
-      projectId: scene.projectId,
-      message: outcome.reason,
-    });
-    await enqueue({
-      type: "generate_scene_media",
-      sceneId,
-      projectId: scene.projectId,
-      priority: job.priority,
-    });
-    return DONE;
-  }
-
-  await prisma.scene.update({
-    where: { id: sceneId },
-    data: { status: "completed", errorMessage: null },
-  });
+  // SCHEDULING ONLY. The step itself is the production executor's - the same
+  // image -> clip -> voice order, the same headroom checks, the same gates.
+  // There is deliberately no quality loop here any more: a below-threshold
+  // verdict used to bump retryCount, which changes every key and re-buys the
+  // image AND the clip - on the word of a mock model. See QĐ-103.
+  const { executeScene } = await import("@/services/batch-executor");
+  await executeScene(sceneId);
   return DONE;
 }
 
@@ -273,6 +251,20 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
   });
 
   await syncProjectActualCost(projectId);
+
+  // The same output layout for every video, whoever asked for the render:
+  // data/output/<slug>/final.mp4 + thumbnail + subtitles + metadata. Local
+  // copy and one FFmpeg frame; a failure here never fails the render.
+  try {
+    const { exportProjectOutput } = await import("@/services/output-export");
+    await exportProjectOutput(projectId);
+  } catch (err) {
+    await logger.warn({
+      event: "output.export_failed",
+      projectId,
+      message: `Không xuất được thư mục output: ${errorMessage(err)}`,
+    });
+  }
   if (project.batchId) {
     await syncBatchActualCost(project.batchId);
     // Settle here rather than on a timer: the batch reaches its terminal state
@@ -318,220 +310,28 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
 async function handleBatchExpand(job: Job): Promise<HandlerResult> {
   const batchId = job.batchId;
   if (!batchId) throw new Error("Job thiếu batchId.");
-
-  const batch = await prisma.batch.findUnique({ where: { id: batchId } });
-  if (!batch) throw new Error(`Không tìm thấy lô ${batchId}`);
-
   const auth = await prisma.batchAuthorization.findUnique({ where: { batchId } });
   if (auth?.status !== "APPROVED") {
-    // Not an error: this is a batch that was stopped, or never approved. Saying
-    // so and returning beats throwing, which would retry three times and log
-    // three stack traces for a perfectly ordinary state.
     await logger.warn({
       event: "batch.expand_skipped",
       message:
-        `Lô ${batchId} không có quyền chi đang hiệu lực ` +
-        `(${auth?.status ?? "chưa duyệt"}), nên không mở rộng thành dự án.`,
+        `Lô ${batchId} không có quyền chi đang hiệu lực (${auth?.status ?? "chưa duyệt"}), ` +
+        `nên không chạy.`,
     });
-    return { deferred: false, result: { created: 0, skipped: "not_approved" } };
+    return { deferred: false, result: { skipped: "not_approved" } };
   }
-
-  const plan = storedPlan(batch);
-  const runnable = (plan?.videos ?? []).filter((v) => isRunnable(v.status));
-  if (runnable.length === 0) {
-    throw new Error(
-      "Bản dự toán của lô không có video nào chạy được. Hãy dự toán lại.",
-    );
-  }
-
-  await prisma.batch.update({ where: { id: batchId }, data: { status: "RUNNING" } });
-
-  const { createProjectForIdiom } = await import("@/services/project-service");
-
-  let created = 0;
-  let skipped = 0;
-  let stoppedReason = "";
-
-  for (const planned of runnable) {
-    // 1 - the approval can be revoked mid-expansion, by a cancel or by the gate
-    // closing it on exhaustion. Re-read it every iteration rather than trusting
-    // the copy taken before the loop.
-    const live = await prisma.batchAuthorization.findUnique({ where: { batchId } });
-    if (live?.status !== "APPROVED") {
-      stoppedReason =
-        `Quyền chi chuyển sang ${live?.status ?? "không còn"} giữa chừng. ` +
-        `Dừng mở rộng, không tạo thêm dự án.`;
-      break;
-    }
-
-    // Already expanded on an earlier run. A resume must not buy a second script
-    // for a video that already has one.
-    const existing = await prisma.project.findFirst({
-      where: { batchId, idiomId: planned.idiomId },
-    });
-    if (existing) {
-      // A project whose script generation died leaves a row at `draft` with no
-      // scenes. That state is a dead end everywhere else: `startMediaGeneration`
-      // refuses it ("chưa có kịch bản"), and so does the retry button - so the
-      // video could never be recovered by resuming, only by hand.
-      //
-      // Seen for real: a SQLite socket timeout during expansion killed the third
-      // video's script and left it stranded while the other two finished. The
-      // error was transient; the stranding was permanent, and that is the part
-      // worth fixing.
-      if (existing.status === "draft" && !existing.scriptJson) {
-        await logger.warn({
-          event: "batch.repairing_script",
-          projectId: existing.id,
-          message:
-            `Video "${planned.phrase}" có dự án nhưng chưa có kịch bản — ` +
-            `lần tạo trước hỏng giữa chừng. Đang viết lại kịch bản.`,
-        });
-        const { generateProjectScript } = await import("@/services/project-service");
-        await generateProjectScript(existing.id);
-      }
-
-      // A project stopped for review stays stopped: restarting it here would
-      // spend money on exactly the thing a human was asked about.
-      const current = await prisma.project.findUniqueOrThrow({
-        where: { id: existing.id },
-      });
-      if (current.status === "draft" || current.status === "script_ready") {
-        await startMediaForBatchVideo(current.id, live.maxCostPerVideo);
-      }
-      continue;
-    }
-
-    // 2 - room in the batch for this video's forecast, counting money already
-    // held by requests in flight.
-    const ledger = await reservationLedger(batchId, live.authorizedMaxSpend);
-    if (ledger.available < planned.estimatedCost) {
-      stoppedReason =
-        `Hạn mức lô còn $${ledger.available.toFixed(6)}, không đủ cho video ` +
-        `"${planned.phrase}" (dự toán $${planned.estimatedCost.toFixed(6)}). ` +
-        `Dừng ở đây thay vì bắt đầu một video chắc chắn không chạy hết được.`;
-      await closeAuthorization(batchId, "EXHAUSTED", stoppedReason);
-      break;
-    }
-
-    try {
-      // Writing the script is a paid text call, but a cheap one, and it has to
-      // happen before the video can be priced honestly. It goes through the
-      // ordinary spend guard like everything else.
-      const project = await createProjectForIdiom({
-        idiomId: planned.idiomId,
-        qualityMode: batch.qualityMode as QualityMode,
-        stylePresetId: batch.stylePresetId ?? undefined,
-        targetDuration: batch.targetDuration,
-        // The per-video ceiling IS this project's MAX BUDGET. Splitting the
-        // batch budget evenly - what this used to do - let one video quietly
-        // take a share that had been sized for several.
-        maxBudget: live.maxCostPerVideo,
-        batchId,
-        autoGenerateScript: true,
-        // Media starts below, AFTER the real script has been re-checked against
-        // the ceiling. Starting it here would skip checkpoint 3.
-        autoStartMedia: false,
-      });
-
-      const started = await startMediaForBatchVideo(project.id, live.maxCostPerVideo);
-      if (started) created++;
-      else skipped++;
-    } catch (err) {
-      skipped++;
-      await logger.error({
-        event: "batch.project_failed",
-        message: `Không tạo được dự án cho "${planned.phrase}": ${errorMessage(err)}`,
-      });
-    }
-  }
-
-  if (stoppedReason) {
-    await logger.warn({ event: "batch.expand_stopped", message: stoppedReason });
-  }
-
-  await settleBatchIfDone(batchId);
-
+  // SCHEDULING ONLY: the batch is run by the production executor - idioms into
+  // projects, every scene, render, export, settle. One engine. QĐ-103.
+  const { startRun } = await import("@/services/batch-executor");
+  const summary = await startRun(batchId, { resume: true });
   return {
     deferred: false,
-    result: { created, skipped, requested: runnable.length, stoppedReason },
+    result: {
+      videos: summary.outcomes.length,
+      completed: summary.outcomes.filter((o) => !o.stopped).length,
+      settled: summary.settledStatus,
+    },
   };
-}
-
-/**
- * Re-check one video against the per-video ceiling using its REAL script, then
- * start it or stop it.
- *
- * Returns whether media generation actually started. False is not a failure: it
- * means the video was correctly refused, and the project carries a status and a
- * message saying which refusal it was.
- */
-async function startMediaForBatchVideo(
-  projectId: string,
-  maxCostPerVideo: number,
-): Promise<boolean> {
-  const { previewProjectCost, startMediaGeneration } = await import(
-    "@/services/project-service"
-  );
-
-  const preview = await previewProjectCost(projectId);
-  const total = preview.current.breakdown.total;
-
-  // A plan that could not be routed is NOT a cheap plan.
-  //
-  // Scenes that fail to route cost nothing, so a video whose every scene was
-  // refused totals about $0 and sails through the ceiling check below - then
-  // starts, and fails one scene at a time at generation time. The codebase
-  // already learned this once, in `withinBudget`: "an incomplete plan is not an
-  // affordable one". This call site had the same hole.
-  if (preview.current.errors.length > 0) {
-    await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        status: "needs_review",
-        estimatedCost: total,
-        errorMessage:
-          `Không định tuyến được ${preview.current.errors.length} cảnh, nên dự ` +
-          `toán $${total.toFixed(6)} KHÔNG phản ánh công việc thật. ` +
-          preview.current.errors.join(" | "),
-      },
-    });
-    await logger.warn({
-      event: "batch.plan_incomplete",
-      projectId,
-      message: preview.current.errors.join(" | "),
-    });
-    return false;
-  }
-
-  if (total > maxCostPerVideo) {
-    await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        status: "needs_review",
-        estimatedCost: total,
-        errorMessage:
-          `OVER_VIDEO_BUDGET: kịch bản thật tốn $${total.toFixed(6)}, vượt hạn mức ` +
-          `$${maxCostPerVideo.toFixed(2)} cho một video. Video này KHÔNG chạy; ` +
-          `các video khác trong lô không bị ảnh hưởng.`,
-      },
-    });
-    await logger.warn({
-      event: "batch.over_video_budget",
-      projectId,
-      estimatedCost: total,
-      message:
-        `Video vượt hạn mức/video ($${total.toFixed(6)} > ` +
-        `$${maxCostPerVideo.toFixed(2)}). Đánh dấu OVER_VIDEO_BUDGET.`,
-    });
-    return false;
-  }
-
-  // skipBudgetPrompt means "the money was approved for the whole batch, stop
-  // asking". It does NOT wave through a scene with no usable provider - that
-  // check lives in startMediaGeneration and refuses either way.
-  const result = await startMediaGeneration(projectId, { skipBudgetPrompt: true });
-  return result.started;
 }
 
 /**

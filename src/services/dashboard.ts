@@ -19,6 +19,12 @@ export interface TodayDashboard {
   /** LIVE / CACHE / DECLARED, and when it was last read live - never shown bare. */
   runwaySource: string | null;
   runwayCheckedAt: string | null;
+  /**
+   * What the operator should read the number as: LIVE only when it was read
+   * from the vendor in the last 10 minutes; otherwise CACHE (with its age) -
+   * a stored LIVE reading is a claim about the past, not about now.
+   */
+  runwayFreshness: "LIVE" | "CACHE" | "DECLARED" | null;
   globalCap: number;
   globalSpent: number;
   globalRemaining: number;
@@ -63,6 +69,13 @@ export async function todayDashboard(now = new Date()): Promise<TodayDashboard> 
     runwayCredits: runway?.remainingUsd != null ? Math.round(runway.remainingUsd * 100) : null,
     runwaySource: runway?.budget?.source ?? null,
     runwayCheckedAt: runway?.budget?.checkedAt ?? null,
+    runwayFreshness: !runway?.budget
+      ? null
+      : runway.budget.checkedAt && now.getTime() - new Date(runway.budget.checkedAt).getTime() <= 10 * 60_000
+        ? "LIVE"
+        : runway.budget.checkedAt
+          ? "CACHE"
+          : "DECLARED",
     globalCap: cap.cap,
     globalSpent: cap.spent,
     globalRemaining: cap.remaining,

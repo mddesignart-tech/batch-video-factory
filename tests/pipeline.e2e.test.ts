@@ -21,8 +21,10 @@ import {
 } from "@/services/batch-authorization";
 import { planBatch } from "@/services/batch-planner";
 import { savePlan } from "@/services/batch-runner";
-import { claimNext, completeJob, failJob, queueStats } from "@/jobs/queue";
-import { onJobExhausted, runJob } from "@/jobs/handlers";
+import { approveAndRun, preflightForApproval } from "@/services/batch-executor";
+import { setSpendCap, spendStatus } from "@/services/spend-guard";
+import { queueStats } from "@/jobs/queue";
+import { runJob } from "@/jobs/handlers";
 import { probeDuration } from "@/media/ffmpeg";
 import { resetMockJobs } from "@/providers/mock/mock-visual-providers";
 
@@ -41,43 +43,11 @@ const IDIOM = "Break a leg";
 let idiomId = "";
 let projectId = "";
 
-/** Drain the queue the way the worker would, but synchronously and bounded. */
-async function drainQueue(maxJobs = 60): Promise<{ completed: number; failed: number }> {
-  let completed = 0;
-  let failed = 0;
-
-  for (let i = 0; i < maxJobs; i++) {
-    // Deferred jobs schedule themselves into the future; pull them forward so
-    // the test does not have to sleep through real backoff windows.
-    await prisma.job.updateMany({
-      where: { status: "queued", nextRunAt: { gt: new Date() } },
-      data: { nextRunAt: new Date() },
-    });
-
-    const job = await claimNext();
-    if (!job) break;
-
-    try {
-      const outcome = await runJob(job);
-      if (!outcome.deferred) {
-        await completeJob(job.id, outcome.result);
-        completed++;
-      }
-    } catch (err) {
-      const willRetry = await failJob(job.id, err);
-      if (!willRetry) {
-        // Mirror the worker exactly, so the harness and production agree on
-        // what happens when a job gives up.
-        await onJobExhausted(job, err);
-        failed++;
-      }
-    }
-  }
-  return { completed, failed };
-}
-
 beforeAll(async () => {
   resetMockJobs();
+  // Mock mode spends $0, but the approval gate compares the ESTIMATE with the
+  // global remaining - exactly as it would with real money.
+  await setSpendCap(50);
 
   for (const preset of SEED_STYLE_PRESETS) {
     await prisma.stylePreset.upsert({
@@ -250,21 +220,25 @@ describe("Milestone 1 acceptance: idiom to MP4", () => {
     expect(updated?.subtitle).toBe("BREAK A LEG?!");
   });
 
-  it("queues media generation within budget", async () => {
+  it("hands the project to the SAME approval + executor every batch uses", async () => {
+    // ONE ENGINE (QĐ-103): "TẠO MEDIA" spends nothing and queues nothing - the
+    // project becomes a batch of one, approved and run like any batch.
+    const jobsBefore = (await queueStats()).queued ?? 0;
     const result = await startMediaGeneration(projectId);
-    expect(result.started).toBe(true);
-    expect(result.jobsQueued).toBeGreaterThan(1);
+    expect(result.needsApproval).toBe(true);
+    expect(result.batchId).toBeTruthy();
+    expect((await queueStats()).queued ?? 0).toBe(jobsBefore);
 
-    const project = await prisma.project.findUnique({ where: { id: projectId } });
-    expect(project?.status).toBe("media_generating");
-
-    const stats = await queueStats();
-    expect(stats.queued).toBeGreaterThan(0);
-  });
+    const pre = await preflightForApproval(result.batchId!);
+    expect(pre.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(pre.ready).toBe(true);
+    const cap = await spendStatus();
+    const maxBatch = Math.min(cap.remaining, Math.max(0.01, pre.estimatedTotal * 1.5));
+    const { run } = await approveAndRun({ batchId: result.batchId!, maxBatch, lowAutoApproved: false, wait: true });
+    expect(run!.outcomes[0]!.stopped).toBe("");
+  }, 900_000);
 
   it("gives every scene usable media, whether from a video model or a keyframe", async () => {
-    const { failed } = await drainQueue();
-    expect(failed).toBe(0);
 
     const scenes = await prisma.scene.findMany({
       where: { projectId, skipped: false },
@@ -575,9 +549,10 @@ describe("batch generation", () => {
 });
 
 describe("provider failure handling", () => {
-  it("retries with backoff, exhausts, and surfaces the failure", async () => {
-    // Every mock generation fails, so the retry and fallback paths are taken
-    // deterministically rather than depending on a random draw.
+  it("one paid attempt per asset: fails, stops that video, surfaces it, charges nothing", async () => {
+    // Every mock generation fails. The ONE retry policy (QĐ-103): no paid
+    // request is retried automatically - the video stops at the scene that
+    // failed, says why, and the person decides (Thử lại / TIẾP TỤC).
     process.env.MOCK_FAILURE_RATE = "1";
     resetMockJobs();
 
@@ -594,62 +569,47 @@ describe("provider failure handling", () => {
       projectIdUnderTest = project.id;
 
       const started = await startMediaGeneration(project.id);
-      expect(started.started).toBe(true);
-
-      await drainQueue(120);
-
-      // Scene jobs must have been retried up to their limit, not given up on
-      // after one attempt.
-      const sceneJobs = await prisma.job.findMany({
-        where: { projectId: project.id, type: "generate_scene_media" },
+      expect(started.needsApproval).toBe(true);
+      const cap = await spendStatus();
+      const pre = await preflightForApproval(started.batchId!);
+      await approveAndRun({
+        batchId: started.batchId!,
+        maxBatch: Math.min(cap.remaining, Math.max(0.01, pre.estimatedTotal * 1.5)),
+        lowAutoApproved: false,
+        wait: true,
       });
-      expect(sceneJobs.length).toBeGreaterThan(0);
-      expect(sceneJobs.every((j) => j.attempts > 1)).toBe(true);
-      expect(sceneJobs.some((j) => j.status === "failed")).toBe(true);
 
-      // Every provider attempt is on record - this is the table that stops a
-      // retry from turning into a second charge. Only the MEDIA jobs failed;
-      // the text call that wrote the script succeeded before media started.
+      // Every provider attempt is on record, and none was attempted twice.
       const providerJobs = await prisma.providerJob.findMany({
         where: { projectId: project.id, kind: { not: "text" } },
       });
       expect(providerJobs.length).toBeGreaterThan(0);
       expect(providerJobs.every((p) => p.status === "failed")).toBe(true);
-
-      // Fallback was attempted: the log records each provider that was tried.
-      const fallbackLogs = await prisma.logEntry.count({
-        where: { projectId: project.id, event: "provider.fallback" },
-      });
-      expect(fallbackLogs).toBeGreaterThan(0);
+      expect(providerJobs.every((p) => p.attempts <= 1)).toBe(true);
+      expect(new Set(providerJobs.map((p) => p.idempotencyKey)).size).toBe(providerJobs.length);
 
       // The failure is visible on the scene and the project, in Vietnamese.
-      const scenes = await prisma.scene.findMany({
-        where: { projectId: project.id },
-      });
+      const scenes = await prisma.scene.findMany({ where: { projectId: project.id } });
       expect(scenes.some((s) => s.status === "failed")).toBe(true);
-
-      const after = await prisma.project.findUnique({
-        where: { id: project.id },
-      });
+      const after = await prisma.project.findUnique({ where: { id: project.id } });
       expect(after?.status).toBe("failed");
       expect(after?.errorMessage).toBeTruthy();
 
-      // Nothing was charged for the failed work.
+      // Nothing was charged for the failed work, and nothing is left held.
       const costs = await prisma.costEntry.aggregate({
         where: { projectId: project.id },
         _sum: { amount: true },
       });
       expect(costs._sum.amount ?? 0).toBe(0);
+      expect(await prisma.costReservation.count({ where: { batchId: started.batchId!, status: "RESERVED" } })).toBe(0);
     } finally {
       delete process.env.MOCK_FAILURE_RATE;
       resetMockJobs();
       if (projectIdUnderTest) {
-        await prisma.project
-          .delete({ where: { id: projectIdUnderTest } })
-          .catch(() => undefined);
+        await prisma.project.delete({ where: { id: projectIdUnderTest } }).catch(() => undefined);
       }
     }
-  });
+  }, 900_000);
 
   it("refuses to render a project whose scenes failed, with actionable advice", async () => {
     const project = await createProjectForIdiom({

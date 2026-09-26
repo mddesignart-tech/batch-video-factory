@@ -26,7 +26,6 @@ import { planBatch } from "@/services/batch-planner";
 import {
   batchProgress,
   cancelBatch,
-  resumeBatch,
   savePlan,
   settleBatchIfDone,
   storedPlan,
@@ -34,7 +33,7 @@ import {
 import { setSpendCap } from "@/services/spend-guard";
 import { setProviderBudget } from "@/services/provider-budget";
 import { runJob } from "@/jobs/handlers";
-import { claimNext, completeJob, failJob } from "@/jobs/queue";
+import { runBatch } from "@/services/batch-executor";
 
 /**
  * Batch Video Factory V1 - the acceptance test.
@@ -845,7 +844,9 @@ describe("cancel and resume", () => {
     await commit("r-1", 0.3);
     await cancelBatch(batch.id, "test");
 
-    await resumeBatch(batch.id);
+    // The first thing TIẾP TỤC does: re-open the SAME approval. (The run that
+    // follows is the executor's, tested elsewhere.)
+    await resumeAuthorization(batch.id);
     const auth = await prisma.batchAuthorization.findUniqueOrThrow({
       where: { batchId: batch.id },
     });
@@ -988,12 +989,10 @@ describe("three-video mock batch, end to end", () => {
     // Nothing has been spent, and nothing can be, until this call.
     await approveAuthorization({ batchId: batch.id, authorizedMaxSpend: 4 });
 
-    // Expand into projects.
-    const expandJob = await prisma.job.create({
-      data: { type: "batch_expand", batchId: batch.id, status: "processing" },
-    });
-    await runJob(expandJob);
-    await completeJob(expandJob.id);
+    // ONE production executor: idioms into projects, every scene, render,
+    // export, settle - the same code an imported storyboard runs. QĐ-103.
+    const run = await runBatch(batch.id, { resume: false });
+    expect(run.outcomes).toHaveLength(3);
 
     const projects = await prisma.project.findMany({ where: { batchId: batch.id } });
     expect(projects).toHaveLength(3);
@@ -1012,22 +1011,6 @@ describe("three-video mock batch, end to end", () => {
       expect(["AI_VIDEO", "LOCAL_MOTION"]).toContain(scene.motionSource);
     }
     expect(scenes.some((s) => s.motionSource === "LOCAL_MOTION")).toBe(true);
-
-    // Drain the queue the way the worker would.
-    for (let i = 0; i < 400; i++) {
-      await prisma.job.updateMany({
-        where: { status: "queued", nextRunAt: { gt: new Date() } },
-        data: { nextRunAt: new Date() },
-      });
-      const job = await claimNext();
-      if (!job) break;
-      try {
-        const outcome = await runJob(job);
-        if (!outcome.deferred) await completeJob(job.id, outcome.result);
-      } catch (err) {
-        await failJob(job.id, err);
-      }
-    }
 
     const progress = await batchProgress(batch.id);
     expect(progress).not.toBeNull();

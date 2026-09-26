@@ -5,6 +5,7 @@ import { ActionButtonWithFeedback } from "@/components/action-ui";
 import { exportOutput } from "@/app/actions/batch-run";
 import { openOutputFolder } from "@/app/actions/output";
 import { formatUSD } from "@/lib/utils";
+import { CopyPathButton } from "@/components/copy-path-button";
 
 /**
  * The finished video as a person wants it: playable, with its size, cost and
@@ -50,13 +51,10 @@ export function OutputCard({
                 <ActionButtonWithFeedback action={() => openOutputFolder(projectId)} size="sm" variant="outline">
                   MỞ THƯ MỤC
                 </ActionButtonWithFeedback>
-                <button
-                  type="button"
+                <CopyPathButton
+                  path={output.dir}
                   className="rounded border border-ink-700 px-2 py-1 text-[11px] text-ink-300 hover:border-brand-500"
-                  onClick={() => void navigator.clipboard?.writeText(output.dir)}
-                >
-                  COPY PATH
-                </button>
+                />
                 <ActionButtonWithFeedback action={() => exportOutput(projectId)} size="sm" variant="ghost">
                   Xuất lại
                 </ActionButtonWithFeedback>

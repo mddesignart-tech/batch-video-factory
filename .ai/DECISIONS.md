@@ -2835,3 +2835,49 @@ trần vượt ngân sách toàn cục còn lại bị từ chối, không bao g
 Output của video xong được xuất ra `data/output/<slug>-<id8>/` (final.mp4, thumbnail.jpg,
 subtitles.srt, metadata.json) — sao chép + FFmpeg tại máy, làm lại được bất cứ lúc nào.
 Dashboard hiện số dư Runway kèm NGUỒN và ngày đọc live (CACHE phải hiện kèm tuổi).
+
+## QĐ-103 — MỘT executor cho cả lô idiom và storyboard; một chính sách retry
+
+Luồng V1 (idiom → kịch bản → media qua hàng đợi) và storyboard nhập vào nay chạy chung
+`batch-executor.ts`. Khác nhau duy nhất ở NGUỒN (`batch-sources.ts`): IDIOM_GENERATED
+viết kịch bản trong bước `materializeIdiomVideos` của chính lần chạy; STORYBOARD_IMPORTED
+đã có sẵn dự án. Sau đó: cùng `gateChecks` duyệt, cùng cổng chi (reuse → knownBadInput →
+trần toàn cục → trần lô/video/scope/LOW_AUTO/reservation), cùng ledger, cùng output, cùng
+resume. Dự án đơn lẻ ("TẠO MEDIA") được bọc thành lô một video và phải DUYỆT & CHẠY ở trang
+lô — không còn đường nào mua media mà bỏ qua màn duyệt.
+
+Hàng đợi chỉ còn là lịch: `batch_expand` gọi `startRun(resume)`, `generate_scene_*` gọi
+`executeScene/executeSceneAsset`. Chính sách retry duy nhất: job trả phí
+(`PAID_JOB_TYPES`) KHÔNG bao giờ tự thử lại — dừng video, nêu lý do, người bấm Thử lại /
+TIẾP TỤC. Job cục bộ (render) vẫn được thử lại. Không có fallback ngầm.
+
+Số dư Runway: nút REFRESH BALANCE (bấm tay, chỉ GET /organization). Lỗi GET giữ số cũ,
+báo STALE, không bao giờ ghi 0 thay. Hạn mức toàn cục: người gõ số mới, phải ≥ đã chi,
+xác nhận, ghi log cũ → mới; đổi hạn mức không chạy lô nào.
+
+## QĐ-104 — Hạn mức toàn cục: ghi + audit trong MỘT transaction, UI chỉ hiện số đọc lại từ DB
+
+Sự cố 2026-09-26: người dùng nhập $8,50 ở Settings nhưng `data/app.db` vẫn $8,08. Bằng chứng:
+không DB nào trong máy có 8.5, không có `spend.cap_changed` mới, và `worker.*` (ghi mỗi lần
+server khởi động) cuối cùng là 25/09 16:05 — không server nào mở DB thật sau đó. Mã cũ có ba
+lỗ khiến việc này không nhìn thấy được: `save()` không `catch` (server chết/mất mạng → không
+báo gì), "Lưu hạn mức…" chỉ mở hộp xác nhận (chưa bấm XÁC NHẬN = chưa lưu), và trang không
+nói đang sửa DB nào. Thêm: `next dev` trả 500 mọi trang vì instrumentation kéo ffmpeg-static
+vào bản Edge.
+
+Quyết định: `changeSpendCap` kiểm (hữu hạn, ≥0, ≤1000, ≥ đã chi thật), ghi setting + LogEntry
+(previous, cap, spent, source=SETTINGS_UI, changedAt) trong `$transaction`, rồi ĐỌC LẠI và so.
+Action parse chặt (regex số thập phân), trả `readBack` + đường dẫn DB. UI hiện số của DB
+(`spendCapView`), lỗi → SAVE FAILED, dòng "DB: …" đỏ khi không phải `data/app.db`.
+Instrumentation tách `instrumentation-node.ts`, import trong nhánh `NEXT_RUNTIME === "nodejs"`.
+
+## QĐ-105 — TIẾP TỤC có ở cả lô COMPLETED; COPY PATH luôn báo kết quả
+
+Paid UI test 2026-09-26 cần bấm TIẾP TỤC trên lô đã xong để chứng minh idempotency, nhưng nút bị
+ẩn khi COMPLETED. Nay nút luôn có khi quyền chi không còn DRAFT, nhãn "kiểm tra lại — $0 nếu đã
+đủ": resume không duyệt lại tiền, dùng lại mọi asset, và bỏ qua video có final MP4 còn trên đĩa
+(chỉ render lại tại máy khi file mất). Đã chứng minh trên DB thật: PJ/CE/POST +0, sha final giữ nguyên.
+
+COPY PATH dùng `navigator.clipboard.writeText` kiểu `void` — trình duyệt từ chối thì im lặng, người
+dùng tưởng đã copy. Nay `CopyPathButton` dùng chung: thử Clipboard API, rồi textarea+execCommand,
+và luôn hiện ĐÃ COPY hoặc COPY LỖI.

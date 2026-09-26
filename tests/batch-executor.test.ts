@@ -132,7 +132,7 @@ describe("PREFLIGHT (không chi gì)", () => {
     const jobs0 = await count();
     const pre = await preflightForApproval(batchId);
     expect(await count()).toBe(jobs0);
-    const byTitle = Object.fromEntries(pre.preflight.videos.map((v) => [v.title, v]));
+    const byTitle = Object.fromEntries(pre.preflight!.videos.map((v) => [v.title, v]));
     expect(byTitle["Video A"]!.lifecycle).toBe("READY");
     expect(byTitle["Video B"]!.lifecycle).toBe("READY");
     expect(byTitle["Video C"]!.lifecycle).toBe("BLOCKED");

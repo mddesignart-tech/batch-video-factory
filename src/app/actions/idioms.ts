@@ -25,6 +25,8 @@ export interface ActionResult {
   message: string;
   /** Populated by import: rows rejected and why. */
   details?: string[];
+  /** Where the page should go next, when the action hands off to another page. */
+  redirectTo?: string;
 }
 
 const IdiomInput = z.object({

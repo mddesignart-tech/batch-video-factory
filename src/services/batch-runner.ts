@@ -2,14 +2,8 @@ import type { Batch } from "@prisma/client";
 import type { BatchStatus, VideoPlanStatus } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { parseJson, round } from "@/lib/utils";
-import { enqueue } from "@/jobs/queue";
-import {
-  approveAuthorization,
-  BatchAuthorizationError,
-  closeAuthorization,
-  resumeAuthorization,
-} from "./batch-authorization";
+import { parseJson } from "@/lib/utils";
+import { closeAuthorization } from "./batch-authorization";
 import { reservationLedger, type ReservationLedger } from "./cost-reservation";
 import type { BatchPlan, PlannedVideo } from "./batch-planner";
 import { isRunning } from "./run-registry";
@@ -141,52 +135,24 @@ export async function approveAndStart(opts: {
   batchId: string;
   authorizedMaxSpend: number;
   note?: string;
+  /** A separate yes for router-chosen clips; never implied by an amount. */
+  lowAutoApproved?: boolean;
 }): Promise<{ started: boolean; message: string }> {
-  const batch = await prisma.batch.findUnique({ where: { id: opts.batchId } });
-  if (!batch) throw new Error("Không tìm thấy lô.");
-
-  const plan = storedPlan(batch);
-  if (!plan) {
-    throw new BatchAuthorizationError(
-      "Lô này chưa có bản dự toán. Hãy bấm PHÂN TÍCH & DỰ TOÁN trước khi duyệt.",
-      "no_authorization",
-    );
-  }
-  if (plan.runnableCount === 0) {
-    throw new BatchAuthorizationError(
-      "Không có video nào chạy được trong bản dự toán này. Hãy sửa nguyên nhân " +
-        "ở cột trạng thái rồi dự toán lại.",
-      "not_approved",
-    );
-  }
-
-  await approveAuthorization({
+  // ONE approval and ONE run for every source: the production executor.
+  // Nothing is enqueued here any more. QĐ-103.
+  const { approveAndRun } = await import("./batch-executor");
+  await approveAndRun({
     batchId: opts.batchId,
-    authorizedMaxSpend: opts.authorizedMaxSpend,
-    note: opts.note,
+    maxBatch: opts.authorizedMaxSpend,
+    lowAutoApproved: opts.lowAutoApproved === true,
   });
-
-  await prisma.batch.update({
-    where: { id: opts.batchId },
-    data: { status: "QUEUED", maxBudget: round(opts.authorizedMaxSpend, 6) },
-  });
-
-  // Expanding into projects happens in the queue: writing ten scripts is not
-  // something an HTTP request should hold open.
-  await enqueue({ type: "batch_expand", batchId: opts.batchId, priority: 10 });
-
   await logger.warn({
     event: "batch.started",
-    message:
-      `Lô "${batch.name}" được duyệt chi tối đa $${opts.authorizedMaxSpend.toFixed(2)} ` +
-      `cho ${plan.runnableCount} video. Bắt đầu chạy.`,
+    message: `Lô ${opts.batchId}: duyệt $${opts.authorizedMaxSpend.toFixed(2)} và chạy bằng executor production.`,
   });
-
   return {
     started: true,
-    message:
-      `Đã duyệt và bắt đầu lô "${batch.name}": ${plan.runnableCount} video, ` +
-      `hạn mức $${opts.authorizedMaxSpend.toFixed(2)}.`,
+    message: `Đã duyệt chi tối đa $${opts.authorizedMaxSpend.toFixed(2)}. Lô đang chạy.`,
   };
 }
 
@@ -263,61 +229,25 @@ export async function cancelBatch(
  * under the same idempotency key.
  */
 export async function resumeBatch(batchId: string): Promise<{ message: string }> {
-  await resumeAuthorization(batchId);
-  await prisma.batch.update({ where: { id: batchId }, data: { status: "QUEUED" } });
-  await enqueue({ type: "batch_expand", batchId, priority: 10 });
-
+  // Same approval, same ceiling, same tally - through the executor.
+  const { resumeRun } = await import("./batch-executor");
+  await resumeRun({ batchId });
   await logger.warn({
     event: "batch.resumed",
-    message:
-      `Chạy tiếp lô ${batchId}. Giữ nguyên hạn mức và số tiền đã chi — ` +
-      `resume KHÔNG cấp thêm quyền chi.`,
+    message: `Chạy tiếp lô ${batchId}. Giữ nguyên hạn mức và số tiền đã chi — resume KHÔNG cấp thêm quyền chi.`,
   });
   return { message: "Đã chạy tiếp lô. Công việc đã hoàn thành sẽ không làm lại." };
 }
 
-/** Put one video back in the queue without re-approving anything. */
+/** Run one video again through the executor, without re-approving anything. */
 export async function retryVideo(projectId: string): Promise<{ jobsQueued: number }> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    include: { scenes: { where: { skipped: false }, orderBy: { sceneNumber: "asc" } } },
-  });
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) throw new Error("Không tìm thấy dự án.");
   if (!project.batchId) throw new Error("Dự án này không thuộc lô nào.");
-
-  // The gate is re-asked for every request either way, so a retry cannot spend
-  // outside the ceiling. What it must not do is bypass a CLOSED approval.
-  const auth = await prisma.batchAuthorization.findUnique({
-    where: { batchId: project.batchId },
-  });
-  if (auth?.status !== "APPROVED") {
-    throw new BatchAuthorizationError(
-      `Quyền chi của lô đang ở trạng thái ${auth?.status ?? "chưa có"}. ` +
-        `Hãy chạy tiếp lô trước khi thử lại video này.`,
-      "not_approved",
-    );
-  }
-
-  const { generateProjectScript, startMediaGeneration } = await import(
-    "./project-service"
-  );
-
-  // "Thử lại" is the button an operator presses on the row that looks broken,
-  // so it has to handle the way a row actually breaks. A project whose script
-  // generation died sits at `draft` with no scenes, and `startMediaGeneration`
-  // refuses it for want of a script - which would make the retry button reply
-  // "no script" forever on the one row it exists to rescue.
-  if (!project.scriptJson || project.scenes.length === 0) {
-    await logger.warn({
-      event: "batch.repairing_script",
-      projectId,
-      message: "Dự án chưa có kịch bản (lần tạo trước hỏng). Đang viết lại trước khi tạo media.",
-    });
-    await generateProjectScript(projectId);
-  }
-
-  const result = await startMediaGeneration(projectId, { skipBudgetPrompt: true });
-  return { jobsQueued: result.jobsQueued };
+  const { resumeRun } = await import("./batch-executor");
+  // A project whose script died is repaired by the executor's idiom step.
+  await resumeRun({ batchId: project.batchId, onlyProjectIds: [projectId] });
+  return { jobsQueued: 0 };
 }
 
 /**
@@ -335,52 +265,20 @@ export async function retryScene(sceneId: string): Promise<void> {
   });
   if (!scene) throw new Error("Không tìm thấy cảnh.");
 
+  // The operator asked for THIS scene again: bumping retryCount changes its key,
+  // so it is bought again - on purpose. Every other scene keeps its key and is
+  // reused. The run itself is the executor's.
   await prisma.scene.update({
     where: { id: sceneId },
     data: { retryCount: { increment: 1 }, status: "pending", errorMessage: null },
   });
-  await enqueue({
-    type: "generate_scene_media",
-    sceneId,
-    projectId: scene.projectId,
-    priority: 100 + scene.sceneNumber,
-  });
-
-  // Revive the render this scene took down with it.
-  //
-  // `handleRenderFinal` refuses outright when a scene has given up - waiting on
-  // one that will never produce media is waiting forever - so it burns its
-  // attempts and ends `failed`. Fixing the scene afterwards then leaves the
-  // video one job short of finished, with nothing in the queue to notice: the
-  // project sits at `rendering` for good, and the only symptom is an MP4 that
-  // never appears. An operator retrying a scene is trying to finish the video,
-  // so the render goes back in the queue behind it.
-  const render = await prisma.job.findFirst({
-    where: { projectId: scene.projectId, type: "render_final", status: "failed" },
-    orderBy: { createdAt: "desc" },
-  });
-  if (render) {
-    await prisma.job.update({
-      where: { id: render.id },
-      data: {
-        status: "queued",
-        attempts: 0,
-        error: null,
-        finishedAt: null,
-        nextRunAt: new Date(),
-        // The deferral counter is per attempt at rendering, not per lifetime.
-        payloadJson: "{}",
-      },
-    });
-    await logger.info({
-      event: "render.requeued_after_retry",
-      projectId: scene.projectId,
-      sceneId,
-      message:
-        `Đã xếp lại bước render của dự án: nó từng hỏng vì cảnh ${scene.sceneNumber} ` +
-        `không có media, và cảnh đó vừa được cho chạy lại.`,
-    });
+  if (!scene.project.batchId) {
+    const { executeScene } = await import("./batch-executor");
+    await executeScene(sceneId);
+    return;
   }
+  const { resumeRun } = await import("./batch-executor");
+  await resumeRun({ batchId: scene.project.batchId, onlyProjectIds: [scene.projectId], wait: true });
 }
 
 /** Everything the batch detail page needs, in one read. */

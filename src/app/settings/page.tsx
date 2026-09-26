@@ -8,6 +8,7 @@ import {
 import { getSettings } from "@/lib/settings";
 import { isMockMode } from "@/lib/env";
 import { DATA_ROOT } from "@/lib/paths";
+import { isProductionDatabase, resolveDatabaseFile } from "@/lib/db-location";
 import { ffmpegVersion, resolveFfmpeg, resolveFfprobe } from "@/media/ffmpeg";
 import { SettingsForm } from "./settings-form";
 import { AudioMixForm } from "./audio-mix-form";
@@ -102,7 +103,12 @@ export default async function SettingsPage() {
             </CardContent>
           </Card>
 
-          <SpendCapForm cap={spend.cap} spent={spend.spent} />
+          <SpendCapForm
+            cap={spend.cap}
+            spent={spend.spent}
+            databaseFile={resolveDatabaseFile()}
+            productionDatabase={isProductionDatabase()}
+          />
 
           <ProviderBudgets rows={budgets} />
 

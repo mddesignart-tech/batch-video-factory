@@ -29,11 +29,9 @@ import {
   CopyPathButton,
   OpenOutputButton,
   ResumeRunButton,
-  RetryVideoButton,
 } from "./batch-controls";
 import { ApproveRunPanel } from "@/components/approve-run-panel";
 import { LIFECYCLE_TONE } from "@/domain/video-lifecycle";
-import { ApprovePanel, type ApprovalFigures } from "./approve-panel";
 import { POLL_INTERVAL_MS, useBatchProgress } from "./use-batch-progress";
 
 const PROJECT_TONE: Record<string, "neutral" | "info" | "ok" | "warn" | "danger"> = {
@@ -59,10 +57,8 @@ const PROJECT_TONE: Record<string, "neutral" | "info" | "ok" | "warn" | "danger"
  */
 export function BatchProgressView({
   initial,
-  approval,
 }: {
   initial: BatchProgress;
-  approval: ApprovalFigures | null;
 }) {
   const { progress, refreshing, error, polling } = useBatchProgress(
     initial.batch.id,
@@ -201,34 +197,36 @@ export function BatchProgressView({
             canStop={live}
             // An imported batch resumes through the production executor below,
             // never through the queue.
-            canResume={stopped && !progress.importBatch}
-            canReplan={!live && !progress.importBatch}
+            // Resume is TIẾP TỤC below, through the executor, for every batch.
+            canResume={false}
+            canReplan={authorization?.status === "DRAFT" && !progress.importBatch}
           />
-          {progress.importBatch ? (
-            <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
               {progress.running ? (
                 <Badge tone="warn">Đang chạy (pipeline production)</Badge>
-              ) : authorization &&
-                authorization.status !== "DRAFT" &&
-                !["COMPLETED", "CANCELLED"].includes(status) ? (
-                <ResumeRunButton batchId={batch.id} />
+              ) : authorization && authorization.status !== "DRAFT" ? (
+                // Also offered on a finished batch: resuming never re-approves,
+                // reuses every asset already bought, and only re-renders
+                // locally when a final MP4 has gone missing - so it is the $0
+                // "check it again" button as well.
+                <ResumeRunButton
+                  batchId={batch.id}
+                  label={status === "COMPLETED" && !stopped ? "TIẾP TỤC (kiểm tra lại — $0 nếu đã đủ)" : "TIẾP TỤC"}
+                />
               ) : null}
               {authorization?.approvedAt ? (
                 <span className="text-ink-500">
                   Duyệt lúc {new Date(authorization.approvedAt).toLocaleString("vi-VN")}
                 </span>
               ) : null}
-            </div>
-          ) : null}
+          </div>
         </CardContent>
       </Card>
 
-      {progress.importBatch && authorization?.status === "DRAFT" ? (
+      {authorization?.status === "DRAFT" ? (
         <div className="mt-4">
           <ApproveRunPanel batchId={batch.id} />
         </div>
-      ) : approval ? (
-        <ApprovePanel batchId={batch.id} figures={approval} />
       ) : null}
 
       <Card className="mt-4">
@@ -348,12 +346,8 @@ export function BatchProgressView({
                           <OpenOutputButton projectId={video.projectId} />
                         </>
                       ) : ["failed", "needs_review", "budget_exhausted"].includes(video.status) ? (
-                        progress.importBatch ? (
-                          progress.running ? null : (
-                            <ResumeRunButton batchId={batch.id} projectId={video.projectId} label="Thử lại video này" />
-                          )
-                        ) : (
-                          <RetryVideoButton projectId={video.projectId} />
+                        progress.running ? null : (
+                          <ResumeRunButton batchId={batch.id} projectId={video.projectId} label="Thử lại video này" />
                         )
                       ) : null}
                       <Link

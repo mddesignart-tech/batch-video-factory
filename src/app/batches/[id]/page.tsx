@@ -1,8 +1,6 @@
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
-import { batchProgress, storedPlan } from "@/services/batch-runner";
+import { batchProgress } from "@/services/batch-runner";
 import { BatchProgressView } from "./batch-progress-view";
-import type { ApprovalFigures } from "./approve-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -28,28 +26,5 @@ export default async function BatchDetailPage({
   const progress = await batchProgress(id);
   if (!progress) notFound();
 
-  // Only a DRAFT authorisation can be approved, so only then is the panel
-  // assembled at all.
-  let approval: ApprovalFigures | null = null;
-  if (progress.authorization?.status === "DRAFT") {
-    const batch = await prisma.batch.findUnique({ where: { id } });
-    const plan = batch ? storedPlan(batch) : null;
-    if (plan) {
-      const forMoney = plan.production ?? plan.runtime;
-      approval = {
-        costBasis: forMoney.costBasis,
-        estimated: plan.recommendation.estimated,
-        recommended: plan.recommendation.recommended,
-        safetyMarginPct: plan.recommendation.safetyMarginPct,
-        clampedByGlobalCap: plan.recommendation.clampedByGlobalCap,
-        globalRemaining: plan.globalCap.remaining,
-        providerScope: forMoney.providerScope,
-        videoCount: forMoney.runnableCount,
-        maxCostPerVideo: plan.maxCostPerVideo,
-        warnings: plan.warnings,
-      };
-    }
-  }
-
-  return <BatchProgressView initial={progress} approval={approval} />;
+  return <BatchProgressView initial={progress} />;
 }

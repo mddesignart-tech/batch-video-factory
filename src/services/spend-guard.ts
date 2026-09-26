@@ -66,17 +66,115 @@ export async function getSpendCap(): Promise<number> {
   }
 }
 
-export async function setSpendCap(cap: number): Promise<void> {
+export async function setSpendCap(
+  cap: number,
+  audit: { previous?: number; spent?: number; source?: string } = {},
+): Promise<void> {
   const valueJson = JSON.stringify(Math.max(0, cap));
   await prisma.setting.upsert({
     where: { key: SPEND_CAP_SETTING },
     create: { key: SPEND_CAP_SETTING, valueJson },
     update: { valueJson },
   });
+  // The audit line: old -> new, what was already spent, and who changed it.
   await logger.warn({
     event: "spend.cap_changed",
-    message: `Hạn mức chi tiêu API đổi thành $${cap.toFixed(2)}.`,
+    message:
+      `Hạn mức chi tiêu API đổi ` +
+      (audit.previous !== undefined ? `từ $${audit.previous.toFixed(2)} ` : "") +
+      `thành $${cap.toFixed(2)}` +
+      (audit.spent !== undefined ? ` (đã chi $${audit.spent.toFixed(6)}, còn $${(cap - audit.spent).toFixed(6)})` : "") +
+      (audit.source ? ` — nguồn: ${audit.source}` : "") +
+      `. Không có lô nào được chạy vì thay đổi này.`,
+    data: { previous: audit.previous ?? null, cap, spent: audit.spent ?? null, source: audit.source ?? null },
   });
+}
+
+export const SPEND_CAP_MAX = 1000;
+
+export class SpendCapChangeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SpendCapChangeError";
+  }
+}
+
+export interface SpendCapChange {
+  previous: number;
+  /** Read back from the database AFTER the write - never the requested number. */
+  cap: number;
+  spent: number;
+  remaining: number;
+  changedAt: Date;
+  source: string;
+}
+
+/**
+ * Change the global limit to exactly the number a person typed.
+ *
+ * The setting and its audit row are written in ONE transaction, so there is
+ * never a new limit without its old -> new record, nor a record of a change that
+ * did not happen. The value is then read back from the database and compared:
+ * the caller is told what the database now holds, not what was asked for.
+ */
+export async function changeSpendCap(
+  requested: number,
+  source: string,
+): Promise<SpendCapChange> {
+  if (typeof requested !== "number" || !Number.isFinite(requested)) {
+    throw new SpendCapChangeError("Hạn mức phải là một số hữu hạn.");
+  }
+  if (requested < 0) throw new SpendCapChangeError("Hạn mức không được âm.");
+  if (requested > SPEND_CAP_MAX) {
+    throw new SpendCapChangeError(`Hạn mức tối đa $${SPEND_CAP_MAX}.`);
+  }
+  const cap = round(requested, 6);
+  const { spent, cap: previous } = await spendStatus();
+  if (cap < spent) {
+    throw new SpendCapChangeError(
+      `Hạn mức mới ($${cap.toFixed(2)}) thấp hơn số đã chi ($${spent.toFixed(6)}). ` +
+        `Mọi yêu cầu trả phí sẽ bị chặn ngay lập tức.`,
+    );
+  }
+
+  const changedAt = new Date();
+  const valueJson = JSON.stringify(cap);
+  const remaining = round(cap - spent, 6);
+  const message =
+    `Hạn mức chi tiêu API đổi từ $${previous.toFixed(2)} thành $${cap.toFixed(2)} ` +
+    `(đã chi $${spent.toFixed(6)}, còn $${remaining.toFixed(6)}) — nguồn: ${source}. ` +
+    `Không có lô nào được chạy vì thay đổi này.`;
+  await prisma.$transaction([
+    prisma.setting.upsert({
+      where: { key: SPEND_CAP_SETTING },
+      create: { key: SPEND_CAP_SETTING, valueJson },
+      update: { valueJson },
+    }),
+    prisma.logEntry.create({
+      data: {
+        level: "warn",
+        event: "spend.cap_changed",
+        message,
+        createdAt: changedAt,
+        dataJson: JSON.stringify({
+          previous,
+          cap,
+          spent,
+          source,
+          changedAt: changedAt.toISOString(),
+        }),
+      },
+    }),
+  ]);
+  console.warn(`[warn] spend.cap_changed ${message}`);
+
+  const readBack = await getSpendCap();
+  if (readBack !== cap) {
+    throw new SpendCapChangeError(
+      `Đọc lại hạn mức từ DB được $${readBack.toFixed(2)}, không phải $${cap.toFixed(2)}.`,
+    );
+  }
+  return { previous, cap: readBack, spent, remaining: round(readBack - spent, 6), changedAt, source };
 }
 
 /**
