@@ -193,17 +193,17 @@ describe("2. ảnh nhập = REUSE, 0 Image API", () => {
 });
 
 describe("3. thứ tự cảnh đọc từ MP4 thật", () => {
-  it("khung giữa mỗi cảnh (theo duration storyboard) đúng màu 1 -> 2 -> 3 -> 4 -> 5", async () => {
+  it("khung giữa mỗi cảnh (theo thời lượng cuối đã render) đúng màu 1 -> 2 -> 3 -> 4 -> 5", async () => {
     const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
     const mp4 = toAbsolute(project.finalVideoPath!);
     const scenes = await prisma.scene.findMany({ where: { projectId, skipped: false }, orderBy: { sceneNumber: "asc" } });
-    const total = scenes.reduce((n, s) => n + s.duration, 0);
+    const total = scenes.reduce((n, s) => n + (s.finalDuration ?? s.duration), 0);
     expect(await probeDuration(mp4)).toBeCloseTo(total, 1);
     let start = 0;
     const seen: string[] = [];
     for (const s of scenes) {
-      seen.push(nearest(await frameColour(mp4, start + s.duration / 2)));
-      start += s.duration;
+      seen.push(nearest(await frameColour(mp4, start + (s.finalDuration ?? s.duration) / 2)));
+      start += s.finalDuration ?? s.duration;
     }
     expect(seen).toEqual(EXPECTED.map((e) => e.name));
   });

@@ -27,6 +27,7 @@ import {
   uploadCharacterReference,
 } from "@/services/character-master";
 import { sceneCharacters } from "@/domain/scene-characters";
+import { DURATION_MODES } from "@/domain/scene-timing";
 
 /**
  * Server actions for the storyboard import screen.
@@ -249,6 +250,38 @@ export async function importedScenes(batchId: string): Promise<
     out.push({ projectId: project.id, title: project.title, scenes: rows });
   }
   return out;
+}
+
+/**
+ * Change how one scene's length is decided (AUTO / MINIMUM / LOCKED).
+ *
+ * Only the instruction is written - `duration` (the plan) is untouched and no
+ * media is created or bought. A video that is already rendered is not
+ * re-rendered by this: the new mode applies at its next local render
+ * (RENDER_ONLY_CHANGE, $0).
+ */
+export async function setSceneDurationMode(
+  sceneId: string,
+  mode: string,
+): Promise<{ ok: boolean; message: string; preflight?: ImportPreflight }> {
+  const wanted = String(mode).toUpperCase();
+  if (!(DURATION_MODES as readonly string[]).includes(wanted)) {
+    return { ok: false, message: `Chế độ thời lượng "${mode}" không hợp lệ. Chỉ nhận: ${DURATION_MODES.join(", ")}.` };
+  }
+  try {
+    const scene = await prisma.scene.update({
+      where: { id: sceneId },
+      data: { durationMode: wanted },
+      select: { sceneNumber: true, project: { select: { batchId: true } } },
+    });
+    const batchId = scene.project.batchId;
+    const preflight = batchId ? await preflightImportedBatch(batchId) : undefined;
+    if (batchId) revalidatePath(`/batches/${batchId}`);
+    revalidatePath("/import");
+    return { ok: true, message: `Cảnh ${scene.sceneNumber}: thời lượng ${wanted}. Không có request nào được gửi.`, preflight };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Re-price an imported batch after the operator edited a scene. */

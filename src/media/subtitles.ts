@@ -129,10 +129,12 @@ export function cuesFromTimelines(
     for (const entry of scene.entries) {
       const text = entry.text.trim();
       if (text.length === 0) continue;
+      // A 60ms trim stops one caption flickering into the next; a caption
+      // never runs past its own scene, however short the scene was timed.
+      const end = Math.min(Math.max(entry.startSec + 0.3, entry.endSec - 0.06), scene.sceneDurationSec - 0.02);
       cues.push({
         startSeconds: round(offset + entry.startSec),
-        // A 60ms trim stops one caption flickering into the next.
-        endSeconds: round(offset + Math.max(entry.startSec + 0.3, entry.endSec - 0.06)),
+        endSeconds: round(offset + Math.max(entry.startSec + 0.05, end)),
         text,
       });
     }

@@ -127,7 +127,11 @@ export function pauseFromMs(ms: number | null | undefined): number | undefined {
 export function buildSceneTimeline(
   lines: TimelineInput[],
   plannedDuration: number,
+  opts: { leadInSec?: number } = {},
 ): SceneTimeline {
+  // Silence before the first word (voice-aware timing, V1.2). 0 keeps the old
+  // layout, where speech starts on the cut.
+  const leadIn = Math.max(0, opts.leadInSec ?? 0);
   const ordered = [...lines].sort((a, b) => a.lineNumber - b.lineNumber);
   const entries: TimelineEntry[] = [];
 
@@ -160,9 +164,9 @@ export function buildSceneTimeline(
       speaker: line.speaker,
       text: line.text,
       audioPath: line.audioPath,
-      startSec: round(cursor),
+      startSec: round(leadIn + cursor),
       durationSec: round(duration),
-      endSec: round(cursor + duration),
+      endSec: round(leadIn + cursor + duration),
       pauseAfterSec: round(pauseAfterSec),
       speakerChanged,
     });
@@ -172,13 +176,13 @@ export function buildSceneTimeline(
   }
 
   const speechDurationSec = round(cursor);
-  const sceneDurationSec = round(Math.max(plannedDuration, speechDurationSec));
+  const sceneDurationSec = round(Math.max(plannedDuration, leadIn + speechDurationSec));
 
   return {
     entries,
     speechDurationSec,
     sceneDurationSec,
-    extended: speechDurationSec > plannedDuration,
+    extended: leadIn + speechDurationSec > plannedDuration,
   };
 }
 

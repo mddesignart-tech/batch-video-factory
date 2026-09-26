@@ -27,6 +27,7 @@ import { ImportImagesCard } from "./import-images-card";
 import { OutputCard } from "./output-card";
 import { existingOutputFor } from "@/services/output-export";
 import { CostPreview } from "./cost-preview";
+import { pacingSummary } from "@/domain/scene-timing";
 
 export const dynamic = "force-dynamic";
 
@@ -152,6 +153,14 @@ export default async function ProjectDetailPage({
                 <OutputCard
                   projectId={project.id}
                   actualCost={project.actualCost}
+                  pacing={(() => {
+                    const live = project.scenes.filter((sc) => !sc.skipped);
+                    if (live.length === 0 || live.some((sc) => sc.finalDuration === null)) return null;
+                    return pacingSummary(
+                      live.reduce((n, sc) => n + sc.duration, 0),
+                      live.reduce((n, sc) => n + (sc.finalDuration ?? sc.duration), 0),
+                    );
+                  })()}
                   output={
                     found
                       ? {

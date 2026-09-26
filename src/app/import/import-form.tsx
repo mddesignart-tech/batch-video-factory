@@ -410,7 +410,7 @@ export function ImportForm() {
 
       {batchId ? <SceneEditor batchId={batchId} onEstimated={setPreflight} /> : null}
 
-      {preflight ? <PreflightPanel preflight={preflight} batchId={batchId} /> : null}
+      {preflight ? <PreflightPanel preflight={preflight} batchId={batchId} onUpdate={setPreflight} /> : null}
 
       {preflight && batchId ? <ApproveRunPanel batchId={batchId} /> : null}
     </div>

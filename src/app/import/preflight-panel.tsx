@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { setSceneDurationMode } from "@/app/actions/storyboard-import";
+import { DURATION_MODES } from "@/domain/scene-timing";
 import {
   Alert,
   Badge,
@@ -86,7 +89,73 @@ function readinessLabel(readiness: string): string {
   return readiness === "NEEDS_CHARACTER_REFERENCE" ? "NEEDS_REFERENCE" : readiness;
 }
 
-function VideoBlock({ video }: { video: ImportVideoPreview }) {
+/** AUTO / MINIMUM / LOCKED for one scene. Writes the instruction only - nothing is bought. */
+function DurationModeSelect({
+  sceneId,
+  mode,
+  onUpdate,
+}: {
+  sceneId: string | null;
+  mode: string;
+  onUpdate?: (p: ImportPreflight) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!sceneId) return <span>{mode}</span>;
+  return (
+    <span className="inline-flex flex-col">
+      <select
+        aria-label="Chế độ thời lượng"
+        className="rounded border border-ink-700 bg-ink-900 px-1 py-0.5 text-[11px]"
+        value={mode}
+        disabled={busy}
+        onChange={async (e) => {
+          setBusy(true);
+          setError(null);
+          try {
+            const r = await setSceneDurationMode(sceneId, e.target.value);
+            if (r.ok && r.preflight) onUpdate?.(r.preflight);
+            else if (!r.ok) setError(r.message);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {DURATION_MODES.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+      {error ? <span className="text-[10px] text-danger-500">{error}</span> : null}
+    </span>
+  );
+}
+
+function TimingCell({ s, onUpdate }: { s: ImportVideoPreview["scenes"][number]; onUpdate?: (p: ImportPreflight) => void }) {
+  const t = s.timing;
+  return (
+    <div className="space-y-0.5 text-[11px] leading-tight">
+      <div>
+        Dự kiến {t.planned.toFixed(1)}s · Lời{" "}
+        {t.voice === null ? "—" : `${t.voice.toFixed(1)}s${t.voiceEstimated ? " (ước tính)" : ""}`}
+      </div>
+      <div className={t.blocked ? "text-danger-500" : t.final < t.planned - 0.05 ? "text-ok-500" : ""}>
+        <strong>Cuối {t.final.toFixed(1)}s</strong>
+      </div>
+      <div className="flex items-center gap-1">
+        <DurationModeSelect sceneId={s.sceneId} mode={t.mode} onUpdate={onUpdate} />
+        <span className="font-mono text-[10px] text-ink-500" title="timingReason">
+          {t.reason}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function VideoBlock({ video, onUpdate }: { video: ImportVideoPreview; onUpdate?: (p: ImportPreflight) => void }) {
   const duration = video.scenes.reduce((n, s) => n + s.duration, 0);
 
   return (
@@ -113,6 +182,12 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
           ) : null}
         </span>
       </div>
+
+      {video.pacing ? (
+        <p className="text-xs text-ok-500">
+          {video.pacing} (theo lời thoại; lời chưa tạo thì là ước tính — con số thật tính lại lúc render, $0)
+        </p>
+      ) : null}
 
       {video.blockedReason ? <Alert tone="danger">{video.blockedReason}</Alert> : null}
 
@@ -148,6 +223,7 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
             <Th>#</Th>
             <Th>Ảnh cảnh</Th>
             <Th>Giây</Th>
+            <Th>Nhịp (lời thoại)</Th>
             <Th>Nhân vật</Th>
             <Th>Camera</Th>
             <Th>Chuyển động</Th>
@@ -182,6 +258,9 @@ function VideoBlock({ video }: { video: ImportVideoPreview }) {
                 ) : null}
               </Td>
               <Td>{s.duration}</Td>
+              <Td>
+                <TimingCell s={s} onUpdate={onUpdate} />
+              </Td>
               <Td className="text-xs">{s.characters.join(", ") || "—"}</Td>
               <Td className="max-w-[10rem] truncate text-xs">{s.camera || "—"}</Td>
               <Td>
@@ -244,9 +323,12 @@ const IMAGE_SOURCE_TONE: Record<
 export function PreflightPanel({
   preflight,
   batchId,
+  onUpdate,
 }: {
   preflight: ImportPreflight;
   batchId: string | null;
+  /** Receives a fresh preflight after a per-scene timing edit. */
+  onUpdate?: (p: ImportPreflight) => void;
 }) {
   const c = preflight.counts;
 
@@ -267,7 +349,7 @@ export function PreflightPanel({
         </div>
 
         {preflight.videos.map((v) => (
-          <VideoBlock key={v.projectId} video={v} />
+          <VideoBlock key={v.projectId} video={v} onUpdate={onUpdate} />
         ))}
 
         {/* ---- images first: the purchase an import exists to avoid ---- */}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DURATION_MODES, type DurationMode } from "./scene-timing";
 
 /**
  * The storyboard import format, and everything that can be checked about it
@@ -46,6 +47,10 @@ export const DEFAULT_SCENE_DURATION = 4;
 export interface StoryboardScene {
   sceneNumber: number;
   duration: number;
+  /** Voice-aware timing (V1.2). Missing in the file = AUTO. */
+  durationMode: DurationMode;
+  minDuration: number | null;
+  maxDuration: number | null;
   narration: string;
   dialogue: string;
   visualDescription: string;
@@ -271,6 +276,9 @@ const RawSceneSchema = z
     video_title: z.unknown().optional(),
     scene_number: z.unknown().optional(),
     duration: z.unknown().optional(),
+    duration_mode: z.unknown().optional(),
+    min_duration: z.unknown().optional(),
+    max_duration: z.unknown().optional(),
     narration: z.unknown().optional(),
     dialogue: z.unknown().optional(),
     visual_description: z.unknown().optional(),
@@ -408,6 +416,44 @@ export function normaliseScene(
     issues.push(
       warn("duration_defaulted", `Thiếu duration, dùng mặc định ${DEFAULT_SCENE_DURATION}s.`, at),
     );
+  }
+
+  // Voice-aware timing. All optional: a V1.1 storyboard is AUTO with no bounds.
+  const rawMode = text(raw.duration_mode).toUpperCase();
+  let durationMode: DurationMode = "AUTO";
+  if (rawMode.length > 0) {
+    if (!(DURATION_MODES as readonly string[]).includes(rawMode)) {
+      issues.push(
+        err(
+          "duration_mode_invalid",
+          `duration_mode "${text(raw.duration_mode)}" không hợp lệ. Chỉ nhận: ${DURATION_MODES.join(", ")}.`,
+          at,
+        ),
+      );
+      return { scene: null, issues };
+    }
+    durationMode = rawMode as DurationMode;
+  }
+  const bound = (value: unknown, name: string): number | null | "invalid" => {
+    const t = text(value);
+    if (t.length === 0) return null;
+    const n = Number(t);
+    if (!Number.isFinite(n) || n < MIN_SCENE_DURATION || n > MAX_SCENE_DURATION) {
+      issues.push(
+        err(`${name}_invalid`, `${name} "${t}" nằm ngoài khoảng ${MIN_SCENE_DURATION}–${MAX_SCENE_DURATION} giây.`, at),
+      );
+      return "invalid";
+    }
+    return n;
+  };
+  const minDuration = bound(raw.min_duration, "min_duration");
+  const maxDuration = bound(raw.max_duration, "max_duration");
+  if (minDuration === "invalid" || maxDuration === "invalid") return { scene: null, issues };
+  if (minDuration !== null && maxDuration !== null && minDuration > maxDuration) {
+    issues.push(
+      err("duration_bounds_invalid", `min_duration (${minDuration}s) lớn hơn max_duration (${maxDuration}s).`, at),
+    );
+    return { scene: null, issues };
   }
 
   const visualDescription = text(raw.visual_description);
@@ -559,6 +605,9 @@ export function normaliseScene(
     scene: {
       sceneNumber,
       duration,
+      durationMode,
+      minDuration,
+      maxDuration,
       narration,
       dialogue,
       visualDescription,

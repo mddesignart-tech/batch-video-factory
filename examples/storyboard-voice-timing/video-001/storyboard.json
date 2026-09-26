@@ -1,0 +1,72 @@
+{
+  "video_id": "qa-voice-timing",
+  "video_title": "QA nhịp theo lời thoại (5 cảnh, 5s dự kiến)",
+  "characters": [
+    {
+      "character_id": "max",
+      "character_name": "Max"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration": 5,
+      "visual_description": "A flat red card with the words SCENE 1.",
+      "character_action": "Nothing moves.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Short line for scene one.\"",
+      "subtitle": "Short line for scene one.",
+      "image_file": "scene-01.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 2,
+      "duration": 5,
+      "visual_description": "A flat blue card with the words SCENE 2.",
+      "character_action": "Nothing moves.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"This second line is longer than the first one.\"",
+      "subtitle": "This second line is longer than the first one.",
+      "image_file": "scene-02.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 3,
+      "duration": 5,
+      "visual_description": "A flat yellow card with the words SCENE 3.",
+      "character_action": "Nothing moves.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"Scene three says exactly six words.\"",
+      "subtitle": "Scene three says exactly six words.",
+      "image_file": "scene-03.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 4,
+      "duration": 5,
+      "visual_description": "A flat purple card with the words SCENE 4. Nobody speaks.",
+      "character_action": "Nothing moves.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "",
+      "subtitle": "",
+      "image_file": "scene-04.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    },
+    {
+      "scene_number": 5,
+      "duration": 5,
+      "visual_description": "A flat black card with the words SCENE 5.",
+      "character_action": "Nothing moves.",
+      "camera": "Locked static medium shot, no camera movement.",
+      "dialogue": "Max: \"And the last scene closes with ten words exactly here.\"",
+      "subtitle": "And the last scene closes with ten words exactly here.",
+      "image_file": "scene-05.png",
+      "motion_mode": "LOCAL_MOTION",
+      "priority": "LOW"
+    }
+  ]
+}

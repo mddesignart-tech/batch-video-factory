@@ -312,9 +312,16 @@ describe("Milestone 1 acceptance: idiom to MP4", () => {
     expect(fs.statSync(finalPath).size).toBeGreaterThan(20_000);
 
     const duration = await probeDuration(finalPath);
-    // The scripted target is 27s; allow generous slack for per-scene rounding.
-    expect(duration).toBeGreaterThan(15);
-    expect(duration).toBeLessThan(45);
+    // Voice-aware timing (V1.2): scenes last as long as their speech plus a
+    // little padding, so the video is SHORTER than the scripted ~27s - and
+    // exactly as long as the per-scene lengths the render recorded.
+    const scenes = await prisma.scene.findMany({ where: { projectId, skipped: false } });
+    const planned = scenes.reduce((n, s) => n + s.duration, 0);
+    const timed = scenes.reduce((n, s) => n + (s.finalDuration ?? s.duration), 0);
+    expect(scenes.every((s) => s.finalDuration !== null && s.timingReason !== null)).toBe(true);
+    expect(duration).toBeCloseTo(timed, 0);
+    expect(duration).toBeGreaterThan(8);
+    expect(duration).toBeLessThanOrEqual(planned + 1);
   });
 
   it("marks the idiom as used so it is not picked again", async () => {

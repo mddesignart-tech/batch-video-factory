@@ -11,6 +11,7 @@ import { evaluateScene } from "@/services/generation";
 import { syncBatchActualCost, syncProjectActualCost } from "@/services/cost-tracker";
 import { settleBatchIfDone } from "@/services/batch-runner";
 import { renderProject, targetForAspect } from "@/media/render";
+import { pacingSummary, parseDurationMode } from "@/domain/scene-timing";
 import { deferJob } from "./queue";
 
 /**
@@ -193,6 +194,44 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
           durationSec: l.durationSec,
           pauseAfterMs: l.pauseAfterMs,
         })),
+      durationMode: parseDurationMode(s.durationMode),
+      minDuration: s.minDuration,
+      maxDuration: s.maxDuration,
+      motionSource: s.motionSource,
+    })),
+  });
+
+  // What the voice-aware timing decided, per scene - kept beside the PLANNED
+  // duration, which is never overwritten.
+  for (const timing of result.sceneTimings) {
+    const scene = active.find((s) => s.sceneNumber === timing.sceneNumber);
+    if (!scene) continue;
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: {
+        voiceDurationActual: timing.voiceDuration,
+        finalDuration: timing.finalDuration,
+        timingReason: timing.timingReason,
+      },
+    });
+  }
+  await logger.info({
+    event: "render.timing",
+    projectId,
+    message:
+      (pacingSummary(result.plannedTotal, result.finalTotal) ??
+        `Nhịp giữ nguyên: ${result.finalTotal.toFixed(1)}s`) +
+      ` (dự kiến ${result.plannedTotal.toFixed(2)}s, thực ${result.finalTotal.toFixed(2)}s). ` +
+      `Chỉ cắt/ghép tại máy — không request trả phí nào vì nhịp cảnh.`,
+    data: result.sceneTimings.map((t) => ({
+      scene: t.sceneNumber,
+      planned: t.plannedDuration,
+      voice: t.voiceDuration,
+      final: t.finalDuration,
+      mode: t.durationMode,
+      reason: t.timingReason,
+      freeze: t.freezeSec,
+      trimmed: t.trimmedSec,
     })),
   });
 

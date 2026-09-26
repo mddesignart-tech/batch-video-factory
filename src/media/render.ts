@@ -34,6 +34,14 @@ import {
   type MixWarning,
 } from "./audio-metrics";
 import { ensureProjectDirs, projectSubdir } from "@/lib/paths";
+import {
+  DEFAULT_TIMING,
+  resolveSceneDuration,
+  TimingBlockedError,
+  type DurationMode,
+  type SceneTiming,
+  type TimingConfig,
+} from "@/domain/scene-timing";
 
 /**
  * Final assembly: many short scene clips -> one platform-ready MP4.
@@ -100,6 +108,12 @@ export interface RenderScene {
   imagePath: string | null;
   /** The real audio source. Present on every project made since per-line voice. */
   dialogueLines?: RenderDialogueLine[];
+  /** Voice-aware timing (V1.2). Missing = AUTO, no bounds. */
+  durationMode?: DurationMode | null;
+  minDuration?: number | null;
+  maxDuration?: number | null;
+  /** How the scene was planned to move; decides the visual floor. */
+  motionSource?: string | null;
 }
 
 export interface RenderRequest {
@@ -113,6 +127,8 @@ export interface RenderRequest {
   sfx?: { path: string; atSec: number }[];
   /** Mix knobs. Anything missing falls back to the safe preset. */
   mixSettings?: Partial<AudioMixSettings>;
+  /** Voice-aware timing thresholds. Missing = DEFAULT_TIMING. */
+  timingConfig?: TimingConfig;
 }
 
 export interface RenderResult {
@@ -129,6 +145,10 @@ export interface RenderResult {
   audioWarnings: MixWarning[];
   /** Per-scene audio tracks, kept so one scene can be re-mixed alone. */
   sceneAudioPaths: string[];
+  /** How long every scene ended up, and why - in scene order. */
+  sceneTimings: SceneTiming[];
+  plannedTotal: number;
+  finalTotal: number;
 }
 
 // ------------------------------------------------------- pure arg builders ---
@@ -161,8 +181,12 @@ export function buildSceneNormalizeArgs(opts: {
   if (audioInput) args.push("-i", audioInput);
   else args.push("-f", "lavfi", "-i", `anullsrc=r=48000:cl=stereo`);
 
+  // The push spreads over the WHOLE scene: a fixed step reached 1.10 after
+  // ~2.8s and then sat still, which a longer voice-timed scene would expose.
+  const frames = Math.max(1, Math.round(dur * fps));
+  const step = Math.min(0.0012, 0.1 / frames).toFixed(6);
   const zoom = isStill
-    ? `,zoompan=z='min(zoom+0.0012,1.10)':d=${Math.round(dur * fps)}:s=${width}x${height}:fps=${fps}`
+    ? `,zoompan=z='min(zoom+${step},1.10)':d=${frames}:s=${width}x${height}:fps=${fps}`
     : "";
 
   const videoChain =
@@ -407,30 +431,63 @@ export function buildConcatList(files: string[]): string {
  * predates it, and letting an operator pick would leave two behaviours to
  * reason about forever.
  */
-async function buildSceneAudio(
-  scene: RenderScene,
-  tempDir: string,
-): Promise<{
-  timeline: SceneTimeline;
-  audioPath: string;
-  loudness: LoudnessStats;
-} | null> {
-  const lines = (scene.dialogueLines ?? []).filter(
-    (l) => l.audioPath.length > 0 && fs.existsSync(l.audioPath),
-  );
-  if (lines.length === 0) return null;
-
-  const timeline = buildSceneTimeline(
-    lines.map((l) => ({
+function timelineInputs(scene: RenderScene) {
+  return (scene.dialogueLines ?? [])
+    .filter((l) => l.audioPath.length > 0 && fs.existsSync(l.audioPath))
+    .map((l) => ({
       lineNumber: l.lineNumber,
       speaker: l.speaker,
       text: l.text,
       audioPath: l.audioPath,
       durationSec: l.durationSec,
       pauseAfterOverride: pauseFromMs(l.pauseAfterMs),
-    })),
-    scene.duration,
+    }));
+}
+
+/**
+ * The measured facts the timing engine needs for one scene: how long the
+ * speech really is (from the clips' measured lengths, or ffprobe on a legacy
+ * file - never a text estimate once audio exists) and how long a paid clip is.
+ */
+async function sceneTimingFor(scene: RenderScene, config: TimingConfig): Promise<SceneTiming> {
+  const lines = timelineInputs(scene);
+  let voice: number | null = null;
+  if (lines.length > 0) {
+    voice = buildSceneTimeline(lines, 0).speechDurationSec;
+  } else if (scene.audioPath && fs.existsSync(scene.audioPath)) {
+    voice = await probeDuration(scene.audioPath).catch(() => null);
+  }
+  const isClip = Boolean(scene.videoPath && /\.(mp4|mov|webm|mkv)$/i.test(scene.videoPath));
+  const clipDuration = isClip && fs.existsSync(scene.videoPath!) ? await probeDuration(scene.videoPath!).catch(() => null) : null;
+  return resolveSceneDuration(
+    {
+      sceneNumber: scene.sceneNumber,
+      plannedDuration: scene.duration,
+      durationMode: scene.durationMode ?? "AUTO",
+      minDuration: scene.minDuration ?? null,
+      maxDuration: scene.maxDuration ?? null,
+      voiceDuration: voice,
+      motion: isClip ? "VIDEO_AI" : scene.motionSource === "LOCAL_MOTION" || scene.imagePath ? "LOCAL_MOTION" : "STATIC",
+      clipDuration,
+    },
+    config,
   );
+}
+
+async function buildSceneAudio(
+  scene: RenderScene,
+  timing: SceneTiming,
+  tempDir: string,
+): Promise<{
+  timeline: SceneTimeline;
+  audioPath: string;
+  loudness: LoudnessStats;
+} | null> {
+  const lines = timelineInputs(scene);
+  if (lines.length === 0) return null;
+
+  // Laid out on the RESOLVED length, speech starting after the lead-in.
+  const timeline = buildSceneTimeline(lines, timing.finalDuration, { leadInSec: timing.leadInSec });
 
   const audioPath = path.join(
     tempDir,
@@ -463,37 +520,44 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   // This runs FIRST because it decides how long each scene is. A scene whose
   // speech outruns its planned visuals gets extended, and the video cut has to
   // follow that decision rather than the other way round.
+  // Voice-aware timing (V1.2): every scene's length is resolved from MEASURED
+  // speech and the paid clip's MEASURED length, before anything is cut. A scene
+  // the purchased media cannot fit stops the render here - no file is touched
+  // and nothing is bought (MEDIA_REGEN_REQUIRED).
+  const timingConfig = req.timingConfig ?? DEFAULT_TIMING;
+  const sceneTimings: SceneTiming[] = [];
+  for (const scene of usable) sceneTimings.push(await sceneTimingFor(scene, timingConfig));
+  const blockedTimings = sceneTimings.filter((t) => t.blocked);
+  if (blockedTimings.length > 0) throw new TimingBlockedError(blockedTimings);
+
   const sceneAudio: ({
     timeline: SceneTimeline;
     audioPath: string;
     loudness: LoudnessStats;
   } | null)[] = [];
-  for (const scene of usable) {
-    sceneAudio.push(await buildSceneAudio(scene, tempDir));
+  for (let i = 0; i < usable.length; i += 1) {
+    sceneAudio.push(await buildSceneAudio(usable[i]!, sceneTimings[i]!, tempDir));
   }
   const usingTimeline = sceneAudio.some((a) => a !== null);
   const audioWarnings: MixWarning[] = [];
 
-  // Effective duration per scene: extended where the speech demanded it.
-  const sceneDurations = usable.map((scene, i) => {
+  // Effective duration per scene: the resolved one. The timeline can only be
+  // longer if speech outran it, which the engine already rules out.
+  const sceneDurations = usable.map((_, i) => {
     const audio = sceneAudio[i];
-    return audio ? audio.timeline.sceneDurationSec : scene.duration;
+    const resolved = sceneTimings[i]!.finalDuration;
+    return audio ? Math.max(resolved, audio.timeline.sceneDurationSec) : resolved;
   });
 
-  for (let i = 0; i < usable.length; i += 1) {
-    const scene = usable[i];
-    const audio = sceneAudio[i];
-    if (!scene || !audio || !audio.timeline.extended) continue;
-    audioWarnings.push({
-      kind: "audio_longer_than_scene",
-      severity: "warning",
-      message:
-        `Cảnh ${scene.sceneNumber}: âm thanh ${audio.timeline.speechDurationSec.toFixed(2)}s ` +
-        `dài hơn thời lượng cảnh ${scene.duration.toFixed(2)}s. Cảnh đã được kéo dài.`,
-      suggestion:
-        "Lời thoại KHÔNG bị cắt. Muốn cảnh ngắn lại: giảm khoảng nghỉ, " +
-        "tăng nhẹ tốc độ đọc, hoặc viết lời thoại ngắn hơn.",
-    });
+  for (const timing of sceneTimings) {
+    for (const message of timing.warnings) {
+      audioWarnings.push({
+        kind: "scene_timing",
+        severity: "warning",
+        message,
+        suggestion: "Lời thoại KHÔNG bị cắt và không có request trả phí nào vì nhịp cảnh.",
+      });
+    }
   }
 
   // ---- Pass 1 - normalise every scene to identical codec parameters -------
@@ -553,13 +617,14 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
           }
           // A legacy scene inside an otherwise modern project still needs its
           // slot on the clock, with its caption across the whole scene.
+          const length = sceneDurations[i] ?? scene.duration;
           return {
-            entries: [{ startSec: 0, endSec: scene.duration, text: scene.subtitle }],
-            sceneDurationSec: scene.duration,
+            entries: [{ startSec: 0, endSec: length, text: scene.subtitle }],
+            sceneDurationSec: length,
           };
         }),
       )
-    : buildCues(usable);
+    : buildCues(usable.map((scene, i) => ({ ...scene, duration: sceneDurations[i] ?? scene.duration })));
 
   const srt = buildSRT(cues);
   const ass = buildASS(cues, {
@@ -685,5 +750,8 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     audioMetrics,
     audioWarnings,
     sceneAudioPaths,
+    sceneTimings,
+    plannedTotal: Math.round(sceneTimings.reduce((n, t) => n + t.plannedDuration, 0) * 1000) / 1000,
+    finalTotal: Math.round(sceneDurations.reduce((n, d) => n + d, 0) * 1000) / 1000,
   };
 }

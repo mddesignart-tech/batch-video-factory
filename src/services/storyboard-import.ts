@@ -1038,6 +1038,10 @@ export async function materialiseImport(
           // other two are instructions and are written down as such.
           motionMode: scene.motionMode,
           motionSource: scene.motionMode === "LOCAL_MOTION" ? "LOCAL_MOTION" : "AI_VIDEO",
+          // Voice-aware timing instruction; `duration` above stays the plan.
+          durationMode: scene.durationMode,
+          minDuration: scene.minDuration,
+          maxDuration: scene.maxDuration,
           videoProvider: scene.videoProvider,
           videoModel: scene.videoModel,
           // A model named in the storyboard file is a person's instruction, and

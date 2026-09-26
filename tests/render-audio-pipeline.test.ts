@@ -277,9 +277,13 @@ describe.runIf(hasFfmpeg)("legacy fallback", () => {
 });
 
 describe.runIf(hasFfmpeg)("audio longer than the scene", () => {
-  it("EXTENDS the video rather than cutting the speech, and says so", async () => {
-    const v = path.join(root, "short.mp4");
-    await makeVideo(v, 2, "orange");
+  // Voice-aware timing (V1.2, QĐ-107): speech is never cut. A scene drawn from
+  // a still picture simply lasts as long as its speech; a PAID clip is a fixed
+  // length, and a hold of more than 1s to cover the speech is refused rather
+  // than shown (the old behaviour froze the last frame for 4s).
+  it("ảnh tĩnh / LOCAL_MOTION: cảnh KÉO DÀI cho đủ lời, không cắt lời", async () => {
+    const still = path.join(root, "still.png");
+    await ffmpeg(["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=orange:s=360x640", "-frames:v", "1", still]);
     const longLine = path.join(root, "long-line.wav");
     await makeLine(longLine, 6, 240);
 
@@ -290,9 +294,10 @@ describe.runIf(hasFfmpeg)("audio longer than the scene", () => {
           sceneNumber: 1,
           duration: 2,
           subtitle: "A long line",
-          videoPath: v,
+          videoPath: null,
           audioPath: null,
-          imagePath: null,
+          imagePath: still,
+          motionSource: "LOCAL_MOTION",
           dialogueLines: [
             { lineNumber: 1, speaker: "Leo", text: "A long line", audioPath: longLine, durationSec: 6 },
           ],
@@ -302,11 +307,36 @@ describe.runIf(hasFfmpeg)("audio longer than the scene", () => {
       burnSubtitles: false,
     });
 
-    const warning = result.audioWarnings.find((w) => w.kind === "audio_longer_than_scene");
-    expect(warning).toBeDefined();
-    expect(warning?.suggestion).toMatch(/KHÔNG bị cắt/);
-    // The picture was held to cover the speech, not the other way round.
-    expect(result.durationSeconds).toBeGreaterThan(5);
+    expect(result.sceneTimings[0]!.finalDuration).toBeGreaterThanOrEqual(6 + result.sceneTimings[0]!.leadInSec);
+    expect(result.durationSeconds).toBeGreaterThan(6);
+  }, 300_000);
+
+  it("clip đã mua ngắn hơn lời quá 1s: DỪNG (MEDIA_REGEN_REQUIRED), không kéo khung 4s, không mua gì", async () => {
+    const v = path.join(root, "short.mp4");
+    await makeVideo(v, 2, "orange");
+    const longLine = path.join(root, "long-line.wav");
+    await makeLine(longLine, 6, 240);
+
+    await expect(
+      renderProject({
+        projectId: PROJECT,
+        scenes: [
+          {
+            sceneNumber: 1,
+            duration: 2,
+            subtitle: "A long line",
+            videoPath: v,
+            audioPath: null,
+            imagePath: null,
+            dialogueLines: [
+              { lineNumber: 1, speaker: "Leo", text: "A long line", audioPath: longLine, durationSec: 6 },
+            ],
+          },
+        ],
+        target: { width: 360, height: 640, fps: 30 },
+        burnSubtitles: false,
+      }),
+    ).rejects.toThrow(/MEDIA_REGEN_REQUIRED/);
   }, 300_000);
 });
 

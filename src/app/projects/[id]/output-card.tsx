@@ -16,6 +16,7 @@ export function OutputCard({
   projectId,
   output,
   actualCost,
+  pacing = null,
 }: {
   projectId: string;
   output: {
@@ -26,6 +27,8 @@ export function OutputCard({
     aspectRatio: string | null;
   } | null;
   actualCost: number;
+  /** "Đã tối ưu nhịp: 26s → 21.8s" from the last render, or null. */
+  pacing?: string | null;
 }) {
   return (
     <Card>
@@ -43,6 +46,7 @@ export function OutputCard({
             />
             <div className="space-y-1.5 text-ink-300">
               <p>Thời lượng: {output.duration !== null ? `${output.duration.toFixed(2)}s` : "—"}</p>
+              {pacing ? <p className="text-ok-500">{pacing}</p> : null}
               <p>Độ phân giải: {output.resolution ?? "—"} · {output.aspectRatio ?? ""}</p>
               <p>Chi thật: {formatUSD(actualCost, 6)}</p>
               <p className="max-w-md break-all font-mono text-[11px] text-ink-400">{output.dir}</p>

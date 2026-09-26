@@ -489,6 +489,21 @@ model Scene {
   /// recomputing it later against a changed registry would quietly move money.
   motionSource String @default("AI_VIDEO")
 
+  /// Voice-aware timing (V1.2, QĐ-107). `duration` stays what the script or
+  /// storyboard PLANNED and is never overwritten; these hold the instruction
+  /// (mode + optional bounds) and what the last render actually decided.
+  /// AUTO = speech decides, MINIMUM = never shorter than planned, LOCKED =
+  /// planned unless the speech does not fit (then raised, never cut).
+  durationMode        String  @default("AUTO")
+  minDuration         Float?
+  maxDuration         Float?
+  /// MEASURED speech length (lines + pauses) at the last render.
+  voiceDurationActual Float?
+  /// The length the scene was rendered at.
+  finalDuration       Float?
+  /// Stable reason code from scene-timing.ts (VOICE_PADDED, CLIP_TRIMMED_LOCAL, ...).
+  timingReason        String?
+
   /// What the OPERATOR asked for, as opposed to what was decided.
   ///
   /// AUTO leaves the motion decision to the planner, which is V1's behaviour and

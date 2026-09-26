@@ -17,6 +17,75 @@ import {
   type CharacterReadiness,
 } from "./character-service";
 import { sceneCharacters } from "@/domain/scene-characters";
+import {
+  estimateVoiceDuration,
+  pacingSummary,
+  parseDurationMode,
+  resolveSceneDuration,
+  type DurationMode,
+  type TimingReason,
+} from "@/domain/scene-timing";
+
+/**
+ * How the voice-aware timing will treat one scene, BEFORE render. Measured
+ * voice when every line of the scene has been voiced; otherwise an estimate
+ * from the words, marked as such. The paid clip's length is not known before
+ * it is bought, so clip rules show up at render (and in the render log).
+ */
+async function previewTiming(
+  scene: {
+    id: string;
+    duration: number;
+    durationMode: string;
+    minDuration: number | null;
+    maxDuration: number | null;
+    dialogue: string;
+    narration: string;
+    voiceDurationActual: number | null;
+  } | null,
+  sceneNumber: number,
+  motionSource: string,
+) {
+  const planned = scene?.duration ?? 0;
+  let voice: number | null = null;
+  let estimated = false;
+  if (scene) {
+    const lines = await prisma.dialogueLine.findMany({
+      where: { sceneId: scene.id },
+      select: { status: true, durationSec: true, text: true },
+    });
+    if (lines.length > 0 && lines.every((l) => l.status === "completed" && l.durationSec > 0)) {
+      // Measured clips; pauses between lines are small and added at render.
+      voice = lines.reduce((n, l) => n + l.durationSec, 0) + Math.max(0, lines.length - 1) * 0.15;
+    } else if (scene.voiceDurationActual) {
+      voice = scene.voiceDurationActual;
+    } else {
+      const words = lines.length > 0 ? lines.map((l) => l.text).join(" ") : `${scene.dialogue} ${scene.narration}`;
+      const spoken = words.replace(/^[^:"]{1,40}:\s*/gm, "").replace(/["“”]/g, "");
+      voice = estimateVoiceDuration(spoken) || null;
+      estimated = voice !== null;
+    }
+  }
+  const t = resolveSceneDuration({
+    sceneNumber,
+    plannedDuration: planned,
+    durationMode: parseDurationMode(scene?.durationMode),
+    minDuration: scene?.minDuration ?? null,
+    maxDuration: scene?.maxDuration ?? null,
+    voiceDuration: voice,
+    voiceEstimated: estimated,
+    motion: motionSource === "LOCAL_MOTION" ? "LOCAL_MOTION" : "VIDEO_AI",
+  });
+  return {
+    planned: t.plannedDuration,
+    voice: t.voiceDuration,
+    voiceEstimated: t.voiceEstimated,
+    final: t.finalDuration,
+    mode: t.durationMode as DurationMode,
+    reason: t.timingReason as TimingReason,
+    blocked: t.blocked,
+  };
+}
 import type { BatchPlan, BatchCosting, PlannedVideo, PlannedSceneRow } from "./batch-planner";
 
 /**
@@ -68,6 +137,22 @@ export interface ImportSceneLine {
   imagePath: string | null;
   /** The name the imported picture had when the person supplied it, so the table shows which file went to which scene. */
   imageFilename: string | null;
+  /** For per-scene edits (duration mode) from the preview. */
+  sceneId: string | null;
+  /**
+   * Voice-aware timing as it will be decided at render (V1.2). Before audio
+   * exists the voice length is an ESTIMATE from the words and says so; the
+   * render recomputes it from the measured files.
+   */
+  timing: {
+    planned: number;
+    voice: number | null;
+    voiceEstimated: boolean;
+    final: number;
+    mode: DurationMode;
+    reason: TimingReason;
+    blocked: boolean;
+  };
   estimatedCost: number;
   /** Per asset: BUY (this run pays), REUSE (already owned), NONE (not needed). */
   plan: {
@@ -149,8 +234,12 @@ export interface ImportVideoPreview {
   projectId: string;
   title: string;
   aspectRatio: string;
-  /** Seconds, summed over the scenes that will be rendered. */
+  /** Seconds, summed over the scenes that will be rendered - as PLANNED. */
   totalDuration: number;
+  /** Seconds after voice-aware timing (estimated until the voices exist). */
+  timedDuration: number;
+  /** "Đã tối ưu nhịp: 25s → 16.4s", or null. */
+  pacing: string | null;
   sceneCount: number;
   localMotionCount: number;
   videoAiCount: number;
@@ -451,6 +540,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       }
       sceneLines.push({
         sceneNumber: row.sceneNumber,
+        sceneId: scene?.id ?? null,
         duration: scene?.duration ?? 0,
         complexity: scene?.complexity ?? "LOW",
         motionSource: row.motionSource,
@@ -468,6 +558,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
             : null,
         estimatedCost: round(row.estimatedCost, 6),
         plan,
+        timing: await previewTiming(scene ?? null, row.sceneNumber, row.motionSource),
       });
       plannedScenes.push({
         sceneNumber: row.sceneNumber,
@@ -658,6 +749,11 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     videos.push({
       aspectRatio: project.aspectRatio,
       totalDuration: round(project.scenes.reduce((n, sc) => n + sc.duration, 0), 3),
+      timedDuration: round(sceneLines.reduce((n, s) => n + s.timing.final, 0), 3),
+      pacing: pacingSummary(
+        project.scenes.reduce((n, sc) => n + sc.duration, 0),
+        sceneLines.reduce((n, s) => n + s.timing.final, 0),
+      ),
       lifecycle,
       blockedReason,
       characters,

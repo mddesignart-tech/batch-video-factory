@@ -2906,3 +2906,45 @@ VIDEO_AI không có ảnh nhập → preflight nói rõ WILL_CREATE 1 ảnh.
 
 Giới hạn công cụ, không phải app: kéo thả thư mục không giả lập được bằng JS (Chrome không cấp
 FileSystemEntry cho DataTransfer tổng hợp) — đường chọn nhiều file và ZIP đã kiểm trên UI thật.
+
+## QĐ-107 — Voice-aware scene timing (V1.2 Phase 1)
+
+Trước đây cảnh dài `max(dự kiến, lời)` → cảnh 5s có 2s lời để 3s im lặng. Nay MỘT hàm quyết định:
+`resolveSceneDuration` (`src/domain/scene-timing.ts`, thuần, không I/O). Render gọi nó TRƯỚC khi cắt gì.
+
+**Dữ liệu mỗi cảnh:** `duration` = dự kiến (không bao giờ bị ghi đè) · `durationMode` AUTO|MINIMUM|LOCKED
+(mặc định AUTO) · `minDuration`/`maxDuration` (tuỳ chọn) · sau render: `voiceDurationActual` (ĐO từ
+file, không ước tính), `finalDuration`, `timingReason`. Migration `20260926000000_voice_aware_timing`
+(chỉ thêm cột). Storyboard nhận `duration_mode`, `min_duration`, `max_duration` (JSON/CSV/ZIP; file
+V1.1 vẫn nhập được, mặc định AUTO).
+
+**Luật** (DEFAULT_TIMING): target = 0.15 + lời + 0.35.
+- AUTO: final = target, kẹp [1.5s … 15s] và min/max của storyboard; max KHÔNG cắt lời.
+- MINIMUM: max(dự kiến, target). LOCKED: dự kiến; nếu lời không vừa → NÂNG cho đủ lời (cảnh báo), không cắt.
+- Không lời: giữ dự kiến, tối thiểu 2.0s (tĩnh) / 2.5s (LOCAL_MOTION).
+- VIDEO_AI (clip đã mua, độ dài ĐO bằng ffprobe): final ≤ clip → cắt tại máy; lời vừa clip khi giảm
+  đệm (0 trước / 0.1 sau) → vừa clip; thiếu ≤ 1.0s → giữ khung cuối; thiếu > 1.0s → BLOCK
+  (`TimingBlockedError`, MEDIA_REGEN_REQUIRED, retryable=false) — KHÔNG mua clip mới, không slow-motion.
+  Không lời mà dự kiến dài hơn clip + 1s → giới hạn ở clip + 1s (cảnh báo).
+- LOCAL_MOTION: zoompan trải đều theo thời lượng cảnh; > 8s thì cảnh báo đơn điệu. $0.
+- Phụ đề theo timeline cuối: câu bắt đầu sau đệm, không vượt cảnh, không chồng.
+
+**Mã lý do:** VOICE_PADDED · VOICE_PADDED_MIN_CLAMP · VOICE_EXCEEDS_MAX · MINIMUM_PLANNED · MINIMUM_VOICE ·
+LOCKED_PLANNED · LOCKED_RAISED_FOR_VOICE · NO_VOICE_PLANNED · NO_VOICE_VISUAL_MIN · CLIP_TRIMMED_LOCAL ·
+CLIP_FIT_REDUCED_PADDING · CLIP_FREEZE_EXTENDED · CLIP_CAPPED_NO_VOICE · CLIP_TOO_SHORT_FOR_VOICE (BLOCK).
+
+**Bất biến chi phí:** timing chỉ tạo RENDER_ONLY_CHANGE (cắt/ghép/zoom tại máy, $0). Không tạo lại ảnh,
+giọng, clip; không đổi provider; không retry trả phí. Clip VIDEO_AI vẫn được MUA theo `duration` dự kiến
+(routing/giá không đổi). Video COMPLETED không tự render lại khi đổi chế độ; đổi chế độ áp dụng ở lần
+render tại máy tiếp theo.
+
+UI: bảng dự toán Nhập có cột "Nhịp (lời thoại)" (Dự kiến / Lời [ước tính] / Cuối / chế độ chọn được /
+mã lý do) và dòng "Đã tối ưu nhịp: Xs → Ys"; Output của dự án hiện cùng dòng đó. Preflight dùng ước
+tính (2.6 từ/giây) khi chưa có giọng và ghi rõ "(ước tính)"; render dùng số đo.
+
+Thay đổi hành vi so với V1.1 (test cũ đã cập nhật theo):
+- Video V1 (thành ngữ) cũng mặc định AUTO → ngắn hơn kịch bản ~27s khi lời ngắn (mock: 14.7s).
+  `pipeline.e2e` nay kiểm MP4 = tổng finalDuration và ≤ dự kiến, thay vì "> 15s".
+- Clip VIDEO_AI ngắn hơn lời > 1s: trước đây giữ khung cuối tới 10s (thử nghiệm: 4s đứng hình); nay
+  BLOCK render với MEDIA_REGEN_REQUIRED. Cảnh ảnh tĩnh / LOCAL_MOTION vẫn kéo dài cho đủ lời.
+  Một video cũ đã xong KHÔNG bị ảnh hưởng trừ khi được render lại.

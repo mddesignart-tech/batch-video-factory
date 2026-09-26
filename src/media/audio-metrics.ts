@@ -20,6 +20,7 @@ export type MixWarningKind =
   | "voice_too_loud"
   | "music_over_voice"
   | "audio_longer_than_scene"
+  | "scene_timing"
   | "empty_audio";
 
 export type MixSeverity = "error" | "warning" | "info";

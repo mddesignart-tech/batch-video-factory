@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-26 (V1.1 QA COMPLETE — paid UI run PASS + QA cuối Import Storyboard, $0)
+**Cập nhật:** 2026-09-26 (V1.2 Phase 1 — voice-aware scene timing PASS, $0; chờ duyệt Phase 2)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,18 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.2 PHASE 1 — VOICE-AWARE SCENE TIMING (2026-09-26, $0, không POST trả phí)
+
+Một engine: src/domain/scene-timing.ts (resolveSceneDuration). Luật, ngưỡng, mã lý do: QĐ-107.
+
+QA video examples/storyboard-voice-timing (5 cảnh dự kiến 5s, lời 1.88/3.42/2.27/—/3.80s đo được):
+dự kiến 25.000s → cuối 18.361s (−6.639s, −26.6%); ffprobe 18.361s; khoảng lặng dài nhất giữa cảnh có
+lời 0.579s; dài nhất toàn video 5.581s = cảnh 4 KHÔNG lời (giữ 5s theo luật); lời kết thúc 17.933s,
+video 18.361s; không đoạn đen. VIDEO_AI: cắt tại máy / giữ khung ≤1s / BLOCK — không POST.
+Resume video đã xong: mọi delta 0. Đổi chế độ cảnh → render lại tại máy, giọng giữ nguyên file.
+Test mới: tests/scene-timing.test.ts (22), tests/voice-timing.e2e.test.ts (9).
+Migration 20260926000000_voice_aware_timing (chỉ thêm cột) — áp lên data/app.db sau khi sao lưu.
 
 ## ✅ V1.1 QA COMPLETE — QA cuối Import Storyboard (2026-09-26, $0, không POST trả phí)
 
