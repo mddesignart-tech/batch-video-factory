@@ -3201,3 +3201,105 @@ tests/asset-reuse.test.ts (22). Bộ đầy đủ 65/65 file · 1330/1330 test, 
 lần chạy trước. A (5 ảnh nhập · 4 LOCAL · 1 clip đã có · giọng đã có): $0, 0 POST, REUSE giọng 5 + clip 1.
 B (3 ảnh đã có · 2 ảnh mới · 4 LOCAL · 1 clip mới · giọng đã có): đúng 2 POST ảnh + 1 POST clip. Tóm tắt:
 nếu tạo mới $0.400450 − tiết kiệm $0.253150 = tăng thêm $0.147300 (giá mock).
+
+---
+
+## QĐ-113 — V1.2 Phase 5: thư viện asset, backfill asset cũ, bảo trì cache (2026-09-27, $0, không POST trả phí)
+
+**Kiến trúc.** Không graph DB, không bảng quan hệ mới. Đồ thị tham chiếu tính khi đọc từ bảng hiện có
+(`src/services/asset-library.ts`): Scene.imagePath/videoPath/audioPath, Scene.imageAssetId, DialogueLine.outputPath,
+Project.finalVideoPath, CharacterReference.filePath → "đang dùng bởi". Phụ thuộc theo NỘI DUNG từ cột mới
+`Asset.inputsJson` ({keyframe}, {references, characters}, {media, recipe}) và `reusedFromAssetId`; asset cũ không
+ghi đầu vào thì suy "ảnh cùng cảnh → clip cùng cảnh", gắn nhãn STRUCTURE (không phải RECORDED).
+Hàm: `getAssetReferences`, `getAssetDependents`, `getAssetDependencies`, `getAssetDetail`, `listLibrary`.
+**Sở hữu đường dẫn:** nhiều dòng cùng một đường dẫn (dòng thoại tạo lại vào cùng tên file) → chỉ dòng MỚI NHẤT
+không phải REUSED sở hữu tham chiếu theo đường dẫn; dòng cũ mô tả nội dung đã mất → 0 tham chiếu. Dòng REUSED luôn
+chia sẻ tham chiếu với file của nó. Khi quy một SHA về một asset: ưu tiên bản gốc, VALID, đang sở hữu đường dẫn.
+
+**Backfill asset cũ** (`src/services/asset-backfill.ts`, `npm run assets:backfill -- --dry-run|--apply`): đo SHA-256,
+size, MIME, rộng/cao, thời lượng (ffprobe). Khoá tái dùng CHỈ dựng khi đầu vào có trong hồ sơ:
+- audio (provider thật): DialogueLine ghi lúc tạo text, provider, model, voiceId, instructions, speed; cùng đường dẫn
+  + cùng text + cùng provider/model → khoá `reuse:v2:audio:…`, `legacyState = LEGACY_BACKFILLED`.
+- audio mock (khoá gồm độ dài cảnh lúc tạo, không ghi lại), ảnh (không ghi hash ảnh tham chiếu / phiên bản nhân vật),
+  clip (không ghi hash keyframe), MP4 cuối (không ghi đầu vào render) → `LEGACY_UNVERIFIED`.
+- file mất → MISSING_LOCAL_FILE; hash lệch / ffprobe không đọc được → INVALID; dòng cũ cùng tên với dòng mới hơn mà
+  kích thước khác → MISSING_LOCAL_FILE (đã bị ghi đè, không nhận byte của dòng mới).
+Chỉ UPDATE cột metadata của Asset (điều kiện `reuseKey` như lúc đọc — không đè khoá do generation ghi cùng lúc);
+không tạo/xoá dòng, không đụng CostEntry/ProviderJob/reservation/spend/routing. Idempotent.
+
+**LEGACY_UNVERIFIED:** asset ở nguyên chỗ, cảnh của nó vẫn dùng; không có khoá nên engine reuse không bao giờ trao
+cho cảnh khác "vì file trông giống"; provider/model hiển thị như dòng đã ghi, không suy đoán. Ảnh nhập giữ danh tính
+theo nội dung (sha256) như Phase 4 (CONTENT_ONLY). Khi resume, cơ chế adopt của Phase 4 có thể gắn lại khoá cho asset
+cũ dựa trên chính ProviderJob cùng idempotency key — đó là bằng chứng hợp lệ (cùng request đã ghi).
+
+**Khoá audio v2.** Bỏ `accent` khỏi khoá giọng: không adapter nào gửi nó (OpenAI TTS nhận model, voice, input, speed,
+instructions). Phiên bản khoá tách theo loại (`REUSE_KEY_VERSIONS`: image v1, video v1, audio v2, local_motion v1)
+nên đổi khoá giọng không đổi khoá loại khác. Khoá audio v1 (nếu có) được backfill đổi sang v2 khi có bằng chứng.
+
+**Sở hữu asset dùng chung.** Giữ lớp tương thích Phase 4: dự án chỉ THAM CHIẾU; dùng lại xuyên dự án = hard link NTFS
+vào thư mục dự án dùng (dữ liệu sống tới khi link cuối bị xoá). Không ép chuyển sang `data/assets/` (rủi ro mất dữ liệu
+> lợi ích). `src/lib/safe-link.ts`: link → nếu bị từ chối (EXDEV khác ổ, EPERM/FAT) thì sao chép; EBUSY/EPERM/EACCES
+(antivirus, indexer) thử lại có back-off; LUÔN kiểm size + SHA-256 trước khi trả về; thất bại thì xoá file dở và ném lỗi
+TRƯỚC khi ghi DB — DB không bao giờ trỏ vào file không tồn tại. Test: xoá dự án A (kể cả cả thư mục) → B vẫn render,
+hash không đổi, 0 POST.
+
+**Chính sách xoá.** Không có nút / hàm xoá cứng asset. Trang chi tiết: "Asset đang được sử dụng bởi N
+scene/video/project. Không thể xoá cứng khi còn tham chiếu." 0 tham chiếu = ORPHAN_CANDIDATE: chỉ báo cáo, không bao
+giờ tự xoá (có thể đã trả tiền). Xoá dự án (hành động cũ) xoá dòng DB, không xoá file.
+
+**Dọn file tạm** (`src/services/asset-cleanup.ts`, `npm run assets:cleanup -- --dry-run`; `npm run cleanup` trỏ cùng
+script; `scripts/cleanup.ts` cũ — vốn tự xoá cả thư mục của dự án đã xoá — đã gỡ). Mọi file dưới data/ vào một nhóm:
+A PRODUCTION (được tham chiếu) · B OUTPUT (data/output) · C CACHE (data/cache, tái tạo được, không dọn tự động) ·
+D TEMP (projects/<id>/temp quá `cleanupTempDays`, dự án không có job queued/processing) · E INTERRUPTED (*.tmp* /
+.part quá hạn) · TEST (data/.test/run-<pid> của tiến trình đã chết, > 1 ngày) → SAFE; media không tham chiếu / thư mục
+dự án đã xoá → ORPHAN_CANDIDATE (giữ); còn lại UNKNOWN (giữ). Chỉ `--apply` mới xoá, chỉ SAFE, mỗi file kiểm lại ngay
+trước khi xoá. Phase 5 KHÔNG chạy --apply trên production.
+
+**Thumbnail reuse** (`ensureThumbnail`, output-export): khoá `thumb:t1:<sha nguồn>:<giây>:<bộ lọc>`; sidecar
+`thumbnail.json` {key, sha256}. Cùng khoá + file còn + hash khớp → REUSE; mất/hỏng/nguồn đổi → vẽ lại bằng FFmpeg tại
+máy ($0), ghi qua file tạm tên ngẫu nhiên rồi rename. MP4 trong thư mục output chỉ chép lại khi hash khác.
+
+**Output recipe hash** (`src/services/render-recipe.ts`): `recipe:r1:<sha>` trên media theo thứ tự BẰNG NỘI DUNG,
+thời lượng/chế độ nhịp, từng dòng thoại (text, speaker, hash audio, độ dài, pause), phụ đề, nhạc/hiệu ứng, mix, target,
+burnSubtitles, highlightPhrase; KHÔNG gồm projectId/tiêu đề/tên file. Lưu `Project.renderRecipe`; asset final mới ghi
+sha256 + inputsJson.media. SAME_RENDER_INPUT = COMPLETED + recipe khớp + MP4 còn đúng hash → render job không render
+lại (log `render.same_input`, chỉ bổ sung thư mục output nếu thiếu). MP4 mất/đổi → render lại tại máy $0. Đổi cách
+renderer vẽ cho cùng đầu vào → tăng RENDER_RECIPE_VERSION.
+
+**Tách chi phí QA.** Settings `aiPaidQa` (mặc định TẮT). Tắt: dự toán không cộng chấm chất lượng vào bắt buộc/tổng,
+chỉ hiện `optionalQa`; `evaluateScene` bỏ qua provider QA trả phí (mock/local không ảnh hưởng). Bật: thành chi phí sẽ
+chạy, cộng vào tổng.
+
+**Công thức đối soát** (preflight, `reconcileCosts`):
+`requiredTotal = Σ asset WILL_CREATE trả phí (text + image + video + voice + upscale)`;
+`recommendedAuthorization = requiredTotal + QA đã bật + retry reserve`. REUSED VALUE / IMPORTED VALUE KHÔNG cộng vào
+tổng; LOCAL FREE là tính toán $0, không phải tiền tiết kiệm. `reconciles` = khớp dự toán (dung sai làm tròn 4 chữ số).
+Thư viện: API COST SAVED (giá gốc asset được REUSED) và STORAGE DEDUPLICATED (byte không lưu hai lần: cùng file / cùng
+inode) là hai số riêng.
+
+**Health check** (`npm run assets:health`, chỉ đọc): thiếu file / bị ghi đè, hash lệch, file rỗng, media hỏng, trùng
+SHA (khác inode), nhiều asset GỐC cùng khoá, cảnh trỏ asset không tồn tại, file media của cảnh mất, cảnh completed
+không media, dự án completed thiếu MP4, ProviderJob trỏ dự án/cảnh đã xoá, asset cũ thiếu metadata, orphan.
+Không sửa gì.
+
+**Nhập storyboard:** thông báo "N ảnh được nhập: X asset mới, Y asset đã có; Image API cost $0".
+
+**Migration** `20260928000000_asset_library`: chỉ ADD COLUMN (Asset.legacyState, Asset.inputsJson default '{}',
+Project.renderRecipe). ĐÃ ÁP 2026-09-27 bằng `prisma migrate deploy` sau sao lưu
+`backups/app-before-asset-library-20260927-213810.db`. Backfill production ĐÃ ÁP sau sao lưu
+`backups/app-before-asset-backfill-20260927-221448.db`: quét 116 · dựng khoá 29 (audio v2) · LEGACY_UNVERIFIED 77 ·
+MISSING 18 (bị ghi đè cùng tên) · INVALID 2 (wav còn 78 byte header — vẫn đang được cảnh 2 của "Break the ice" dùng)
+· lần 2 = 0 thay đổi. Trước/sau: Asset 116/116 · ProviderJob 156/156 · CostEntry 193/193 · CostReservation 57/57 ·
+Scene 49/49 · Project 9/9 · Character 3/3 · chi $8.413060/$8.413060 · cap $8.50/$8.50.
+Dọn dẹp production (chỉ chạy thử): 936 file · SAFE 49 (44,80 MB, file tạm quá hạn) · PROTECTED 185 · ORPHAN 85 ·
+UNKNOWN 617 · đã xoá 0.
+
+**QA giao diện** (Chrome thật, server QA với BẢN SAO DB production `data/.ui-qa-p5`, Mock Mode, worker tắt):
+/assets tóm tắt 116 · Healthy 39 · Missing 18 · Invalid 2 · Legacy 77 · Orphan 31; lọc health/type/source/provider
+kết hợp đúng (12 clip runway); tìm theo id; chi tiết ảnh nhập, clip (chi phí gốc $0.40 khớp CostEntry), asset INVALID.
+Sửa từ lần kiểm: dòng bị ghi đè vẫn hiện "đang dùng bởi 2" (→ sở hữu đường dẫn); badge LEGACY lặp; phụ thuộc trỏ nhầm
+dòng cũ cùng SHA.
+
+**Test mới:** asset-backfill (9), asset-health (1), asset-library (5), asset-delete-safety (5), thumbnail-reuse (6),
+output-recipe (4), cost-reconciliation (6), legacy-project (3), cross-project-reuse (4), concurrency (1),
+windows-fs (8). Bộ đầy đủ 76/76 file · 1382/1382 test, một process. Paid POST = 0.

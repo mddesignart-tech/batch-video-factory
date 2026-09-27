@@ -8,6 +8,7 @@ import { reuseKeyKind } from "@/domain/asset-reuse-key";
 import { fileSha256 } from "./asset-content";
 import { jobPossiblyBilled } from "./paid-recovery";
 import { getSettings } from "@/lib/settings";
+import { linkOrCopyVerified } from "@/lib/safe-link";
 
 /**
  * THE reuse engine (V1.2 Phase 4, QĐ-112). Generation, the preflight and the
@@ -268,11 +269,9 @@ export async function attachReusedAsset(opts: {
     const dir = projectSubdir(opts.projectId, SUBDIR[source.kind] ?? "images");
     fs.mkdirSync(dir, { recursive: true });
     const dest = path.join(dir, `reuse-${uuidFilename(path.extname(source.filePath) || ".bin")}`);
-    try {
-      fs.linkSync(toAbsolute(source.filePath), dest);
-    } catch {
-      fs.copyFileSync(toAbsolute(source.filePath), dest);
-    }
+    // Hard link, else a verified copy (retried while a scanner holds the file).
+    // Throws - before any row is written - if neither yields the right bytes.
+    await linkOrCopyVerified(toAbsolute(source.filePath), dest, { sha256: source.sha256 });
     filePath = toRelative(dest);
   }
   const asset = await prisma.asset.create({

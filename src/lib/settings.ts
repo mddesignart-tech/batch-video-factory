@@ -34,6 +34,12 @@ export interface AppSettings {
    * SCENE so its files, which share one database, stay independent).
    */
   assetReuseScope: "GLOBAL" | "PROJECT" | "SCENE";
+  /**
+   * Paid AI quality scoring (QĐ-113). OFF by default: estimates show its price as
+   * OPTIONAL and never add it to what a run needs; a paid scoring provider is not
+   * called. A free/local scorer (mock) is unaffected.
+   */
+  aiPaidQa: boolean;
   jobConcurrency: number;
   workerEnabled: boolean;
   cleanupTempDays: number;
@@ -66,6 +72,7 @@ export function defaultSettings(): AppSettings {
     defaultMaxCostPerVideo: 1.5,
     defaultMaxCostVideoAiScene: null,
     assetReuseScope: "GLOBAL",
+    aiPaidQa: false,
     jobConcurrency: e.JOB_CONCURRENCY,
     workerEnabled: e.JOB_WORKER_ENABLED,
     cleanupTempDays: e.CLEANUP_TEMP_DAYS,

@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-27 (V1.2 Phase 4 — tái sử dụng asset xuyên cảnh/dự án, QĐ-112, $0; READY cho Phase 5 — chờ duyệt)
+**Cập nhật:** 2026-09-27 (V1.2 Phase 5 — thư viện asset, backfill asset cũ, bảo trì cache, QĐ-113, $0; READY cho Phase 6 — chờ duyệt)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,22 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.2 PHASE 5 — THƯ VIỆN ASSET / BACKFILL / BẢO TRÌ CACHE (2026-09-27, $0, không POST trả phí) — QĐ-113
+
+Trang `/assets` + `/assets/[id]` (chỉ đọc DB + file tại máy): loại/nguồn/tình trạng/provider/kích thước/phạm vi dùng
+lại/đang dùng bởi/dependencies; tóm tắt Healthy/Missing/Invalid/Legacy/Orphan; API COST SAVED và STORAGE DEDUPLICATED
+tách riêng. Không có nút xoá; 0 tham chiếu = ORPHAN_CANDIDATE (chỉ báo cáo).
+Lệnh: `npm run assets:backfill -- --dry-run|--apply`, `npm run assets:health` (chỉ đọc),
+`npm run assets:cleanup -- --dry-run` (chỉ `--apply` mới xoá, và chỉ file tạm/dở dang/test quá hạn).
+Thumbnail tái dùng theo hash nguồn; recipe render (`Project.renderRecipe`) → SAME_RENDER_INPUT không render lại;
+chấm chất lượng AI trả phí mặc định TẮT (`aiPaidQa`), preflight có khối "Đối soát chi phí"
+(RECOMMENDED = REQUIRED + QA đã bật + RETRY RESERVE). Hardlink an toàn trên Windows (fallback copy có kiểm SHA).
+Migration 20260928000000_asset_library ĐÃ ÁP; backfill production ĐÃ ÁP: 116 quét · 29 dựng khoá audio v2 ·
+77 LEGACY_UNVERIFIED · 18 MISSING (bị ghi đè cùng tên) · 2 INVALID (wav rỗng, vẫn được cảnh 2 "Break the ice" dùng —
+cần tạo lại giọng khi có ngân sách). Sổ production 116 Asset · 156 ProviderJob · 193 CostEntry · 57 reservation ·
+$8.413060 / $8.50 — không đổi. Dọn dẹp chỉ chạy thử: SAFE 49 file / 44,80 MB, đã xoá 0.
+Bộ đầy đủ 76/76 file · 1382/1382 test, một process (4341 s). Lint · tsc · build PASS; quét secret sạch.
 
 ## ✅ V1.2 PHASE 4 — ASSET REUSE / CHI PHÍ TĂNG THÊM (2026-09-27, $0, không POST trả phí) — QĐ-112
 

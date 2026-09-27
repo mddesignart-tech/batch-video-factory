@@ -60,6 +60,11 @@ export interface ContentInfo {
   width: number | null;
   height: number | null;
   durationSec: number | null;
+  /**
+   * ffprobe could read it as the media its type says: a picture with a size, a
+   * clip/sound with a length. False = unreadable / corrupt (QĐ-113).
+   */
+  probeOk: boolean;
 }
 
 /** Hash + size + type, and width/height/duration from ffprobe when it can tell. */
@@ -72,6 +77,7 @@ export async function contentInfo(absolute: string): Promise<ContentInfo> {
     width: null,
     height: null,
     durationSec: null,
+    probeOk: false,
   };
   try {
     const probe = await ffprobe([
@@ -89,6 +95,11 @@ export async function contentInfo(absolute: string): Promise<ContentInfo> {
     info.height = visual?.height ?? null;
     const d = Number(parsed.format?.duration);
     info.durationSec = Number.isFinite(d) && d > 0 && !info.mimeType.startsWith("image/") ? d : null;
+    info.probeOk = info.mimeType.startsWith("image/")
+      ? info.width !== null
+      : info.mimeType.startsWith("video/")
+        ? info.width !== null && info.durationSec !== null
+        : info.durationSec !== null;
   } catch {
     // Metadata is informative; the hash is what identity rests on.
   }

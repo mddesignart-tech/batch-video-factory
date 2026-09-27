@@ -705,6 +705,12 @@ export interface MaterialiseResult {
    * shows as reuse rather than silently growing the reference list. QĐ-072.
    */
   reusedCharacterImages: number;
+  /**
+   * Scene pictures (QĐ-113): how many were imported, how many became a NEW
+   * stored asset and how many were bytes already held (same SHA-256 - linked,
+   * not copied again). Image API cost of all of them: $0.
+   */
+  sceneImages: { imported: number; newAssets: number; existingAssets: number };
   /** Videos left out because they still had errors, each with its reasons. */
   skipped: { videoId: string; title: string; reasons: string[] }[];
 }
@@ -790,6 +796,7 @@ export async function materialiseImport(
 
   const projects: MaterialiseResult["projects"] = [];
   let copiedImages = 0;
+  const sceneImages = { imported: 0, newAssets: 0, existingAssets: 0 };
   let reusedCharacterImages = 0;
 
   for (const video of importable) {
@@ -994,7 +1001,12 @@ export async function materialiseImport(
           })
         : null;
       const imagePath = stored?.imagePath ?? null;
-      if (stored) copiedImages += 1;
+      if (stored) {
+        copiedImages += 1;
+        sceneImages.imported += 1;
+        if (stored.deduplicated) sceneImages.existingAssets += 1;
+        else sceneImages.newAssets += 1;
+      }
 
       const createdScene = await prisma.scene.create({
         data: {
@@ -1097,5 +1109,5 @@ export async function materialiseImport(
       `vào lô ${batch.id}. Chưa cấp phép chi gì.`,
   });
 
-  return { batchId: batch.id, projects, copiedImages, reusedCharacterImages, skipped };
+  return { batchId: batch.id, projects, copiedImages, reusedCharacterImages, sceneImages, skipped };
 }

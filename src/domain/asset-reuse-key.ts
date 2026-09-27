@@ -22,6 +22,19 @@ import { createHash } from "node:crypto";
 
 export const REUSE_KEY_VERSION = "v1";
 
+/**
+ * Per kind, so changing one kind's key never re-keys the others.
+ *   audio v2 (QĐ-113): `accent` removed - no voice adapter sends it (OpenAI TTS
+ *   takes model, voice, input, speed, instructions), so it never changed the
+ *   output; keeping it would have made a backfilled legacy line unmatchable.
+ */
+export const REUSE_KEY_VERSIONS: Record<ReuseKind, string> = {
+  image: "v1",
+  video: "v1",
+  audio: "v2",
+  local_motion: "v1",
+};
+
 export type ReuseKind = "image" | "video" | "audio" | "local_motion";
 
 /** Line endings to \n, trim, collapse runs of spaces/tabs; newlines kept as one. */
@@ -73,7 +86,6 @@ export interface VoiceKeyInput {
   voiceId: string;
   instructions?: string;
   speed?: number;
-  accent?: string;
   /** Only for adapters whose output depends on it (see voiceReuseKey). */
   targetDuration?: number | null;
 }
@@ -131,7 +143,6 @@ function fields(input: AssetKeyInput): Record<string, unknown> {
         voiceId: input.voiceId,
         instructions: normalizeText(input.instructions),
         speed: input.speed ?? 1,
-        accent: input.accent ?? "",
         targetDuration: input.targetDuration ?? undefined,
       };
     case "local_motion":
@@ -141,7 +152,7 @@ function fields(input: AssetKeyInput): Record<string, unknown> {
 
 export function buildAssetReuseKey(input: AssetKeyInput): string {
   const hash = createHash("sha256").update(canonical(fields(input))).digest("hex");
-  return `reuse:${REUSE_KEY_VERSION}:${input.kind}:${hash}`;
+  return `reuse:${REUSE_KEY_VERSIONS[input.kind]}:${input.kind}:${hash}`;
 }
 
 /** The kind a key was built for, or null for a malformed / foreign key. */

@@ -81,6 +81,7 @@ export function voiceReuseKey(opts: {
   voiceId: string;
   instructions?: string | null;
   speed?: number | null;
+  /** Accepted for call-site symmetry; not part of the key (no adapter sends it - QĐ-113). */
   accent?: string | null;
   /**
    * The scene length the adapter is handed. Only the MOCK voice adapter shapes
@@ -98,7 +99,6 @@ export function voiceReuseKey(opts: {
     voiceId: opts.voiceId,
     instructions: opts.instructions ?? "",
     speed: opts.speed ?? 1,
-    accent: opts.accent ?? "",
     targetDuration: durationSensitive ? (opts.targetDuration ?? null) : undefined,
   });
 }

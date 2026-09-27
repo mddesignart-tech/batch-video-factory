@@ -397,6 +397,8 @@ export async function previewProjectCost(
     // Either way no text model will be called, so pricing one prices work that
     // will not happen. QĐ-079.
     hasScript: project.scriptJson !== null && project.scriptJson.trim().length > 0,
+    // Paid AI scoring only when switched on; otherwise priced as OPTIONAL (QĐ-113).
+    paidQa: (await getSettings()).aiPaidQa,
   };
 
   const current = estimateProject({

@@ -5,6 +5,7 @@ import type {
   SpendPriority,
   VideoPlanStatus,
 } from "@/domain/enums";
+import { getSettings } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
 import { round } from "@/lib/utils";
 import { sceneCharacters } from "@/domain/scene-characters";
@@ -405,6 +406,7 @@ async function costAgainst(
   const wallets = Object.fromEntries(
     (await providerSpendBreakdown()).map((w) => [w.provider, w.remainingUsd]),
   );
+  const paidQa = (await getSettings()).aiPaidQa;
 
   for (const idiom of idioms) {
     const { scenes, basis, projectId } = await scenesFor(idiom.id, batchId);
@@ -422,6 +424,8 @@ async function costAgainst(
       // per-video ceiling this plan is being drawn against.
       providerBudgets: wallets,
       perVideoCapRemaining: input.maxCostPerVideo,
+      // Paid AI scoring only when switched on; otherwise OPTIONAL (QĐ-113).
+      paidQa,
     });
     videos.push(
       toPlannedVideo(idiom, estimate, basis, projectId, input.maxCostPerVideo),

@@ -200,8 +200,22 @@ export interface ScenePlan {
    * be bought are counted; LOCAL_MOTION saves compute, not money, and is 0 here.
    */
   saved: { image: number; video: number; voice: number };
+  /** AI quality scoring price for this scene - optional unless paid QA is on. */
+  optionalQaCost: number;
 }
 
+/**
+ * Money, split by what it is for (QĐ-113):
+ *
+ *   required    = text + image + video + voice + upscale: the assets this run
+ *                 WILL CREATE and must pay for. Reused / imported / local = $0.
+ *   quality     = AI quality scoring that WILL run - only when paid AI QA is
+ *                 switched on (Settings, default OFF); otherwise 0.
+ *   optionalQa  = what that scoring would cost if it were switched on. Shown,
+ *                 never counted.
+ *   retries     = the retry reserve on (required + quality).
+ *   total       = required + quality + retries  (the recommended authorisation)
+ */
 export interface CostBreakdown {
   text: number;
   image: number;
@@ -211,6 +225,8 @@ export interface CostBreakdown {
   quality: number;
   retries: number;
   total: number;
+  required: number;
+  optionalQa: number;
 }
 
 export interface ProjectEstimate {
@@ -281,6 +297,11 @@ export interface EstimateInput {
    * entire point of importing. See QĐ-079.
    */
   hasScript?: boolean;
+  /**
+   * Paid AI quality scoring is switched on (Settings `aiPaidQa`, default OFF).
+   * Off: the scoring cost is reported as OPTIONAL and never added to a total.
+   */
+  paidQa?: boolean;
 }
 
 /**
@@ -330,6 +351,8 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
     quality: 0,
     retries: 0,
     total: 0,
+    required: 0,
+    optionalQa: 0,
   };
   const errors: string[] = [];
   const needsProvider: string[] = [];
@@ -365,6 +388,7 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
       needs1080p: input.needs1080p ?? false,
       providerBudgets: input.providerBudgets,
       perVideoCapRemaining: input.perVideoCapRemaining,
+      paidQa: input.paidQa === true,
     });
     plans.push(plan);
     if (plan.error) errors.push(`Cảnh ${scene.sceneNumber}: ${plan.error}`);
@@ -379,6 +403,7 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
     breakdown.video += plan.video?.estimatedCost ?? 0;
     breakdown.voice += plan.voice?.estimatedCost ?? 0;
     breakdown.quality += plan.quality?.estimatedCost ?? 0;
+    breakdown.optionalQa += plan.optionalQaCost;
     spent += plan.estimatedCost;
   }
 
@@ -401,6 +426,11 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
   breakdown.video = round(breakdown.video);
   breakdown.voice = round(breakdown.voice);
   breakdown.quality = round(breakdown.quality);
+  breakdown.optionalQa = round(breakdown.optionalQa, 6);
+  breakdown.required = round(
+    breakdown.text + breakdown.image + breakdown.video + breakdown.voice + breakdown.upscale,
+    6,
+  );
   breakdown.total = round(subtotal + breakdown.retries);
 
   // Full precision (6 dp), like every other money figure that is compared
@@ -446,6 +476,8 @@ export function planScene(opts: {
   needs1080p: boolean;
   providerBudgets?: Record<string, number | null>;
   perVideoCapRemaining?: number | null;
+  /** Paid AI QA switched on (QĐ-113). Off: scoring is priced as optional only. */
+  paidQa?: boolean;
 }): ScenePlan {
   const {
     scene,
@@ -795,7 +827,12 @@ export function planScene(opts: {
   }
   // Optional: the generator skips scoring when no quality model is configured,
   // so the estimate has to as well.
-  const quality = routeOrNull("quality", wantsQuality, { jobs: 1 }, null, null, true);
+  // Paid AI scoring runs only when a person switched it on; otherwise it is a
+  // price shown as OPTIONAL, never money this run needs (QĐ-113).
+  const quality = opts.paidQa ? routeOrNull("quality", wantsQuality, { jobs: 1 }, null, null, true) : null;
+  const optionalQa = wantsQuality
+    ? routeOrNull("quality", true, { jobs: 1 }, null, null, true, models, true)
+    : null;
 
   // What length the chosen model would actually accept. Computed from the
   // decision that was made, so it cannot describe a different model than the
@@ -843,6 +880,7 @@ export function planScene(opts: {
       voice: reuseFrom.voice !== null,
     },
     reuseFrom,
+    optionalQaCost: round(optionalQa?.estimatedCost ?? 0, 6),
     saved: { image: round(saved.image, 6), video: round(saved.video, 6), voice: round(saved.voice, 6) },
     needs: {
       image: image !== null,

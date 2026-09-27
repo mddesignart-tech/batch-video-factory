@@ -181,6 +181,10 @@ export async function createImportBatch(input: {
       skipped: created.skipped,
       message:
         `Đã tạo lô ${created.projects.length} video, chép ${created.copiedImages} ảnh có sẵn` +
+        (created.sceneImages.imported > 0
+          ? ` (${created.sceneImages.imported} ảnh được nhập: ${created.sceneImages.newAssets} asset mới, ` +
+            `${created.sceneImages.existingAssets} asset đã có; Image API cost $0)`
+          : "") +
         (created.reusedCharacterImages > 0
           ? `, dùng lại ${created.reusedCharacterImages} ảnh nhân vật`
           : "") +

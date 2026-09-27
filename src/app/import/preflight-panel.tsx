@@ -150,7 +150,7 @@ function StageTable({ video }: { video: ImportVideoPreview }) {
     saved: video.savings.voice,
   });
   rows.push({ stage: "RENDER (FFmpeg)", reuse: 0, imported: 0, local: video.scenes.length, create: 0, cost: 0, saved: 0 });
-  rows.push({ stage: "CHẤM CHẤT LƯỢNG", reuse: 0, imported: 0, local: 0, create: 0, cost: video.breakdown.quality, saved: 0 });
+  rows.push({ stage: "CHẤM CHẤT LƯỢNG (tuỳ chọn)", reuse: 0, imported: 0, local: 0, create: 0, cost: video.breakdown.quality, saved: 0 });
   rows.push({ stage: "RETRY RESERVE", reuse: 0, imported: 0, local: 0, create: 0, cost: video.breakdown.retries, saved: 0 });
   return (
     <Table>
@@ -465,6 +465,45 @@ export function SavingsSummary({ preflight }: { preflight: Pick<ImportPreflight,
   );
 }
 
+/**
+ * QĐ-113: the money that adds up. REQUIRED = what this run creates and pays for;
+ * RECOMMENDED = REQUIRED + paid QA (only when switched on) + retry reserve.
+ * Reused / imported values are what those assets cost before - not spent now.
+ */
+export function ReconciliationSummary({ preflight }: { preflight: Pick<ImportPreflight, "reconciliation"> }) {
+  const r = preflight.reconciliation;
+  const line = (label: string, value: string, tone = "") => (
+    <div className={`flex justify-between gap-3 ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+  return (
+    <div className="rounded-lg border border-ink-800 p-3">
+      <h4 className="mb-2 text-sm font-medium">Đối soát chi phí</h4>
+      <div className="grid gap-x-6 gap-y-1 font-mono text-xs md:grid-cols-2">
+        {line("NEW GENERATION COST (tạo mới, phải trả)", formatUSD(r.newGeneration, 6))}
+        {line("REUSED VALUE (dùng lại, $0 lần này)", formatUSD(r.reusedValue, 6), "text-ok-500")}
+        {line("IMPORTED VALUE (ảnh nhập, $0)", formatUSD(r.importedValue, 6), "text-ok-500")}
+        {line("LOCAL FREE (FFmpeg tại máy)", `${r.localFreeScenes} cảnh · $0`, "text-ink-400")}
+        {line(
+          `OPTIONAL QA (AI trả phí ${r.paidQaEnabled ? "ĐANG BẬT" : "TẮT"})`,
+          r.paidQaEnabled ? formatUSD(r.enabledQa, 6) : `${formatUSD(r.optionalQa, 6)} — không cộng`,
+          "text-ink-400",
+        )}
+        {line("RETRY RESERVE", formatUSD(r.retryReserve, 6))}
+        {line("REQUIRED TOTAL", formatUSD(r.requiredTotal, 6))}
+        {line("RECOMMENDED AUTHORIZATION", formatUSD(r.recommendedAuthorization, 6))}
+      </div>
+      <p className={`mt-2 text-[11px] ${r.reconciles ? "text-ink-500" : "text-danger-500"}`}>
+        RECOMMENDED = REQUIRED + QA đã bật + RETRY RESERVE.{" "}
+        {r.reconciles ? "Khớp với dự toán." : "KHÔNG khớp với dự toán — hãy báo lỗi này."} Giá trị dùng lại /
+        nhập không cộng vào tổng.
+      </p>
+    </div>
+  );
+}
+
 export function PreflightPanel({
   preflight,
   batchId,
@@ -499,6 +538,7 @@ export function PreflightPanel({
 
         {/* ---- what reuse keeps in the wallet (QĐ-112) ---- */}
         <SavingsSummary preflight={preflight} />
+        <ReconciliationSummary preflight={preflight} />
 
         {/* ---- images first: the purchase an import exists to avoid ---- */}
         <div className="rounded-lg border border-ink-800 p-3">

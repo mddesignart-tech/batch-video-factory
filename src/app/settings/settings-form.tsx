@@ -95,6 +95,12 @@ export function SettingsForm({ settings }: { settings: AppSettings }) {
               <option value="SCENE">SCENE — chỉ asset của chính cảnh đó</option>
             </select>
           </Field>
+          <input type="hidden" name="aiPaidQaPresent" value="1" />
+          <label className="mt-3 flex items-center gap-2 text-xs text-ink-300">
+            <input type="checkbox" name="aiPaidQa" defaultChecked={settings.aiPaidQa} className="h-3.5 w-3.5" />
+            Bật chấm chất lượng bằng AI TRẢ PHÍ (mặc định TẮT). Khi tắt, dự toán chỉ hiện giá chấm chất lượng là
+            &quot;tuỳ chọn&quot; và không cộng vào chi phí bắt buộc.
+          </label>
         </section>
 
         <section>
@@ -170,7 +176,9 @@ export function SettingsForm({ settings }: { settings: AppSettings }) {
           </div>
           <p className="mt-2 text-[11px] text-ink-500">
             Video hoàn chỉnh được giữ vĩnh viễn và không bao giờ bị tự động xoá.
-            Chạy dọn dẹp bằng lệnh <code className="text-ink-300">npm run cleanup</code>.
+            Xem trước bằng <code className="text-ink-300">npm run assets:cleanup -- --dry-run</code>; chỉ xoá file
+            tạm/dở dang hết hạn khi thêm <code className="text-ink-300">--apply</code>. Asset đã trả tiền, ảnh nhập và
+            file đang được tham chiếu không bao giờ bị xoá.
           </p>
         </section>
       </div>

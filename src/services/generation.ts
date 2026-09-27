@@ -55,6 +55,7 @@ import { knownBadInput, recordFailureEvidence } from "./model-reliability";
 import { probeDuration } from "@/media/ffmpeg";
 import { normalizeVoiceClip } from "@/media/audio-normalize";
 import { isMockMode } from "@/lib/env";
+import { getSettings } from "@/lib/settings";
 import { isFreeVideoProvider } from "@/providers/video-config";
 import { availableProviderNames } from "./provider-health";
 import { targetForAspect } from "@/media/render";
@@ -69,7 +70,7 @@ import {
 import { overallQualityScore, QualityReportSchema } from "@/domain/script";
 import { jobPossiblyBilled, RECOVERY_MESSAGE } from "@/services/paid-recovery";
 import { frozenChoicesForBatch, type FrozenCode } from "@/services/frozen-video";
-import { contentInfo } from "@/services/asset-content";
+import { contentInfo, fileSha256OrNull } from "@/services/asset-content";
 import {
   acquireAssetCreationLock,
   attachReusedAsset,
@@ -859,6 +860,8 @@ async function saveAsset(opts: {
   asset: GeneratedAsset;
   /** What this asset is (QĐ-112); with it the asset can be found and reused later. */
   reuseKey?: string;
+  /** What it was made FROM, by content (QĐ-113): feeds the dependency view. */
+  inputs?: Record<string, unknown>;
 }): Promise<void> {
   const { ctx, kind, decision, prompt, asset } = opts;
   // A reuse bought nothing. Recording it again added one Asset row and one $0
@@ -895,6 +898,7 @@ async function saveAsset(opts: {
       durationSec: content?.durationSec ?? null,
       reuseKey: content ? (opts.reuseKey ?? null) : null,
       validatedAt: content ? new Date() : null,
+      inputsJson: JSON.stringify(opts.inputs ?? {}),
     },
   });
   await recordCost({
@@ -1268,7 +1272,18 @@ export async function generateSceneImage(
   // caller for the same picture finds the row the moment it gets the lock.
   const makeImage = async () => {
     const made = await buyImage();
-    await saveAsset({ ctx, kind: "image", decision: made.used, prompt: shot.prompt, asset: made.result, reuseKey: keyFor(made.used.provider, made.used.modelId) });
+    await saveAsset({
+      ctx,
+      kind: "image",
+      decision: made.used,
+      prompt: shot.prompt,
+      asset: made.result,
+      reuseKey: keyFor(made.used.provider, made.used.modelId),
+      inputs: {
+        references: shot.referenceImages.map((p) => fileSha256OrNull(p)).filter(Boolean),
+        characters: shot.characters.map((c) => `${c.name}@${c.version}`).sort(),
+      },
+    });
     return made;
   };
   const buyImage = () => withFallback(ctx, decision, async (d) => {
@@ -2108,7 +2123,15 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
 
   const makeClip = async () => {
     const made = await buyClip();
-    await saveAsset({ ctx, kind: "video", decision: made.used, prompt: videoPrompt, asset: made.result, reuseKey: clipKeyFor(made.used.provider, made.used.modelId) });
+    await saveAsset({
+      ctx,
+      kind: "video",
+      decision: made.used,
+      prompt: videoPrompt,
+      asset: made.result,
+      reuseKey: clipKeyFor(made.used.provider, made.used.modelId),
+      inputs: keyframeFile ? { keyframe: fileSha256OrNull(keyframeFile) } : {},
+    });
     return made;
   };
   const buyClip = () => withFallback(ctx, decision, async (d) => {
@@ -2595,6 +2618,9 @@ export async function evaluateScene(sceneId: string): Promise<QualityOutcome | n
     if (err instanceof RoutingError) return null;
     throw err;
   }
+  // Paid AI scoring is OFF until a person switches it on (Settings `aiPaidQa`,
+  // QĐ-113). A free scorer (mock/local) is unaffected.
+  if (decision.provider !== "mock" && !(await getSettings()).aiPaidQa) return null;
 
   const provider = getQualityProvider(decision.provider);
   const videoPath = scene.videoPath

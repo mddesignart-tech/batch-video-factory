@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-27 — V1.2 Phase 4 (asset reuse, QĐ-112) XONG; READY cho Phase 5, CHỜ DUYỆT
+**Cập nhật:** 2026-09-27 — V1.2 Phase 5 (thư viện asset / backfill / bảo trì cache, QĐ-113) XONG; READY cho Phase 6, CHỜ DUYỆT
 
 ---
 
@@ -12,6 +12,18 @@
 4. ✅ REUSE clip giữa hai lần nhập cùng storyboard — XONG (Phase 4, QĐ-112; mock).
 5. Test E2E trình duyệt tự động (Playwright) cho luồng Nhập → DUYỆT & CHẠY → Output, chạy mock.
 
+## ✅ V1.2 Phase 5 COMPLETE — thư viện asset, backfill, bảo trì cache (QĐ-113)
+
+- [x] Backfill asset cũ (đã áp production; audio dựng khoá từ DialogueLine, còn lại LEGACY_UNVERIFIED).
+- [x] GC / dọn file: chỉ phát hiện + dry-run; không tự xoá asset production.
+- [x] Thumbnail tái dùng; dự toán không còn cộng "chấm chất lượng" khi QA trả phí tắt.
+- [ ] Còn mở: 2 file giọng INVALID (wav 78 byte) vẫn được cảnh 2 của "Break the ice (5 ảnh nhập sẵn)" dùng — cần
+      tạo lại giọng (trả phí, cần người dùng duyệt).
+- [ ] Còn mở: 49 file tạm quá hạn (44,80 MB) có thể dọn bằng `npm run assets:cleanup -- --apply` — chỉ khi người dùng
+      đồng ý. 85 ORPHAN_CANDIDATE (94 MB) giữ nguyên, cần người xem xét; chưa có lệnh repair/xoá có kiểm soát.
+- [ ] Còn mở: cache đoạn LOCAL_MOTION (`data/cache/segments`) chưa có giới hạn dung lượng.
+- [ ] Còn mở (vận hành): `socket_timeout` cho DATABASE_URL production (cần đồng ý sửa .env).
+
 ## ✅ V1.2 Phase 4 COMPLETE — tái sử dụng asset / chi phí tăng thêm (QĐ-112)
 
 - [ ] Còn mở: asset production CŨ (trước Phase 4) không có khoá → chỉ dùng lại trong chính cảnh đó, không xuyên
@@ -19,7 +31,7 @@
 - [ ] Còn mở: GC / dọn file trùng hash (chỉ phát hiện, chưa xoá) — phase sau; cache đoạn LOCAL_MOTION
       (`data/cache/segments`) chưa có giới hạn dung lượng.
 - [ ] Còn mở (nhỏ): thumbnail của ảnh sẽ được REUSE chưa hiện trong bảng dự toán (cảnh chưa trỏ tới file).
-- [ ] Còn mở (nhỏ): dự toán vẫn cộng "chấm chất lượng" cho cảnh HIGH mà executor lô không chạy.
+- [x] Dự toán cộng "chấm chất lượng" cho cảnh HIGH — SỬA ở Phase 5 (QĐ-113, aiPaidQa mặc định TẮT).
 
 ## ✅ V1.2 Phase 3 COMPLETE — tiếp tục / khôi phục từng video (QĐ-110)
 

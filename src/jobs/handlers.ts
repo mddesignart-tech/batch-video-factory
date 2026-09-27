@@ -10,7 +10,9 @@ import { projectSubdir, toAbsolute, toRelative } from "@/lib/paths";
 import { evaluateScene } from "@/services/generation";
 import { syncBatchActualCost, syncProjectActualCost } from "@/services/cost-tracker";
 import { settleBatchIfDone } from "@/services/batch-runner";
-import { renderProject, targetForAspect } from "@/media/render";
+import { renderProject, targetForAspect, type RenderRequest } from "@/media/render";
+import { renderMediaHashes, renderRecipeHash, sameRenderInput } from "@/services/render-recipe";
+import { contentInfo } from "@/services/asset-content";
 import { pacingSummary, parseDurationMode } from "@/domain/scene-timing";
 import { deferJob } from "./queue";
 
@@ -165,13 +167,8 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
     return { deferred: true };
   }
 
-  await prisma.project.update({
-    where: { id: projectId },
-    data: { status: "rendering" },
-  });
-
   const settings = await getSettings();
-  const result = await renderProject({
+  const request: RenderRequest = {
     projectId,
     target: targetForAspect(project.aspectRatio),
     burnSubtitles: settings.burnSubtitles,
@@ -199,7 +196,47 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
       maxDuration: s.maxDuration,
       motionSource: s.motionSource,
     })),
+  };
+
+  // SAME_RENDER_INPUT (QĐ-113): a COMPLETED video whose recipe is unchanged and
+  // whose MP4 is still the exact file that render produced is not rendered
+  // again. A missing or altered MP4 is simply rendered again, locally, at $0.
+  const recipe = renderRecipeHash(request);
+  const finalAsset = project.finalVideoPath
+    ? await prisma.asset.findFirst({
+        where: { projectId, kind: "final", filePath: project.finalVideoPath },
+        orderBy: { createdAt: "desc" },
+      })
+    : null;
+  if (
+    sameRenderInput({
+      status: project.status,
+      storedRecipe: project.renderRecipe,
+      recipe,
+      finalAbsolute: project.finalVideoPath ? toAbsolute(project.finalVideoPath) : null,
+      finalSha256: finalAsset?.sha256 ?? null,
+    })
+  ) {
+    await logger.info({
+      event: "render.same_input",
+      projectId,
+      message: "SAME_RENDER_INPUT: nội dung render không đổi và MP4 còn nguyên — không render lại ($0).",
+    });
+    try {
+      const { exportProjectOutput, missingOutputFiles } = await import("@/services/output-export");
+      if (missingOutputFiles(project).length > 0) await exportProjectOutput(projectId);
+    } catch (err) {
+      await logger.warn({ event: "output.export_failed", projectId, message: `Không xuất được thư mục output: ${errorMessage(err)}` });
+    }
+    return { deferred: false, result: { videoPath: project.finalVideoPath, segmentsReused: 0, sameRenderInput: true } };
+  }
+
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { status: "rendering" },
   });
+
+  const result = await renderProject(request);
 
   // What the voice-aware timing decided, per scene - kept beside the PLANNED
   // duration, which is never overwritten.
@@ -259,6 +296,7 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
     });
   }
 
+  const finalInfo = await contentInfo(result.videoPath).catch(() => null);
   await prisma.asset.create({
     data: {
       projectId,
@@ -268,12 +306,21 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
       status: "completed",
       filePath: toRelative(result.videoPath),
       bytes: result.bytes,
+      sha256: finalInfo?.sha256 ?? null,
+      mimeType: finalInfo?.mimeType ?? "video/mp4",
+      width: finalInfo?.width ?? null,
+      height: finalInfo?.height ?? null,
+      durationSec: finalInfo?.durationSec ?? null,
+      validatedAt: new Date(),
+      // What this MP4 was made from, by content (dependency view, QĐ-113).
+      inputsJson: JSON.stringify({ media: renderMediaHashes(request), recipe }),
     },
   });
 
   await prisma.project.update({
     where: { id: projectId },
     data: {
+      renderRecipe: recipe,
       status: "completed",
       finalVideoPath: toRelative(result.videoPath),
       subtitlePath: toRelative(result.subtitlePathSrt),

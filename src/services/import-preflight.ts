@@ -277,6 +277,10 @@ export interface ImportVideoPreview {
     voice: number;
     quality: number;
     retries: number;
+    /** Assets this run WILL CREATE and pay for (text+image+video+voice+upscale). QĐ-113. */
+    required: number;
+    /** AI quality scoring price if it were switched on - shown, never counted. QĐ-113. */
+    optionalQa: number;
     /**
      * Always 0, and stated anyway.
      *
@@ -422,7 +426,65 @@ export function paidModelsFor(
     .map((key) => ({ key, confirmed: confirmed.includes(key) }));
 }
 
+/**
+ * One money picture that adds up (QĐ-113), for the videos that can run:
+ *
+ *   requiredTotal            = newGeneration (assets this run WILL CREATE and pay for)
+ *   recommendedAuthorization = requiredTotal + enabledQa + retryReserve
+ *
+ * reusedValue / importedValue are what the same assets cost when they were
+ * first made (or would cost new) - money NOT spent now, never part of a total.
+ * localFree counts FFmpeg work: compute, $0, not a dollar saving.
+ * optionalQa is the price of paid AI scoring while it is switched OFF.
+ */
+export interface CostReconciliation {
+  newGeneration: number;
+  reusedValue: number;
+  importedValue: number;
+  localFreeScenes: number;
+  optionalQa: number;
+  enabledQa: number;
+  paidQaEnabled: boolean;
+  retryReserve: number;
+  requiredTotal: number;
+  recommendedAuthorization: number;
+  /** recommendedAuthorization equals the runnable estimate to the micro-dollar. */
+  reconciles: boolean;
+}
+
+export function reconcileCosts(
+  videos: Pick<ImportVideoPreview, "breakdown" | "estimatedCost" | "scenes" | "localMotionCount">[],
+  paidQaEnabled: boolean,
+): CostReconciliation {
+  const sum = (f: (v: (typeof videos)[number]) => number) => round(videos.reduce((n, v) => n + f(v), 0), 6);
+  const importedValue = sum((v) =>
+    v.scenes.reduce((n, sc) => n + (sc.reuseFrom.image === "IMPORTED" ? sc.saved.image : 0), 0),
+  );
+  const allSaved = sum((v) => v.scenes.reduce((n, sc) => n + sc.saved.image + sc.saved.video + sc.saved.voice, 0));
+  const requiredTotal = sum((v) => v.breakdown.required);
+  const enabledQa = sum((v) => v.breakdown.quality);
+  const retryReserve = sum((v) => v.breakdown.retries);
+  const recommendedAuthorization = round(requiredTotal + enabledQa + retryReserve, 6);
+  const estimated = sum((v) => v.estimatedCost);
+  return {
+    newGeneration: requiredTotal,
+    reusedValue: round(allSaved - importedValue, 6),
+    importedValue,
+    localFreeScenes: videos.reduce((n, v) => n + v.localMotionCount, 0),
+    optionalQa: sum((v) => v.breakdown.optionalQa),
+    enabledQa,
+    paidQaEnabled,
+    retryReserve,
+    requiredTotal,
+    recommendedAuthorization,
+    // Per-video totals are rounded to 4 dp by the estimator; allow that.
+    reconciles: Math.abs(recommendedAuthorization - estimated) <= 0.0002 * Math.max(1, videos.length) + 1e-9,
+  };
+}
+
 export interface ImportPreflight {
+  /** QĐ-113: the money picture that reconciles. */
+  reconciliation: CostReconciliation;
   batchId: string;
   batchName: string;
   videos: ImportVideoPreview[];
@@ -908,6 +970,8 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         voice: round(estimate.breakdown.voice, 6),
         quality: round(estimate.breakdown.quality, 6),
         retries: round(estimate.breakdown.retries, 6),
+        required: round(estimate.breakdown.required, 6),
+        optionalQa: round(estimate.breakdown.optionalQa, 6),
         // FFmpeg, on this machine. Zero, said out loud.
         render: 0,
       },
@@ -1037,6 +1101,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
   savings.total = round(savings.image + savings.video + savings.voice, 6);
 
   return {
+    reconciliation: reconcileCosts(runnableVideos, settings.aiPaidQa),
     savings,
     ifCreatedNew: round(estimatedTotal + savings.total, 6),
     batchId,

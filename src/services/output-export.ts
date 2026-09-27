@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { DATA_ROOT, toAbsolute, toRelative } from "@/lib/paths";
 import { slugify } from "@/lib/utils";
 import { ffmpeg, ffprobe, probeDuration } from "@/media/ffmpeg";
+import { fileSha256, fileSha256OrNull } from "./asset-content";
 
 /**
  * A finished video, laid out for a person rather than for the pipeline:
@@ -53,16 +55,15 @@ export async function exportProjectOutput(projectId: string): Promise<string> {
 
   const dir = outputDirFor(project);
   fs.mkdirSync(dir, { recursive: true });
-  fs.copyFileSync(mp4, path.join(dir, "final.mp4"));
+  // Copy only when the export's MP4 is not already exactly this one.
+  const copy = path.join(dir, "final.mp4");
+  if (fileSha256OrNull(copy) !== fileSha256(mp4)) fs.copyFileSync(mp4, copy);
   if (project.subtitlePath && fs.existsSync(toAbsolute(project.subtitlePath))) {
     fs.copyFileSync(toAbsolute(project.subtitlePath), path.join(dir, "subtitles.srt"));
   }
 
   const duration = await probeDuration(mp4);
-  await ffmpeg([
-    "-v", "error", "-y", "-ss", String(Math.min(1, Math.max(0, duration / 2))), "-i", mp4,
-    "-frames:v", "1", "-vf", "scale=540:-2", path.join(dir, "thumbnail.jpg"),
-  ]);
+  await ensureThumbnail({ source: mp4, output: path.join(dir, "thumbnail.jpg"), duration });
   const { stdout } = await ffprobe([
     "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
     "-of", "csv=p=0:s=x", mp4,
@@ -97,6 +98,59 @@ export async function exportProjectOutput(projectId: string): Promise<string> {
   };
   fs.writeFileSync(path.join(dir, "metadata.json"), JSON.stringify(metadata, null, 2) + "\n");
   return dir;
+}
+
+/**
+ * THUMBNAIL REUSE (QĐ-113). A thumbnail is one local FFmpeg frame, keyed by:
+ *   the SOURCE's content hash + the frame position + the scale/crop filter +
+ *   THUMBNAIL_VERSION (bump when the way a thumbnail is drawn changes).
+ * The key and the thumbnail's own hash are kept beside it (thumbnail.json).
+ *
+ *   same key + thumbnail present + its hash matches  -> REUSE, nothing runs
+ *   thumbnail missing / corrupt (hash mismatch)      -> drawn again, local, $0
+ *   source content changed                           -> new key, drawn again
+ *
+ * Never an image API: FFmpeg on this machine, deterministic for the same input.
+ */
+export const THUMBNAIL_VERSION = "t1";
+const THUMBNAIL_FILTER = "scale=540:-2";
+
+export function thumbnailKey(sourceSha256: string, atSec: number): string {
+  return `thumb:${THUMBNAIL_VERSION}:${sourceSha256}:${atSec.toFixed(3)}:${THUMBNAIL_FILTER}`;
+}
+
+export async function ensureThumbnail(opts: {
+  source: string;
+  output: string;
+  duration: number;
+}): Promise<{ reused: boolean; key: string }> {
+  const atSec = Math.min(1, Math.max(0, opts.duration / 2));
+  const key = thumbnailKey(fileSha256(opts.source), atSec);
+  const sidecar = path.join(path.dirname(opts.output), `${path.parse(opts.output).name}.json`);
+  let stored: { key?: string; sha256?: string } = {};
+  try {
+    stored = JSON.parse(fs.readFileSync(sidecar, "utf8")) as typeof stored;
+  } catch {
+    stored = {};
+  }
+  const current = fileSha256OrNull(opts.output);
+  if (stored.key === key && current !== null && current === stored.sha256 && fs.statSync(opts.output).size > 0) {
+    return { reused: true, key };
+  }
+  // Written to a temp name first, so a failed FFmpeg never leaves a half file
+  // under the real name.
+  const temp = `${opts.output}.tmp-${randomUUID()}.jpg`;
+  try {
+    await ffmpeg([
+      "-v", "error", "-y", "-ss", String(atSec), "-i", opts.source,
+      "-frames:v", "1", "-vf", THUMBNAIL_FILTER, temp,
+    ]);
+    fs.renameSync(temp, opts.output);
+  } finally {
+    if (fs.existsSync(temp)) fs.rmSync(temp, { force: true });
+  }
+  fs.writeFileSync(sidecar, JSON.stringify({ key, sha256: fileSha256(opts.output) }, null, 2) + "\n");
+  return { reused: false, key };
 }
 
 /**

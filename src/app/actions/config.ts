@@ -318,6 +318,7 @@ export async function updateSettings(formData: FormData): Promise<ActionResult> 
     ...parsed.data,
     ...("defaultMaxCostVideoAiScene" in raw ? { defaultMaxCostVideoAiScene: sceneCap } : {}),
     burnSubtitles: raw.burnSubtitles === "on",
+    ...("aiPaidQaPresent" in raw ? { aiPaidQa: raw.aiPaidQa === "on" } : {}),
   });
   revalidatePath("/settings");
   return { ok: true, message: "Đã lưu cài đặt." };
