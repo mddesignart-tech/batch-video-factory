@@ -127,6 +127,8 @@ export interface ImportSceneLine {
   camera: string;
   /** Null for a LOCAL_MOTION scene: there is no model, because there is no purchase. */
   videoModel: string | null;
+  /** The clip's route as priced: what an approval freezes (QĐ-111). Null when no clip is bought. */
+  videoRoute: { provider: string; model: string; estimatedCost: number; lowAuto: boolean } | null;
   keyframe: "supplied" | "will-generate";
   /**
    * Where this scene's picture comes from, in the words the operator decides on:
@@ -298,6 +300,8 @@ export interface ImportVideoPreview {
   lifecycle: ImportVideoLifecycle;
   /** Why it is BLOCKED, in one sentence. Null unless it is. */
   blockedReason: string | null;
+  /** Scenes that cannot be routed as they stand (incl. APPROVED_* stops of a frozen choice, QĐ-111). */
+  needsProvider: string[];
   warnings: string[];
   /** Cast of this video, resolved against the character table. */
   characters: ImportVideoCharacter[];
@@ -560,6 +564,14 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         characters: scene ? sceneCharacters(scene).present : [],
         camera: scene?.camera ?? "",
         videoModel: row.video ? `${row.video.provider}/${row.video.modelId}` : null,
+        videoRoute: row.video
+          ? {
+              provider: row.video.provider,
+              model: row.video.modelId,
+              estimatedCost: round(row.video.estimatedCost, 6),
+              lowAuto: row.video.lowAutoRouted === true,
+            }
+          : null,
         keyframe: scene?.imageSource === "IMPORTED" ? "supplied" : "will-generate",
         imageSource,
         imagePath: scene?.imagePath && fileOnDisk(scene.imagePath) ? scene.imagePath : null,
@@ -791,6 +803,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       ),
       lifecycle,
       blockedReason,
+      needsProvider: estimate.needsProvider,
       videoLimit,
       order: videos.length,
       spend: overScene

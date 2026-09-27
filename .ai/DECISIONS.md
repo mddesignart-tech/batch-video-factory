@@ -3079,3 +3079,57 @@ xảy ra. Ghi vào NEXT_TASKS.
 
 Test: tests/video-resume.test.ts (12, ma trận A–T). Môi trường test: `socket_timeout=60` cho SQLite
 của DB test (nhiều video render song song trên máy bận).
+
+## QĐ-111 — Đóng băng model video đã duyệt qua resume (sửa phát hiện của QĐ-110)
+
+**Lỗi (đã chứng minh trong code):** `runScene` so model ĐANG LƯU trên cảnh với `plannedVideoModels`, rồi
+`generateSceneVideo` định tuyến LẠI (cảnh không ghim) và chuỗi dự phòng `withFallback` còn có thể đổi
+model — tức là kiểm model A nhưng POST model B. Production chỉ có h3_max tự định tuyến nên chưa xảy ra.
+
+**Bất biến:** model được duyệt ở preflight/authorization là model được POST.
+Luồng: kế hoạch → xác định provider/model → ĐÓNG BĂNG → tính giá → duyệt → giữ chỗ → thực thi.
+
+**Nơi lưu:** `BatchAuthorization.note.frozenVideo[sceneId] = { provider, model, durationSeconds,
+estimatedCost, lowAuto, pinned, frozenAt }` (`src/services/frozen-video.ts`). Không migration.
+- Ghi khi DUYỆT & CHẠY (`approveAndRun`, từ preflight đã hiển thị; lựa chọn cũ của lô được giữ).
+- Lô IDIOM: ghi lúc sinh kịch bản (`freezeScenePlan`), CHỈ cho model nằm trong `plannedVideoModels`.
+- TIẾP TỤC có mua clip chưa chốt (sau khi lập lại kế hoạch, hoặc clip mất sau khi duyệt): lời xác nhận
+  hiển thị model từng cảnh; bấm xác nhận mới chốt (`approved: true`). Xác nhận mang `fingerprint` của kế
+  hoạch đã xem; kế hoạch đổi (model/giá/số request) → `PLAN_CHANGED`, không gửi gì.
+- DUYỆT & CHẠY trên UI gửi `expectedVideoModels` (model đã xem); khác lúc duyệt → từ chối.
+
+**Thực thi (`generateSceneVideo`):** cảnh có lựa chọn đóng băng KHÔNG định tuyến lại: ghim → đường manual;
+LOW_AUTO → router với DUY NHẤT model đã duyệt (mọi điều kiện grant được hỏi lại); không dự phòng
+(`fallbacks: []`). Dừng trước POST, không fallback, mã rõ ràng:
+`APPROVED_MODEL_UNAVAILABLE` (tắt / shutdown / hết LOW_AUTO / DEGRADED với lựa chọn tự định tuyến) ·
+`APPROVED_MODEL_CHANGED` (ghim đổi sau khi duyệt) · `APPROVED_PARAMS_CHANGED` (thời lượng đổi) ·
+`APPROVED_COST_CHANGED` (giá cao hơn giá đã duyệt) · `APPROVED_MODEL_MISSING` (lô có chế độ đóng băng
+mà cảnh không có lựa chọn). Hết tiền vẫn là lỗi tiền (`over_budget`), không đội lốt model.
+Ghim tay trên model DEGRADED vẫn chạy như ghim (QĐ-035), không đổi model.
+
+**Cổng chi tiền 2c (`assertBatchAuthorized`, ngay trước POST):** request video phải đúng model đóng băng
+của cảnh (`model_not_approved`); lô cũ không có `frozenVideo` → model phải nằm trong
+`plannedVideoModels` — kiểm SAU định tuyến (thay cho kiểm trước định tuyến ở `runScene`, đã bỏ).
+
+**Preflight/kế hoạch resume** định giá bằng đúng lựa chọn đóng băng (`buildPlannedScenes` →
+`frozenVideo`), nên số hiển thị = số được duyệt = model được POST; không dùng được → video BLOCKED kèm mã
+`APPROVED_*`, trên bảng "Từng video" có nút LẬP LẠI KẾ HOẠCH MODEL (`replanVideoModels`: bỏ chốt, $0;
+lần TIẾP TỤC sau phải xác nhận model mới). Video COMPLETED / render-only / chỉ-tại-máy không định
+tuyến gì.
+
+**Sửa kèm:** kế hoạch RENDER_ONLY báo chi phí tăng thêm $0,0021 thay vì $0 (dự toán cộng lượt chấm
+chất lượng cho cảnh HIGH, executor lô không chạy bước đó). Nay RENDER_ONLY / NONE = $0.
+
+**Sửa từ kiểm trình duyệt (bảng "Từng video", server QA trên DB nháp `data/.ui-qa-p3`, mock):**
+1. Dòng thoại đã xong bị ghi lại khi resume (upsert → processing, chuẩn hoá âm lượng lại, ghi completed).
+   Lần ghi cuối bị timeout SQLite → nhánh catch đánh dòng `failed` → video chỉ cần render $0 bị báo
+   "cần mua 1 giọng". Nay dòng completed, cùng lời/giọng/model, file còn trên đĩa → trả lại nguyên trạng,
+   không ghi gì (đóng luôn mục mở của QĐ-110 "resume ghi lại updatedAt").
+2. Dòng BLOCKED ghi "chỉ tại máy ($0)" dù chi phí $0,14 → nay "bị chặn — không chạy (xem lý do)".
+3. Bảng "Từng video" không tự làm mới khi có video đang chạy → nay tự tải lại mỗi 3s khi có video
+   ALREADY_RUNNING.
+Script QA: `scripts/qa-video-resume-ui.ts` (seed · states · snapshot · drop-final), từ chối chạy trên
+data/app.db và ngoài Mock Mode.
+
+Test: tests/model-freeze.test.ts (14, gồm kiểm dòng thoại không bị ghi khi render lại). $0, không POST
+trả phí, sổ production không đổi.

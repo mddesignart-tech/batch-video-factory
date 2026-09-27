@@ -21,6 +21,8 @@ import {
   type VideoResumePlan,
 } from "@/services/video-resume";
 import { acknowledgeRecovery, type RecoveryItem } from "@/services/paid-recovery";
+import { replanVideoModels } from "@/services/frozen-video";
+import { prisma } from "@/lib/prisma";
 
 /**
  * The UI side of the production executor. Every button here calls the SAME
@@ -57,6 +59,8 @@ export async function approveAndRunBatch(input: {
   maxBatch: number;
   maxPerVideo?: number;
   lowAutoApproved: boolean;
+  /** Video models shown in the preflight the person approved (QĐ-111). */
+  expectedVideoModels?: string[];
   /** The person ticked "tôi đồng ý chi tối đa $X". */
   confirmed: boolean;
 }): Promise<ActionResult> {
@@ -69,6 +73,7 @@ export async function approveAndRunBatch(input: {
       maxBatch: input.maxBatch,
       maxPerVideo: input.maxPerVideo,
       lowAutoApproved: input.lowAutoApproved,
+      expectedVideoModels: input.expectedVideoModels,
     });
     revalidatePath(`/batches/${input.batchId}`);
     revalidatePath("/batches");
@@ -123,9 +128,13 @@ export async function videoResumePlans(batchId: string): Promise<{ ok: boolean; 
 }
 
 /** TIẾP TỤC one video. Without confirmPaid, paid work only answers NEEDS_CONFIRMATION. */
-export async function continueVideoAction(projectId: string, confirmPaid: boolean): Promise<ContinueResult & { ok: boolean }> {
+export async function continueVideoAction(
+  projectId: string,
+  confirmPaid: boolean,
+  expectedFingerprint?: string,
+): Promise<ContinueResult & { ok: boolean }> {
   try {
-    const r = await continueVideo(projectId, { confirmPaid });
+    const r = await continueVideo(projectId, { confirmPaid, expectedFingerprint });
     const plan = r.plan;
     if (plan) revalidatePath(`/batches/${plan.batchId}`);
     return { ...r, ok: r.status === "STARTED" || r.status === "NOOP" || r.status === "NEEDS_CONFIRMATION" };
@@ -135,9 +144,13 @@ export async function continueVideoAction(projectId: string, confirmPaid: boolea
 }
 
 /** TIẾP TỤC TẤT CẢ VIDEO ĐỦ ĐIỀU KIỆN. */
-export async function continueAllAction(batchId: string, confirmPaid: boolean): Promise<ContinueAllResult & { ok: boolean }> {
+export async function continueAllAction(
+  batchId: string,
+  confirmPaid: boolean,
+  expectedFingerprint?: string,
+): Promise<ContinueAllResult & { ok: boolean }> {
   try {
-    const r = await continueAllEligible(batchId, { confirmPaid });
+    const r = await continueAllEligible(batchId, { confirmPaid, expectedFingerprint });
     revalidatePath(`/batches/${batchId}`);
     return { ...r, ok: r.status !== "BLOCKED" };
   } catch (err) {
@@ -160,6 +173,28 @@ export async function acknowledgeRecoveryAction(providerJobId: string): Promise<
   try {
     await acknowledgeRecovery(providerJobId, "xác nhận trên trang lô");
     return { ok: true, message: "Đã ghi nhận. Lần mua sau (nếu bấm TIẾP TỤC) là yêu cầu MỚI và phải qua đủ cổng chi." };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/**
+ * LẬP LẠI KẾ HOẠCH MODEL (QĐ-111): drop this video's frozen video models so
+ * the next preflight routes them again. Spends and sends nothing; the next paid
+ * TIẾP TỤC shows the new model and freezes it only on confirmation.
+ */
+export async function replanVideoModelsAction(projectId: string): Promise<ActionResult> {
+  try {
+    const n = await replanVideoModels(projectId);
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { batchId: true } });
+    if (project?.batchId) revalidatePath(`/batches/${project.batchId}`);
+    return {
+      ok: true,
+      message:
+        n > 0
+          ? `Đã bỏ chốt model của ${n} cảnh. Bấm TIẾP TỤC để xem model mới và xác nhận lại — chưa chi đồng nào.`
+          : "Video này không có model nào đang được chốt.",
+    };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

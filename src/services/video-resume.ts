@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { toAbsolute } from "@/lib/paths";
@@ -13,6 +14,7 @@ import { spendStatus } from "./spend-guard";
 import { isVideoRunning, tryLockVideo, unlockVideo } from "./run-registry";
 import { recoveryItemsForProject, type RecoveryItem } from "./paid-recovery";
 import { executeSceneAsset, runBatch, type RunSummary } from "./batch-executor";
+import { freezeVideoChoices, frozenChoicesForBatch, type FrozenVideoMap } from "./frozen-video";
 
 /**
  * Per-video resume inside a batch (V1.2 Phase 3, QĐ-110).
@@ -63,6 +65,14 @@ export interface VideoResumePlan {
   /** The money verdict behind a BLOCKED plan (reason code, limit, over by). */
   verdict: SpendVerdict | null;
   safeToContinue: boolean;
+  /**
+   * Every clip this continue would BUY, with the model it would use (QĐ-111).
+   * `frozen` = an approval already fixed it; otherwise the person's confirmation
+   * of THIS plan is what freezes it.
+   */
+  videoChoices: VideoChoice[];
+  /** Changes whenever what would be bought changes; a confirmation carries it back. */
+  fingerprint: string;
   /** 0-100, from the video's own scenes and output. */
   progress: number;
   budget: {
@@ -73,7 +83,25 @@ export interface VideoResumePlan {
   };
 }
 
+export interface VideoChoice {
+  sceneNumber: number;
+  sceneId: string;
+  provider: string;
+  model: string;
+  durationSeconds: number;
+  estimatedCost: number;
+  lowAuto: boolean;
+  frozen: boolean;
+}
+
 const tally = (): AssetTally => ({ image: 0, video: 0, voice: 0 });
+
+function fingerprintOf(choices: VideoChoice[], cost: number | null, paid: number): string {
+  return createHash("sha256")
+    .update(JSON.stringify([choices.map((c) => [c.sceneId, c.provider, c.model, c.durationSeconds, c.estimatedCost]), cost, paid]))
+    .digest("hex")
+    .slice(0, 16);
+}
 
 async function budgetFor(batchId: string, projectId: string, videoLimit: number) {
   const [auth, status, held, used] = await Promise.all([
@@ -98,6 +126,7 @@ function planFrom(
   recovery: RecoveryItem[],
   active: boolean,
   budget: VideoResumePlan["budget"],
+  frozen: FrozenVideoMap | null,
 ): VideoResumePlan {
   const present = tally();
   const missing = tally();
@@ -113,6 +142,20 @@ function planFrom(
     count(s.plan.image, "image");
     count(s.plan.video, "video");
     count(s.plan.voice, "voice");
+  }
+  const videoChoices: VideoChoice[] = [];
+  for (const sc of v.scenes) {
+    if (sc.plan.video !== "BUY" || !sc.videoRoute || !sc.sceneId) continue;
+    videoChoices.push({
+      sceneNumber: sc.sceneNumber,
+      sceneId: sc.sceneId,
+      provider: sc.videoRoute.provider,
+      model: sc.videoRoute.model,
+      durationSeconds: sc.duration,
+      estimatedCost: sc.videoRoute.estimatedCost,
+      lowAuto: sc.videoRoute.lowAuto,
+      frozen: Boolean(frozen?.[sc.sceneId]),
+    });
   }
   const paid = {
     image: v.counts.imagePosts,
@@ -147,10 +190,13 @@ function planFrom(
     // the router does not even price a scene it cannot afford.
     nextStep = "BLOCKED";
     status = "BLOCKED";
+    // An APPROVED_* stop of a frozen model (QĐ-111) is named as such - never
+    // hidden behind the text of an older failure.
+    const approvedStop = v.needsProvider.find((m) => /APPROVED_[A-Z_]+:/.test(m));
     blockedReason =
       v.spend.status === "BLOCKED"
         ? `${v.spend.reasonCode}: ${v.spend.message}`
-        : (v.blockedReason ?? v.warnings[0] ?? v.status);
+        : (approvedStop ?? v.blockedReason ?? v.needsProvider[0] ?? v.warnings[0] ?? v.status);
   } else if (paid.total > 0) nextStep = "GENERATE";
   else if (renderNeeded || outputGaps.length > 0) nextStep = "RENDER_ONLY";
   else if (project.status === "completed") nextStep = "NONE";
@@ -168,6 +214,16 @@ function planFrom(
         ? 0
         : Math.min(95, Math.round((scenesDone / v.scenes.length) * 90 + (finalOnDisk ? 5 : 0)));
 
+  // No paid request left = nothing will be sent = $0. The estimator also prices
+  // a quality-scoring pass for HIGH-priority scenes, which the batch executor
+  // never runs (no quality loop on paid work) - so a render-only video read
+  // $0.0021 instead of $0 (found by the QĐ-111 render-only test).
+  const incremental =
+    nextStep === "RECOVER"
+      ? null
+      : nextStep === "RENDER_ONLY" || nextStep === "NONE"
+        ? 0
+        : round(Math.max(v.estimatedCost, v.uncappedCost ?? 0), 6);
   return {
     videoId: project.id,
     title: project.title,
@@ -192,11 +248,13 @@ function planFrom(
     // UNCAPPED: the estimator stops pricing when a video's limit runs out, so
     // estimatedCost can be only the part that fitted (QĐ-081). A resume must be
     // judged on the whole of what is still missing.
-    estimatedIncrementalCost: nextStep === "RECOVER" ? null : round(Math.max(v.estimatedCost, v.uncappedCost ?? 0), 6),
+    estimatedIncrementalCost: incremental,
     blockedReason,
     recovery,
     verdict: nextStep === "BLOCKED" && v.spend.status === "BLOCKED" ? v.spend : null,
     safeToContinue: nextStep === "GENERATE" || nextStep === "RENDER_ONLY",
+    videoChoices,
+    fingerprint: fingerprintOf(videoChoices, incremental, paid.total),
     progress,
     budget,
   };
@@ -210,13 +268,14 @@ export async function buildBatchResumePlans(batchId: string, opts: { ignoreLockO
     select: { id: true, title: true, status: true, finalVideoPath: true, subtitlePath: true },
   });
   const byId = new Map(projects.map((p) => [p.id, p]));
+  const frozen = await frozenChoicesForBatch(batchId);
   const plans: VideoResumePlan[] = [];
   for (const v of pre.videos) {
     const project = byId.get(v.projectId);
     if (!project) continue;
     const active = isVideoRunning(v.projectId) && !opts.ignoreLockOwnerFor?.has(v.projectId);
     const recovery = await recoveryItemsForProject(v.projectId, { isActive: active });
-    plans.push(planFrom(v, project, batchId, recovery, active, await budgetFor(batchId, v.projectId, v.videoLimit)));
+    plans.push(planFrom(v, project, batchId, recovery, active, await budgetFor(batchId, v.projectId, v.videoLimit), frozen));
   }
   return plans;
 }
@@ -278,6 +337,49 @@ async function checkPaidContinue(batchId: string, plan: VideoResumePlan): Promis
   return null;
 }
 
+function describeChoices(choices: VideoChoice[]): string {
+  if (choices.length === 0) return "";
+  return (
+    " Clip sẽ mua: " +
+    choices
+      .map(
+        (c) =>
+          `cảnh ${c.sceneNumber} → ${c.provider}/${c.model} ${c.durationSeconds}s $${c.estimatedCost.toFixed(6)}` +
+          (c.frozen ? " (model đã duyệt)" : " (MỚI — xác nhận này sẽ chốt model)"),
+      )
+      .join("; ") +
+    "."
+  );
+}
+
+/**
+ * The person's yes to a continue is an approval of THESE clips: every clip not
+ * yet frozen is frozen now, with the model it was shown with (QĐ-111).
+ */
+async function freezeConfirmed(batchId: string, plans: VideoResumePlan[]): Promise<void> {
+  const at = new Date().toISOString();
+  const entries: FrozenVideoMap = {};
+  for (const plan of plans) {
+    for (const c of plan.videoChoices) {
+      if (c.frozen) continue;
+      const scene = await prisma.scene.findUnique({ where: { id: c.sceneId }, select: { videoModelPinned: true } });
+      entries[c.sceneId] = {
+        provider: c.provider,
+        model: c.model,
+        durationSeconds: c.durationSeconds,
+        estimatedCost: c.estimatedCost,
+        lowAuto: c.lowAuto,
+        pinned: scene?.videoModelPinned ?? false,
+        frozenAt: at,
+      };
+    }
+  }
+  await freezeVideoChoices(batchId, entries, { approved: true });
+}
+
+const PLAN_CHANGED =
+  "PLAN_CHANGED: kế hoạch (model / giá / số request) đã đổi từ lúc bạn xem. KHÔNG gửi request — hãy xem lại rồi xác nhận.";
+
 /**
  * TIẾP TỤC for ONE video. Idempotent: a second call while the first is running
  * answers ALREADY_RUNNING; on a finished video it is a no-op that touches
@@ -285,7 +387,12 @@ async function checkPaidContinue(batchId: string, plan: VideoResumePlan): Promis
  */
 export async function continueVideo(
   projectId: string,
-  opts: { confirmPaid?: boolean; wait?: boolean } = {},
+  opts: {
+    confirmPaid?: boolean;
+    wait?: boolean;
+    /** The plan the person confirmed (VideoResumePlan.fingerprint). A different plan now is a stop. */
+    expectedFingerprint?: string;
+  } = {},
 ): Promise<ContinueResult> {
   const owner = `continue:${projectId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
   // Taken before the first await: a double click cannot get past this line twice.
@@ -312,9 +419,14 @@ export async function continueVideo(
           message:
             `Còn thiếu ${plan.paidRequestsRequired.total} request trả phí ` +
             `(ảnh ${plan.paidRequestsRequired.image} · video ${plan.paidRequestsRequired.video} · giọng ${plan.paidRequestsRequired.voice}), ` +
-            `dự toán tăng thêm $${(plan.estimatedIncrementalCost ?? 0).toFixed(6)}. Cần xác nhận.`,
+            `dự toán tăng thêm $${(plan.estimatedIncrementalCost ?? 0).toFixed(6)}.` +
+            describeChoices(plan.videoChoices) +
+            " Cần xác nhận.",
           plan,
         };
+      }
+      if (opts.expectedFingerprint !== undefined && opts.expectedFingerprint !== plan.fingerprint) {
+        return { status: "BLOCKED", message: PLAN_CHANGED, plan };
       }
       const refusal = await checkPaidContinue(plan.batchId, plan);
       if (refusal) {
@@ -322,6 +434,7 @@ export async function continueVideo(
           ? { status: "BLOCKED", message: `BLOCKED: ${refusal}`, plan }
           : { status: "BLOCKED", message: `${refusal.reasonCode}: ${refusal.message} KHÔNG gửi request.`, plan, verdict: refusal };
       }
+      await freezeConfirmed(plan.batchId, [plan]);
     }
     await logger.info({
       event: "video.continue",
@@ -353,6 +466,8 @@ export interface ContinueAllResult {
   skipped: { plan: VideoResumePlan; why: string }[];
   /** Sum of the runnable videos' INCREMENTAL cost - what this covers. */
   authorizationAmount: number;
+  /** Of the runnable plans together; a confirmation carries it back. */
+  fingerprint?: string;
   run?: RunSummary;
 }
 
@@ -363,7 +478,7 @@ export interface ContinueAllResult {
  */
 export async function continueAllEligible(
   batchId: string,
-  opts: { confirmPaid?: boolean; wait?: boolean } = {},
+  opts: { confirmPaid?: boolean; wait?: boolean; expectedFingerprint?: string } = {},
 ): Promise<ContinueAllResult> {
   const plans = await buildBatchResumePlans(batchId);
   const skipped: ContinueAllResult["skipped"] = [];
@@ -393,21 +508,32 @@ export async function continueAllEligible(
     skipped.push({ plan: p, why: `${b.verdict.reasonCode}: ${b.verdict.message}` });
   }
   const paid = runnable.reduce((n, p) => n + p.paidRequestsRequired.total, 0);
-  const base = { runnable, skipped, authorizationAmount: money.authorizationAmount };
+  const fingerprint = createHash("sha256")
+    .update(runnable.map((p) => `${p.videoId}:${p.fingerprint}`).join("|"))
+    .digest("hex")
+    .slice(0, 16);
+  const base = { runnable, skipped, authorizationAmount: money.authorizationAmount, fingerprint };
   if (runnable.length === 0) return { ...base, status: "BLOCKED", message: "Không video nào vừa hạn mức còn lại." };
   if (paid > 0 && !opts.confirmPaid) {
     return {
       ...base,
       status: "NEEDS_CONFIRMATION",
-      message: `${runnable.length} video, ${paid} request trả phí, dự toán tăng thêm $${money.authorizationAmount.toFixed(6)}. Cần xác nhận.`,
+      message:
+        `${runnable.length} video, ${paid} request trả phí, dự toán tăng thêm $${money.authorizationAmount.toFixed(6)}.` +
+        describeChoices(runnable.flatMap((p) => p.videoChoices)) +
+        " Cần xác nhận.",
     };
   }
   if (paid > 0) {
+    if (opts.expectedFingerprint !== undefined && opts.expectedFingerprint !== fingerprint) {
+      return { ...base, status: "BLOCKED", message: PLAN_CHANGED };
+    }
     try {
       await resumeAuthorization(batchId);
     } catch (err) {
       return { ...base, status: "BLOCKED", message: `BLOCKED: ${err instanceof Error ? err.message : String(err)}` };
     }
+    await freezeConfirmed(batchId, runnable);
   }
   // Each video is locked for this run; one already taken is left to its owner.
   const owner = `continue-all:${batchId}:${Date.now().toString(36)}`;

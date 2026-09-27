@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { parseJson, round } from "@/lib/utils";
 import { assertProviderBudget } from "./provider-budget";
+import { frozenFromNote } from "./frozen-video";
 import { spendStatus } from "./spend-guard";
 import {
   projectReservedAndSpent,
@@ -88,7 +89,8 @@ export class BatchAuthorizationError extends Error {
       | "global_cap"
       | "provider_wallet"
       | "low_auto_not_approved"
-      | "over_scene_budget",
+      | "over_scene_budget"
+      | "model_not_approved",
     /** The structured verdict behind a money refusal (reason code, limit, overBy). */
     readonly verdict?: SpendVerdict,
   ) {
@@ -374,6 +376,37 @@ export async function assertBatchAuthorized(
         `duyệt lại nếu bạn đồng ý cho router tự chọn model.`,
       "low_auto_not_approved",
     );
+  }
+
+  // 2c - the MODEL is the one approved (QĐ-111). The generator already uses
+  // the frozen choice; this is the last line, here because every paid request
+  // passes it: a request for any other model is refused before money moves.
+  if (input.kind === "video") {
+    const note = parseJson<{ plannedVideoModels?: string[] }>(auth.note, {});
+    const frozen = frozenFromNote(auth.note);
+    const key = `${input.provider}/${input.model}`;
+    const entry = frozen?.[input.sceneId];
+    if (frozen && !entry) {
+      throw new BatchAuthorizationError(
+        `APPROVED_MODEL_MISSING: cảnh này không có model nào được duyệt trong quyền chi của lô ` +
+          `${input.batchId}, mà request đòi ${key}. KHÔNG gửi request — hãy lập lại kế hoạch và duyệt lại.`,
+        "model_not_approved",
+      );
+    }
+    if (entry && `${entry.provider}/${entry.model}` !== key) {
+      throw new BatchAuthorizationError(
+        `APPROVED_MODEL_CHANGED: đã duyệt ${entry.provider}/${entry.model}, request đòi ${key}. ` +
+          `Không đổi model ngầm — KHÔNG gửi request.`,
+        "model_not_approved",
+      );
+    }
+    const planned = note.plannedVideoModels ?? [];
+    if (!frozen && planned.length > 0 && !planned.includes(key)) {
+      throw new BatchAuthorizationError(
+        `APPROVED_MODEL_CHANGED: kế hoạch đã duyệt là ${planned.join(", ")}, request đòi ${key}. KHÔNG gửi request.`,
+        "model_not_approved",
+      );
+    }
   }
 
   const cost = round(Math.max(0, input.estimatedCost), 6);

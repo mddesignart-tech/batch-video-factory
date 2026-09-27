@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-26 (V1.2 Phase 3 COMPLETE — tiếp tục/khôi phục từng video, $0; chờ duyệt Phase 4)
+**Cập nhật:** 2026-09-27 (Phase 3 UI check PASS + đóng băng model đã duyệt qua resume QĐ-111, $0; READY cho Phase 4 — chờ duyệt)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,22 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ PHASE 3 UI CHECK + MODEL FREEZE (2026-09-27, $0, không POST trả phí) — QĐ-111
+
+Kiểm trình duyệt thật (Chrome, server QA trên DB nháp `data/.ui-qa-p3`, Mock Mode): Nhập (đường dẫn thư
+mục) → KIỂM TRA → DỰ TOÁN & TẠO LÔ → trang lô → PREFLIGHT → DUYỆT & CHẠY 6 video → bảng "Từng video".
+COMPLETED 100% · FAILED (TIẾP TỤC, 1 giọng, $0,0002, hộp xác nhận có trần) · BLOCKED (không nút trả phí,
+XEM LÝ DO = VIDEO_LIMIT_EXCEEDED) · mất final.mp4 (TIẾP TỤC = render tại máy, $0) · NEEDS_RECOVERY (không tự
+gửi lại, KIỂM TRA → "ĐÃ KIỂM TRA — CHO PHÉP GỬI LẠI") · RUNNING ("đang chạy", bấm lần hai → ALREADY_RUNNING) ·
+TIẾP TỤC TẤT CẢ (chỉ video đủ điều kiện) · tải lại trang giữ đúng trạng thái · bố cục 1280/1366/1920 không tràn.
+Sửa từ lần kiểm: dòng thoại đã xong bị ghi lại khi resume (timeout SQLite → dòng failed → đòi mua lại giọng);
+chữ sai ở dòng BLOCKED; bảng không tự làm mới khi đang chạy.
+
+Đóng băng model video: model đã duyệt = model được POST (note.frozenVideo theo cảnh), không định tuyến lại,
+không fallback; APPROVED_MODEL_UNAVAILABLE / _CHANGED / PARAMS_CHANGED / COST_CHANGED / _MISSING; cổng 2c
+kiểm model ngay trước POST; xác nhận TIẾP TỤC mang fingerprint (PLAN_CHANGED). Bộ test đầy đủ 64/64 file ·
+1308/1308 · một process. Sổ production 156/193/57, $8.413060 — không đổi; routing production không đổi.
 
 ## ✅ V1.2 PHASE 3 — TIẾP TỤC / KHÔI PHỤC TỪNG VIDEO (2026-09-26, $0, không POST trả phí)
 

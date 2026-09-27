@@ -22,7 +22,7 @@ import {
   retryScene,
   savePlan,
 } from "@/services/batch-runner";
-import { setSpendCap, totalRealSpend } from "@/services/spend-guard";
+import { setSpendCap, spendStatus, totalRealSpend } from "@/services/spend-guard";
 import { setProviderBudget } from "@/services/provider-budget";
 import { costSummary } from "@/services/cost-tracker";
 import { executeScene, runBatch } from "@/services/batch-executor";
@@ -618,6 +618,13 @@ describe("7. Budget pressure", () => {
       qualityMode: "ECONOMY",
     });
     await approveAuthorization({ batchId: tight.id, authorizedMaxSpend: 0.5 });
+    // The GLOBAL layer must have room, or it refuses first and this asserts the
+    // wrong refusal. `setSpendCap(5)` above is absolute, and the files that run
+    // before this one on the shared test database have spent (mock) money of
+    // their own - enough, after QĐ-111's tests, to leave less than $0.90.
+    const s = await spendStatus();
+    const held = (await prisma.costReservation.aggregate({ where: { status: "RESERVED" }, _sum: { estimatedCost: true } }))._sum.estimatedCost ?? 0;
+    if (s.cap - s.spent - held < 2) await setSpendCap(Math.round((s.spent + held + 5) * 1e6) / 1e6);
 
     // Fits the per-video ceiling ($5) but not the batch ceiling ($0.50).
     await expect(

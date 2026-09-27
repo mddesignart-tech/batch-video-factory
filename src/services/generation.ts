@@ -68,6 +68,7 @@ import {
 } from "./character-service";
 import { overallQualityScore, QualityReportSchema } from "@/domain/script";
 import { jobPossiblyBilled, RECOVERY_MESSAGE } from "@/services/paid-recovery";
+import { frozenChoicesForBatch, type FrozenCode } from "@/services/frozen-video";
 
 /**
  * Scene media generation.
@@ -1641,26 +1642,102 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
   }
 
   const videoPinned = isOperatorVideoPin(scene);
-  const decision = routeFor(
-    ctx,
-    "video",
-    { seconds: scene.duration, jobs: 1 },
-    videoPinned
-      ? { provider: scene.videoProvider, model: scene.videoModel }
-      : { provider: null, model: null },
-    // The scene facts a LOW_AUTO candidate is judged against. VIDEO stage: this
-    // is the call that spends, so a keyframe that is merely expected later is a
-    // keyframe that does not exist.
-    {
-      ...derived.facts,
-      // The environment half, which is not a property of the scene: each
-      // vendor's wallet as it stands right now, and what the batch approval
-      // still allows one video to cost.
-      providerBudgets: await providerWalletsUsd(),
-      perVideoCapRemaining: await perVideoCapFor(ctx.batchId),
-    },
-    videoPinned ? "MANUAL" : "AUTO",
-  );
+  // The scene facts a LOW_AUTO candidate is judged against. VIDEO stage: this
+  // is the call that spends, so a keyframe that is merely expected later is a
+  // keyframe that does not exist.
+  const lowAutoFacts = {
+    ...derived.facts,
+    // The environment half, which is not a property of the scene: each
+    // vendor's wallet as it stands right now, and what the batch approval
+    // still allows one video to cost.
+    providerBudgets: await providerWalletsUsd(),
+    perVideoCapRemaining: await perVideoCapFor(ctx.batchId),
+  };
+
+  // THE APPROVED MODEL, NOT A NEW ROUTE (QĐ-111). Inside a batch whose approval
+  // froze its choices, this scene is bought with exactly the frozen
+  // provider/model/duration or not at all - never re-routed, never a fallback.
+  const frozenMap = await frozenChoicesForBatch(project.batchId);
+  const frozen = frozenMap?.[scene.id] ?? null;
+  const stop = (code: FrozenCode, why: string): never => {
+    throw new GenerationError(
+      `${code}: cảnh ${scene.sceneNumber} — ${why} Không tự đổi model, KHÔNG gửi request. ` +
+        `Hãy LẬP LẠI KẾ HOẠCH MODEL (preflight) và duyệt lại.`,
+      "video",
+      frozen?.provider ?? "router",
+      false,
+    );
+  };
+  if (frozenMap && !frozen) {
+    stop("APPROVED_MODEL_MISSING", "quyền chi của lô không có model video nào được duyệt cho cảnh này.");
+  }
+  let decision: RouteDecision;
+  if (frozen) {
+    const approvedKey = `${frozen.provider}/${frozen.model}`;
+    if (Math.abs(frozen.durationSeconds - scene.duration) > 1e-9) {
+      stop("APPROVED_PARAMS_CHANGED", `thời lượng đã duyệt ${frozen.durationSeconds}s, hiện là ${scene.duration}s.`);
+    }
+    const pinNow = videoPinned ? `${scene.videoProvider}/${scene.videoModel}` : null;
+    if (pinNow !== (frozen.pinned ? approvedKey : null)) {
+      stop("APPROVED_MODEL_CHANGED", `đã duyệt ${approvedKey}${frozen.pinned ? " (ghim tay)" : ""}, ghim hiện tại là ${pinNow ?? "không có"}.`);
+    }
+    try {
+      // A pin goes through the manual path as it always did; a LOW_AUTO choice
+      // goes through the router with the approved model as the ONLY candidate,
+      // so every condition of the grant is asked again and a "no" is a stop.
+      decision = routeFor(
+        {
+          ...ctx,
+          models: ctx.models.filter(
+            (m) => m.type !== "video" || (m.provider === frozen.provider && m.modelId === frozen.model),
+          ),
+        },
+        "video",
+        { seconds: scene.duration, jobs: 1 },
+        frozen.pinned ? { provider: frozen.provider, model: frozen.model } : { provider: null, model: null },
+        lowAutoFacts,
+        frozen.pinned ? "MANUAL" : "AUTO",
+      );
+    } catch (err) {
+      // Money is its own answer: out of budget is not "the model is gone".
+      if (err instanceof RoutingError && err.code === "over_budget") throw err;
+      return stop(
+        "APPROVED_MODEL_UNAVAILABLE",
+        `model đã duyệt ${approvedKey} hiện không dùng được: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (`${decision.provider}/${decision.modelId}` !== approvedKey) {
+      stop("APPROVED_MODEL_CHANGED", `đã duyệt ${approvedKey}, định tuyến ra ${decision.provider}/${decision.modelId}.`);
+    }
+    if (decision.estimatedCost > frozen.estimatedCost + 1e-6) {
+      stop(
+        "APPROVED_COST_CHANGED",
+        `giá đã duyệt $${frozen.estimatedCost.toFixed(6)}, hiện là $${decision.estimatedCost.toFixed(6)}.`,
+      );
+    }
+    // No fallback: the approval named one model. `lowAutoRouted` is the
+    // router's own answer, so gate 2b still asks for the LOW_AUTO yes.
+    decision = { ...decision, fallbacks: [] };
+    await logger.info({
+      event: "scene.video_model_frozen",
+      provider: frozen.provider,
+      model: frozen.model,
+      projectId: project.id,
+      sceneId: scene.id,
+      message: `Cảnh ${scene.sceneNumber}: dùng đúng model đã duyệt ${approvedKey} (${frozen.pinned ? "ghim tay" : "LOW_AUTO/đã chốt"}), không định tuyến lại.`,
+    });
+  } else {
+    decision = routeFor(
+      ctx,
+      "video",
+      { seconds: scene.duration, jobs: 1 },
+      videoPinned
+        ? { provider: scene.videoProvider, model: scene.videoModel }
+        : { provider: null, model: null },
+      lowAutoFacts,
+      videoPinned ? "MANUAL" : "AUTO",
+    );
+  }
   const target = targetForAspect(project.aspectRatio);
   const outputPath = path.join(
     projectSubdir(project.id, "videos"),
@@ -1798,6 +1875,29 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
       { characters: line.text.length, jobs: 1 },
       { provider: settings.provider, model: settings.model },
     );
+
+    // A line that is already DONE - same words, same voice, same model, file
+    // still on disk - is handed back untouched: no upsert, no re-levelling, no
+    // write. Resume used to flip it to "processing", level the file again and
+    // write "completed" back; when that last write failed (seen in the QĐ-111
+    // browser check: an SQLite socket timeout under load) the catch below marked
+    // a finished, paid-for line "failed", and a $0 render-only video turned
+    // into one that asked to buy its voice again.
+    const done = await prisma.dialogueLine.findUnique({
+      where: { sceneId_lineNumber: { sceneId: scene.id, lineNumber: line.lineNumber } },
+    });
+    if (
+      done?.status === "completed" &&
+      done.text === line.text &&
+      done.voiceId === settings.voiceId &&
+      done.provider === decision.provider &&
+      done.model === decision.modelId &&
+      done.outputPath &&
+      fileOnDiskSafe(done.outputPath)
+    ) {
+      written.push(toAbsolute(done.outputPath));
+      continue;
+    }
 
     const outputPath = path.join(
       projectSubdir(project.id, "audio"),
@@ -1947,6 +2047,14 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
     });
   }
   return written;
+}
+
+function fileOnDiskSafe(relative: string): boolean {
+  try {
+    return fs.existsSync(toAbsolute(relative));
+  } catch {
+    return false;
+  }
 }
 
 /** Container each vendor returns. Kept beside the adapters it describes. */

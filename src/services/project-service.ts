@@ -1,12 +1,18 @@
 import type { Project } from "@prisma/client";
 import type { QualityMode, RouterStrategy } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
+import {
+  freezeVideoChoices,
+  frozenChoicesForBatch,
+  frozenFromNote,
+  type FrozenVideoMap,
+} from "@/services/frozen-video";
 import { sceneCharacters } from "@/domain/scene-characters";
 import { logger } from "@/lib/logger";
 import fs from "node:fs";
 import { ensureProjectDirs, toAbsolute } from "@/lib/paths";
 import { getSettings } from "@/lib/settings";
-import { round } from "@/lib/utils";
+import { parseJson, round } from "@/lib/utils";
 import { ScriptSchema, type ScriptDoc } from "@/domain/script";
 import { enqueue } from "@/jobs/queue";
 import { isMockMode } from "@/lib/env";
@@ -263,6 +269,9 @@ export async function buildPlannedScenes(
   });
   // Scenes whose keyframe was paid for. One query, the same predicate
   // `generateSceneImage` checks before it routes.
+  // Choices an approval froze (QĐ-111): the estimate prices THOSE, so a resume
+  // plan shows - and asks confirmation for - the model the POST will use.
+  const frozen = await frozenChoicesForBatch(project.batchId);
   const paidImages = new Set(
     (
       await prisma.providerJob.findMany({
@@ -289,6 +298,14 @@ export async function buildPlannedScenes(
     manualVideoModel: scene.videoModelPinned ? scene.videoModel : null,
     manualVoiceProvider: scene.voiceProvider,
     manualVoiceModel: scene.voiceModel,
+    frozenVideo: frozen?.[scene.id]
+      ? {
+          provider: frozen[scene.id]!.provider,
+          model: frozen[scene.id]!.model,
+          pinned: frozen[scene.id]!.pinned,
+          durationSeconds: frozen[scene.id]!.durationSeconds,
+        }
+      : null,
     // An imported keyframe is already on disk and already paid for - by the
     // operator, before this app ever saw it.
     hasSuppliedKeyframe: scene.imageSource === "IMPORTED" && Boolean(scene.imagePath),
@@ -444,6 +461,33 @@ export async function freezeScenePlan(
       },
     });
   }
+
+  // A video written AFTER its batch was approved (IDIOM_GENERATED): its clips
+  // are frozen now, from this same estimate - but only onto models the approval
+  // already listed. A model it did not list stays unfrozen, and the run stops
+  // on it (APPROVED_MODEL_MISSING) instead of buying it. QĐ-111.
+  if (!project.batchId) return;
+  const auth = await prisma.batchAuthorization.findUnique({ where: { batchId: project.batchId } });
+  if (auth?.status !== "APPROVED") return;
+  const planned = new Set(parseJson<{ plannedVideoModels?: string[] }>(auth.note, {}).plannedVideoModels ?? []);
+  const existing = frozenFromNote(auth.note) ?? {};
+  const at = new Date().toISOString();
+  const entries: FrozenVideoMap = {};
+  for (const plan of preview.current.scenes) {
+    const scene = project.scenes.find((s) => s.sceneNumber === plan.sceneNumber);
+    if (!scene || !plan.video || existing[scene.id]) continue;
+    if (!planned.has(`${plan.video.provider}/${plan.video.modelId}`)) continue;
+    entries[scene.id] = {
+      provider: plan.video.provider,
+      model: plan.video.modelId,
+      durationSeconds: scene.duration,
+      estimatedCost: round(plan.video.estimatedCost, 6),
+      lowAuto: plan.video.lowAutoRouted === true,
+      pinned: scene.videoModelPinned,
+      frozenAt: at,
+    };
+  }
+  await freezeVideoChoices(project.batchId, entries);
 }
 
 /**

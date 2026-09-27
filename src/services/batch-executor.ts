@@ -10,6 +10,7 @@ import { confirmedProviders, spendStatus } from "@/services/spend-guard";
 import { providerSpendBreakdown } from "@/services/provider-budget";
 import { availableProviderNames } from "@/services/provider-health";
 import { approveAuthorization, resumeAuthorization } from "@/services/batch-authorization";
+import { frozenFromNote, type FrozenVideoMap } from "@/services/frozen-video";
 import { release as releaseReservation } from "@/services/cost-reservation";
 import { preflightImportedBatch, type ImportPreflight } from "@/services/import-preflight";
 import { isRunnable, settleBatchIfDone, storedPlan } from "@/services/batch-runner";
@@ -479,6 +480,36 @@ export async function preflightForApproval(
 
 // ------------------------------------------------------------------ approve ---
 
+/**
+ * The clips an approval covers, as frozen choices: every scene of a video this
+ * approval runs that BUYS a clip, with the route it was priced on.
+ */
+async function frozenFromPreflight(check: ApprovalPreflight): Promise<FrozenVideoMap> {
+  const out: FrozenVideoMap = {};
+  if (!check.preflight) return out;
+  const covered = check.runnableProjectIds ? new Set(check.runnableProjectIds) : null;
+  const at = new Date().toISOString();
+  for (const v of check.preflight.videos) {
+    if (v.lifecycle === "BLOCKED" || v.lifecycle === "COMPLETED") continue;
+    if (covered && !covered.has(v.projectId)) continue;
+    for (const sc of v.scenes) {
+      if (sc.plan.video !== "BUY" || !sc.videoRoute || !sc.sceneId) continue;
+      const row = await prisma.scene.findUnique({ where: { id: sc.sceneId }, select: { videoModelPinned: true, duration: true } });
+      if (!row) continue;
+      out[sc.sceneId] = {
+        provider: sc.videoRoute.provider,
+        model: sc.videoRoute.model,
+        durationSeconds: row.duration,
+        estimatedCost: sc.videoRoute.estimatedCost,
+        lowAuto: sc.videoRoute.lowAuto,
+        pinned: row.videoModelPinned,
+        frozenAt: at,
+      };
+    }
+  }
+  return out;
+}
+
 export class ExecutorError extends Error {
   constructor(message: string) {
     super(message);
@@ -498,6 +529,12 @@ export async function approveAndRun(opts: {
   maxBatch: number;
   maxPerVideo?: number;
   lowAutoApproved: boolean;
+  /**
+   * The video models the person SAW in the preflight. When given, the approval
+   * is refused if the plan re-computed now names different ones (QĐ-111): the
+   * yes was for those models, not for whatever routing says a moment later.
+   */
+  expectedVideoModels?: string[];
   /** Tests await the run; the UI does not. */
   wait?: boolean;
 }): Promise<{ preflight: ApprovalPreflight; run?: RunSummary }> {
@@ -516,6 +553,16 @@ export async function approveAndRun(opts: {
   if (!check.ready) {
     const failed = check.checks.filter((c) => !c.ok && c.blocking).map((c) => `${c.label} (${c.detail})`);
     throw new ExecutorError(`Chưa duyệt được: ${failed.join(" · ")}`);
+  }
+  if (opts.expectedVideoModels) {
+    const seen = [...new Set(opts.expectedVideoModels)].sort().join(", ");
+    const now = [...new Set(check.plannedVideoModels)].sort().join(", ");
+    if (seen !== now) {
+      throw new ExecutorError(
+        `APPROVED_MODEL_CHANGED: preflight bạn đã xem có model video [${seen || "không có"}], ` +
+          `kế hoạch lúc duyệt là [${now || "không có"}]. Hãy PREFLIGHT lại rồi duyệt.`,
+      );
+    }
   }
   if (check.usesLowAuto && !opts.lowAutoApproved && !check.mockMode) {
     throw new ExecutorError(
@@ -539,12 +586,24 @@ export async function approveAndRun(opts: {
   }
   // The note carries the plan the person approved, so the run can refuse a
   // model it did not show.
+  //
+  // frozenVideo (QĐ-111): per scene, the provider/model/duration/price this
+  // yes covers. The run buys exactly that or stops. Choices frozen by an
+  // earlier approval of this batch are kept - the preflight above already
+  // priced them as frozen - so a re-approval never re-routes silently; only
+  // LẬP LẠI KẾ HOẠCH MODEL does.
+  const previous = await prisma.batchAuthorization.findUnique({ where: { batchId: opts.batchId }, select: { note: true } });
+  const frozen = { ...(frozenFromNote(previous?.note) ?? {}), ...(await frozenFromPreflight(check)) };
   await approveAuthorization({
     batchId: opts.batchId,
     authorizedMaxSpend: opts.maxBatch,
     // runnableProjectIds: the videos this approval covers (partial batch). The
     // run starts nothing else, even if money were left.
-    note: JSON.stringify({ plannedVideoModels: check.plannedVideoModels, runnableProjectIds: check.runnableProjectIds }),
+    note: JSON.stringify({
+      plannedVideoModels: check.plannedVideoModels,
+      runnableProjectIds: check.runnableProjectIds,
+      frozenVideo: frozen,
+    }),
     lowAutoApproved: opts.lowAutoApproved,
   });
 
@@ -668,22 +727,15 @@ async function runScene(
   projectId: string,
   batchId: string,
   ceilings: Ceilings,
-  plannedVideoModels: Set<string>,
 ): Promise<void> {
   await generateSceneImage(sceneId);
   await assertHeadroom(projectId, batchId, ceilings, "sau ảnh");
 
-  const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
-  if (scene.motionMode === "VIDEO_AI" && scene.videoProvider && scene.videoModel && plannedVideoModels.size > 0) {
-    const key = `${scene.videoProvider}/${scene.videoModel}`;
-    // A model the approved plan did not show is a stop, not a thing to work around.
-    if (!plannedVideoModels.has(key) && !(scene.videoProvider === "ffmpeg")) {
-      throw new ExecutorError(
-        `Cảnh ${scene.sceneNumber} đổi model: kế hoạch đã duyệt là ${[...plannedVideoModels].join(", ")}, thực tế ${key}.`,
-      );
-    }
-  }
-
+  // Which model the clip may use is NOT checked here any more. This used to
+  // compare the model STORED on the scene with the approved plan and then let
+  // `generateSceneVideo` route again - so it judged one model and the POST used
+  // another. The generator now buys exactly the frozen choice, and the batch
+  // gate (2c) refuses any other model at the POST itself (QĐ-111).
   await generateSceneVideo(sceneId);
   await assertHeadroom(projectId, batchId, ceilings, "sau clip");
   await generateSceneVoice(sceneId);
@@ -717,9 +769,8 @@ export async function executeScene(sceneId: string): Promise<void> {
         providers: parseJson<string[]>(auth.providerScopeJson, []),
       }
     : { perVideo: project.maxBudget, batch: Number.POSITIVE_INFINITY, providers: [] };
-  const planned = new Set(parseJson<{ plannedVideoModels?: string[] }>(auth?.note, {}).plannedVideoModels ?? []);
   await assertHeadroom(project.id, project.batchId ?? "", ceilings, `cảnh ${scene.sceneNumber}`);
-  await runScene(scene.id, project.id, project.batchId ?? "", ceilings, planned);
+  await runScene(scene.id, project.id, project.batchId ?? "", ceilings);
 }
 
 /** One asset of one scene (the "regenerate" buttons), with the same ceilings. */
@@ -781,10 +832,6 @@ export async function runBatch(
     batch: auth.authorizedMaxSpend,
     providers: parseJson<string[]>(auth.providerScopeJson, []),
   };
-  const plannedVideoModels = new Set(
-    parseJson<{ plannedVideoModels?: string[] }>(auth.note, {}).plannedVideoModels ?? [],
-  );
-
   await prisma.batch.update({ where: { id: batchId }, data: { status: "RUNNING" } });
 
   // IDIOM_GENERATED: write the scripts (paid Text AI, through the same gates)
@@ -896,7 +943,7 @@ export async function runBatch(
     for (const scene of scenes) {
       try {
         await assertHeadroom(project.id, batchId, ceilings, `cảnh ${scene.sceneNumber}`);
-        await runScene(scene.id, project.id, batchId, ceilings, plannedVideoModels);
+        await runScene(scene.id, project.id, batchId, ceilings);
       } catch (err) {
         stopped = err instanceof Error ? err.message : String(err);
         await prisma.scene.update({

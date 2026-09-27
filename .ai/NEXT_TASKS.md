@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-26 — V1.2 Phase 3 (tiếp tục từng video) COMPLETE; chờ duyệt Phase 4
+**Cập nhật:** 2026-09-27 — Phase 3 UI check PASS + model freeze (QĐ-111) xong; READY cho Phase 4, CHỜ DUYỆT
 
 ---
 
@@ -14,11 +14,13 @@
 
 ## ✅ V1.2 Phase 3 COMPLETE — tiếp tục / khôi phục từng video (QĐ-110)
 
-- [ ] Kiểm bảng "Từng video" bằng trình duyệt (lần QA này chỉ kiểm dữ liệu vì Chrome không kết nối).
-- [ ] Phát hiện chưa sửa (routing, cần duyệt): lúc resume, chốt "model đã duyệt" kiểm model đang lưu TRƯỚC khi
-      định tuyến lại; nếu có nhiều model video tự định tuyến được, router có thể chọn model rẻ hơn khi trần thấp.
-      Production hiện chỉ h3_max nên không xảy ra.
-- [ ] Resume vẫn ghi lại cột sổ sách (updatedAt) trên dòng thoại đã xong — không tạo lại media.
+- [x] Kiểm bảng "Từng video" bằng trình duyệt — PASS 2026-09-27 (xem STATE, QĐ-111).
+- [x] Lỗi model khi TIẾP TỤC — SỬA 2026-09-27: đóng băng model đã duyệt (QĐ-111).
+- [x] Resume ghi lại dòng thoại đã xong — SỬA 2026-09-27 (dòng xong được trả lại nguyên trạng).
+- [ ] Còn mở (nhỏ): dự toán vẫn cộng lượt "chấm chất lượng" ($0,002/cảnh HIGH) mà executor lô không chạy
+      — số dự toán cao hơn thực tế một chút (hướng an toàn); kế hoạch RENDER_ONLY đã về $0.
+- [ ] Còn mở (vận hành): DATABASE_URL production không có `socket_timeout`; khi trang lô bị nhiều tab
+      cùng hỏi, SQLite có thể timeout 5s. Đề xuất thêm `?socket_timeout=60` — cần người dùng đồng ý (sửa .env).
 
 ## ✅ V1.2 Phase 2 COMPLETE — ngân sách nhiều tầng (QĐ-108, QĐ-109)
 

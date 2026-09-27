@@ -62,6 +62,8 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
         maxBatch: batchNum,
         maxPerVideo: perVideoNum,
         lowAutoApproved: lowAuto,
+        // The models this person saw: a different plan at approval is refused.
+        expectedVideoModels: pre.plannedVideoModels,
         confirmed,
       });
       setMessage({ ok: r.ok, text: r.message });

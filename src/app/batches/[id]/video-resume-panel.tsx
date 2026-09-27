@@ -10,6 +10,7 @@ import {
   continueAllAction,
   continueVideoAction,
   recoverVideoAction,
+  replanVideoModelsAction,
   videoResumePlans,
 } from "@/app/actions/batch-run";
 import type { VideoResumePlan } from "@/services/video-resume";
@@ -40,10 +41,21 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
     void load();
   }, [load]);
 
+  // While a video of this table is running, follow it (the batch table above
+  // polls on its own; this one used to stay on RUNNING until a reload).
+  const anyActive = plans?.some((p) => p.nextStep === "ALREADY_RUNNING") ?? false;
+  useEffect(() => {
+    if (!anyActive) return;
+    const t = setInterval(() => void load(), 3000);
+    return () => clearInterval(t);
+  }, [anyActive, load]);
+
   async function onContinue(plan: VideoResumePlan, confirmPaid: boolean) {
     setBusy(plan.videoId);
     try {
-      const r = await continueVideoAction(plan.videoId, confirmPaid);
+      // A confirmation carries the plan it was given for: if models, prices or
+      // requests changed meanwhile, the server refuses (PLAN_CHANGED, QĐ-111).
+      const r = await continueVideoAction(plan.videoId, confirmPaid, confirmPaid ? plan.fingerprint : undefined);
       if (r.status === "NEEDS_CONFIRMATION" && r.plan) {
         setConfirmFor(r.plan);
         setAgree(false);
@@ -51,6 +63,18 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
         setConfirmFor(null);
         setMessage({ ok: r.ok, text: r.message });
       }
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onReplan(plan: VideoResumePlan) {
+    setBusy(plan.videoId);
+    try {
+      const r = await replanVideoModelsAction(plan.videoId);
+      setMessage({ ok: r.ok, text: r.message });
+      setReasonFor(null);
       await load();
     } finally {
       setBusy(null);
@@ -84,7 +108,7 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
   async function onContinueAll(confirmPaid: boolean) {
     setBusy("__all");
     try {
-      const r = await continueAllAction(batchId, confirmPaid);
+      const r = await continueAllAction(batchId, confirmPaid, confirmPaid ? allPreview?.fingerprint : undefined);
       if (r.status === "NEEDS_CONFIRMATION") {
         setAllPreview(r);
         setAgree(false);
@@ -133,13 +157,20 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
                     <Td>{p.progress}%</Td>
                     <Td>{p.estimatedIncrementalCost === null ? "?" : formatUSD(p.estimatedIncrementalCost, 4)}</Td>
                     <Td className="text-[11px]">
-                      {p.paidRequestsRequired.total > 0
-                        ? `trả phí: ảnh ${p.paidRequestsRequired.image} · video ${p.paidRequestsRequired.video} · giọng ${p.paidRequestsRequired.voice}`
-                        : p.nextStep === "NONE"
-                          ? "—"
-                          : "chỉ tại máy ($0)"}
-                      {p.localWorkRequired.length > 0 && p.nextStep !== "NONE" ? (
+                      {p.nextStep === "BLOCKED"
+                        ? "bị chặn — không chạy (xem lý do)"
+                        : p.paidRequestsRequired.total > 0
+                          ? `trả phí: ảnh ${p.paidRequestsRequired.image} · video ${p.paidRequestsRequired.video} · giọng ${p.paidRequestsRequired.voice}`
+                          : p.nextStep === "NONE"
+                            ? "—"
+                            : "chỉ tại máy ($0)"}
+                      {p.localWorkRequired.length > 0 && p.nextStep !== "NONE" && p.nextStep !== "BLOCKED" ? (
                         <span className="block text-ink-500">{p.localWorkRequired.join(" · ")}</span>
+                      ) : null}
+                      {p.videoChoices.length > 0 ? (
+                        <span className="block break-all text-ink-500">
+                          clip: {[...new Set(p.videoChoices.map((c) => `${c.provider}/${c.model}${c.frozen ? " (đã duyệt)" : " (mới)"}`))].join(", ")}
+                        </span>
                       ) : null}
                     </Td>
                     <Td>
@@ -167,8 +198,13 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
                   </tr>
                   {(reasonFor === p.videoId || p.nextStep === "RECOVER") && p.blockedReason ? (
                     <tr>
-                      <Td colSpan={6}>
+                      <Td colSpan={6} className="space-y-2">
                         <Alert tone={p.nextStep === "RECOVER" ? "danger" : "warn"}>{p.blockedReason}</Alert>
+                        {/APPROVED_[A-Z_]+:/.test(p.blockedReason) ? (
+                          <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => onReplan(p)}>
+                            LẬP LẠI KẾ HOẠCH MODEL (không chi tiền — sau đó phải xác nhận lại)
+                          </Button>
+                        ) : null}
                       </Td>
                     </tr>
                   ) : null}
@@ -205,6 +241,16 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
               <div>BATCH CAP REMAINING: {formatUSD(confirmFor.budget.batchRemaining, 6)}</div>
               <div>GLOBAL REMAINING: {formatUSD(confirmFor.budget.globalRemaining, 6)}</div>
             </div>
+            {confirmFor.videoChoices.length > 0 ? (
+              <ul className="list-disc pl-4 font-mono">
+                {confirmFor.videoChoices.map((c) => (
+                  <li key={c.sceneId} className="break-all">
+                    cảnh {c.sceneNumber} → {c.provider}/{c.model} · {c.durationSeconds}s · {formatUSD(c.estimatedCost, 6)}{" "}
+                    {c.frozen ? "(model đã duyệt, giữ nguyên)" : "(MỚI — xác nhận này chốt model này)"}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
               Tôi đồng ý chi tối đa {formatUSD(confirmFor.estimatedIncrementalCost ?? 0, 6)} cho phần còn thiếu (kiểm lại mọi trần ngay trước khi gửi).

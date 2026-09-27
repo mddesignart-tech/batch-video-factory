@@ -44,6 +44,14 @@ export interface PlannedSceneInput {
   manualVoiceProvider?: string | null;
   manualVoiceModel?: string | null;
   /**
+   * The video model an approval FROZE for this scene (QĐ-111). When set, the
+   * clip is priced with exactly this model - a pin stays a pin, a LOW_AUTO
+   * choice is judged against this one model only - and a model that no longer
+   * qualifies blocks the scene (APPROVED_MODEL_UNAVAILABLE) instead of being
+   * replaced by whatever the router would pick today.
+   */
+  frozenVideo?: { provider: string; model: string; pinned: boolean; durationSeconds: number } | null;
+  /**
    * The scene already HAS its keyframe, supplied with an imported storyboard.
    *
    * Priced at zero, because it will be bought zero times. Leaving it out of the
@@ -497,10 +505,11 @@ export function planScene(opts: {
      * worse than no estimate: it hides a video that was fine.
      */
     optional = false,
+    pool: ModelRegistry[] = models,
   ): RouteDecision | null => {
     if (!enabled || error) return null;
     try {
-      const decision = routeScene(models, {
+      const decision = routeScene(pool, {
         type,
         qualityMode,
         strategy,
@@ -547,14 +556,33 @@ export function planScene(opts: {
   // anything has failed. Without it, an image failure would be re-read as "no
   // video provider" further down and reported as the wrong problem.
   const errorBeforeVideo = error;
+  // A frozen choice (QĐ-111) is priced as itself: a pin through the manual
+  // path, a LOW_AUTO choice through the router with THAT model as the only
+  // candidate - so every condition it was approved under is asked again, and
+  // "no" means no clip, never a different one.
+  const frozen = scene.frozenVideo ?? null;
+  const frozenPool = frozen
+    ? models.filter((m) => m.type !== "video" || (m.provider === frozen.provider && m.modelId === frozen.model))
+    : models;
+  const wantsClip = motion.source === "AI_VIDEO" && scene.hasExistingVideo !== true;
+  const frozenDurationMoved = Boolean(frozen && wantsClip && Math.abs(frozen.durationSeconds - scene.duration) > 1e-9);
+  // The person's pin as it stands now must be the one approved: a pin set,
+  // changed or removed after approval is a different purchase.
+  const pinNow =
+    scene.manualVideoProvider && scene.manualVideoModel ? `${scene.manualVideoProvider}/${scene.manualVideoModel}` : null;
+  const frozenPinMoved = Boolean(
+    frozen && wantsClip && pinNow !== (frozen.pinned ? `${frozen.provider}/${frozen.model}` : null),
+  );
   const video =
-    motion.source === "AI_VIDEO" && scene.hasExistingVideo !== true
+    wantsClip && !frozenDurationMoved && !frozenPinMoved
       ? routeOrNull(
           "video",
           true,
           { seconds: scene.duration, jobs: 1 },
-          scene.manualVideoProvider,
-          scene.manualVideoModel,
+          frozen ? (frozen.pinned ? frozen.provider : null) : scene.manualVideoProvider,
+          frozen ? (frozen.pinned ? frozen.model : null) : scene.manualVideoModel,
+          false,
+          frozenPool,
         )
       : null;
 
@@ -582,6 +610,23 @@ export function planScene(opts: {
     MISSING_PROVIDER.includes(errorCode)
   ) {
     needsProvider = error;
+    error = errorBeforeVideo;
+  }
+  if (frozen && frozenPinMoved && !errorBeforeVideo) {
+    needsProvider =
+      `APPROVED_MODEL_CHANGED: model đã duyệt là ${frozen.provider}/${frozen.model}` +
+      `${frozen.pinned ? " (ghim tay)" : " (LOW_AUTO)"}, ghim hiện tại là ${pinNow ?? "không có"}. ` +
+      `Không tạo clip — hãy LẬP LẠI KẾ HOẠCH MODEL và duyệt lại.`;
+  } else if (frozen && frozenDurationMoved && !errorBeforeVideo) {
+    needsProvider =
+      `APPROVED_PARAMS_CHANGED: thời lượng cảnh đổi từ ${frozen.durationSeconds}s (đã duyệt) ` +
+      `thành ${scene.duration}s. Không tạo clip — hãy LẬP LẠI KẾ HOẠCH MODEL và duyệt lại.`;
+  } else if (frozen && wantsClip && !video && !errorBeforeVideo && errorCode !== "over_budget") {
+    // Whatever the router said - disabled, shut down, no longer LOW_AUTO,
+    // degraded - the approved model cannot be used as approved.
+    needsProvider =
+      `APPROVED_MODEL_UNAVAILABLE: model đã duyệt ${frozen.provider}/${frozen.model} không còn dùng được ` +
+      `(${needsProvider ?? error ?? "không rõ"}). Không tự đổi sang model khác — hãy LẬP LẠI KẾ HOẠCH MODEL và duyệt lại.`;
     error = errorBeforeVideo;
   }
   const speechChars = scene.speechText.trim().length;
