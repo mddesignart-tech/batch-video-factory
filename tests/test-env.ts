@@ -50,4 +50,8 @@ export function applyTestEnv(): void {
   process.env.SECRET_ENCRYPTION_KEY =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   delete process.env.MOCK_FAILURE_RATE;
+  // Test files share ONE database and reuse the same mock storyboards; with the
+  // production default (GLOBAL) a file would reuse another file's purchases.
+  // Each file stays independent; the asset-reuse suite opts into GLOBAL itself.
+  process.env.ASSET_REUSE_SCOPE = "SCENE";
 }

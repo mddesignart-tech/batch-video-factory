@@ -28,6 +28,7 @@ import { generateScript, recordConcept } from "./script-service";
 import { availableProviderNames } from "./provider-health";
 import { speechTextFor } from "./generation";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
+import { sceneReuseFacts } from "./reuse-plan";
 import { providerSpendBreakdown } from "./provider-budget";
 
 /**
@@ -280,7 +281,15 @@ export async function buildPlannedScenes(
       })
     ).map((j) => j.sceneId),
   );
+  // What the reuse engine already holds for each scene (QĐ-112): identical
+  // images, clips and spoken lines that exist anywhere - priced at $0 below.
+  const reuse = await sceneReuseFacts(scenes, project, {
+    ownedKeyframe: (scene) =>
+      (scene.imageSource === "IMPORTED" && fileOnDisk(scene.imagePath)) ||
+      (paidImages.has(scene.id) && fileOnDisk(scene.imagePath)),
+  });
   return scenes.map((scene) => ({
+    reuseFacts: reuse.get(scene.id) ?? null,
     sceneNumber: scene.sceneNumber,
     duration: scene.duration,
     complexity: scene.complexity as "LOW" | "MEDIUM" | "HIGH",

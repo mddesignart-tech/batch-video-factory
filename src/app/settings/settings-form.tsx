@@ -79,6 +79,26 @@ export function SettingsForm({ settings }: { settings: AppSettings }) {
 
         <section>
           <h3 className="mb-2 text-xs font-semibold tracking-wide text-ink-300 uppercase">
+            Tái sử dụng asset đã trả tiền
+          </h3>
+          <Field
+            label="Phạm vi tái sử dụng"
+            hint="Asset giống hệt (cùng đầu vào, cùng model, cùng thông số, file còn nguyên) được dùng lại ở $0 thay vì mua lại. Tiền đã chi trước đó không đổi."
+          >
+            <select
+              name="assetReuseScope"
+              defaultValue={settings.assetReuseScope}
+              className="w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-sm"
+            >
+              <option value="GLOBAL">GLOBAL — mọi dự án (nhập lại storyboard không mua lại)</option>
+              <option value="PROJECT">PROJECT — chỉ trong cùng một video</option>
+              <option value="SCENE">SCENE — chỉ asset của chính cảnh đó</option>
+            </select>
+          </Field>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-xs font-semibold tracking-wide text-ink-300 uppercase">
             Hàng đợi công việc
           </h3>
           <div className="grid gap-3 sm:grid-cols-2">

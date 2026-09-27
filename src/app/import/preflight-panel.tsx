@@ -17,7 +17,6 @@ import {
 } from "@/components/ui";
 import { formatUSD } from "@/lib/utils";
 import type {
-  AssetPlan,
   ImportPreflight,
   ImportVideoLifecycle,
   ImportVideoPreview,
@@ -59,24 +58,138 @@ const LIFECYCLE_TONE: Record<
   FAILED: "danger",
 };
 
-const PLAN_LABEL: Record<AssetPlan, string> = {
-  BUY: "WILL_CREATE",
-  REUSE: "REUSE",
-  NONE: "—",
-};
+type SceneLine = ImportVideoPreview["scenes"][number];
+type Kind = "image" | "video" | "voice";
 
-const PLAN_TONE: Record<AssetPlan, "ok" | "warn" | "neutral"> = {
-  BUY: "warn",
-  REUSE: "ok",
-  NONE: "neutral",
-};
-
-function PlanBadge({ plan, freeLabel }: { plan: AssetPlan; freeLabel?: string }) {
-  if (plan === "NONE" && freeLabel) {
-    return <Badge tone="ok">{freeLabel}</Badge>;
+/**
+ * One asset of one scene, in the words the operator decides on (QĐ-112):
+ *   IMPORTED     a person supplied it - $0
+ *   REUSE        already exists (this scene, or an identical asset elsewhere) - $0
+ *   LOCAL        FFmpeg makes it - $0, and not a saving
+ *   WILL CREATE  this run pays for it: model + price shown
+ *   MISSING      its file is gone - never reused blind
+ *   INVALID      its bytes no longer match - never reused blind
+ */
+function AssetCell({ s, kind }: { s: SceneLine; kind: Kind }) {
+  const plan = s.plan[kind];
+  const from = s.reuseFrom[kind];
+  const invalid = kind === "voice" ? null : s.invalid[kind];
+  const problem =
+    invalid === "MISSING_LOCAL_FILE" ? (
+      <Badge tone="danger">MISSING</Badge>
+    ) : invalid === "INVALID" ? (
+      <Badge tone="danger">INVALID</Badge>
+    ) : null;
+  if (kind === "image" && s.imageSource === "MISSING") return <Badge tone="danger">MISSING</Badge>;
+  if (kind === "video" && s.motionSource === "LOCAL_MOTION") return <Badge tone="ok">LOCAL</Badge>;
+  if (from === "IMPORTED") {
+    return (
+      <span className="inline-flex flex-col gap-0.5">
+        <Badge tone="ok">IMPORTED</Badge>
+        <span className="text-[10px] text-ok-500">Ảnh nhập sẵn — $0</span>
+      </span>
+    );
   }
-  if (plan === "NONE") return <span className="text-ink-500">—</span>;
-  return <Badge tone={PLAN_TONE[plan]}>{PLAN_LABEL[plan]}</Badge>;
+  if (plan === "REUSE" || from) {
+    return (
+      <span className="inline-flex flex-col gap-0.5" title={from === "CACHE" ? "Asset giống hệt đã có ở cảnh / dự án khác" : "Cảnh này đã có"}>
+        <Badge tone="ok">REUSE</Badge>
+        <span className="text-[10px] text-ok-500">
+          Đã có — không phát sinh chi phí{from === "CACHE" ? " (dùng chung)" : ""}
+        </span>
+      </span>
+    );
+  }
+  if (plan === "BUY") {
+    const model = kind === "video" ? s.videoModel : s.models[kind];
+    return (
+      <span className="inline-flex flex-col gap-0.5">
+        <span className="inline-flex flex-wrap gap-1">
+          {problem}
+          <Badge tone="warn">WILL CREATE</Badge>
+        </span>
+        <span className="max-w-[9rem] break-all font-mono text-[10px] text-ink-400">
+          {model ?? "?"} · {formatUSD(s.costs[kind], 6)}
+        </span>
+      </span>
+    );
+  }
+  return problem ?? <span className="text-ink-500">—</span>;
+}
+
+/** Per video: each cost stage split into REUSE / IMPORTED / LOCAL_FREE / WILL_CREATE, with cost and saving. */
+function StageTable({ video }: { video: ImportVideoPreview }) {
+  const rows: { stage: string; reuse: number; imported: number; local: number; create: number; cost: number; saved: number }[] = [];
+  const count = (pred: (s: SceneLine) => boolean) => video.scenes.filter(pred).length;
+  rows.push({ stage: "TEXT", reuse: 0, imported: 0, local: 0, create: 0, cost: video.breakdown.text, saved: 0 });
+  rows.push({
+    stage: "IMAGE",
+    reuse: count((s) => s.reuseFrom.image === "EXISTING" || s.reuseFrom.image === "CACHE"),
+    imported: count((s) => s.reuseFrom.image === "IMPORTED"),
+    local: 0,
+    create: count((s) => s.plan.image === "BUY"),
+    cost: video.breakdown.image,
+    saved: video.savings.image,
+  });
+  rows.push({
+    stage: "VIDEO",
+    reuse: count((s) => s.reuseFrom.video !== null),
+    imported: 0,
+    local: count((s) => s.motionSource === "LOCAL_MOTION"),
+    create: count((s) => s.plan.video === "BUY"),
+    cost: video.breakdown.video,
+    saved: video.savings.video,
+  });
+  rows.push({
+    stage: "VOICE",
+    reuse: count((s) => s.reuseFrom.voice !== null),
+    imported: 0,
+    local: 0,
+    create: count((s) => s.plan.voice === "BUY"),
+    cost: video.breakdown.voice,
+    saved: video.savings.voice,
+  });
+  rows.push({ stage: "RENDER (FFmpeg)", reuse: 0, imported: 0, local: video.scenes.length, create: 0, cost: 0, saved: 0 });
+  rows.push({ stage: "CHẤM CHẤT LƯỢNG", reuse: 0, imported: 0, local: 0, create: 0, cost: video.breakdown.quality, saved: 0 });
+  rows.push({ stage: "RETRY RESERVE", reuse: 0, imported: 0, local: 0, create: 0, cost: video.breakdown.retries, saved: 0 });
+  return (
+    <Table>
+      <thead>
+        <tr>
+          <Th>Hạng mục</Th>
+          <Th>REUSE</Th>
+          <Th>IMPORTED</Th>
+          <Th>LOCAL_FREE</Th>
+          <Th>WILL_CREATE</Th>
+          <Th>Chi phí</Th>
+          <Th>Tiết kiệm</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.stage}>
+            <Td className="font-mono text-[11px]">{r.stage}</Td>
+            <Td>{r.reuse || "—"}</Td>
+            <Td>{r.imported || "—"}</Td>
+            <Td>{r.local || "—"}</Td>
+            <Td>{r.create || "—"}</Td>
+            <Td className="font-mono text-[11px]">{formatUSD(r.cost, 6)}</Td>
+            <Td className="font-mono text-[11px] text-ok-500">{r.saved > 0 ? `-${formatUSD(r.saved, 6)}` : "—"}</Td>
+          </tr>
+        ))}
+        <tr>
+          <Td className="font-mono text-[11px] font-semibold">TỔNG</Td>
+          <Td colSpan={4} className="text-[11px] text-ink-500">
+            Chi phí tăng thêm = tổng dự toán; tiết kiệm chỉ tính asset thật sự không mua lại.
+          </Td>
+          <Td className="font-mono text-[11px] font-semibold">{formatUSD(video.estimatedCost, 6)}</Td>
+          <Td className="font-mono text-[11px] font-semibold text-ok-500">
+            {video.savings.total > 0 ? `-${formatUSD(video.savings.total, 6)}` : "—"}
+          </Td>
+        </tr>
+      </tbody>
+    </Table>
+  );
 }
 
 function readinessTone(readiness: string): "ok" | "warn" | "danger" {
@@ -199,9 +312,10 @@ function VideoBlock({ video, onUpdate }: { video: ImportVideoPreview; onUpdate?:
         <Alert tone="warn">
           Đây là <strong>một bản nhập MỚI</strong> của storyboard đã từng nhập (
           {video.duplicateOf.map((d) => d.title).join(", ")}) — nội dung giống hệt, dấu vân
-          tay <code className="font-mono text-[11px]">{video.importFingerprint}</code>. Hệ
-          thống <strong>không</strong> giả vờ dùng lại video cũ: đây là một video riêng, sẽ
-          tốn tiền riêng. Nhân vật và ảnh tham chiếu thì vẫn dùng chung, không nhân đôi.
+          tay <code className="font-mono text-[11px]">{video.importFingerprint}</code>. Đây là
+          một video riêng (render và output riêng), nhưng asset <strong>giống hệt</strong> đã
+          có — ảnh, clip Video AI, giọng cùng đầu vào — được dùng lại ở $0 và hiện là REUSE
+          bên dưới. Chỉ phần thật sự khác mới là WILL CREATE.
         </Alert>
       ) : null}
 
@@ -276,16 +390,13 @@ function VideoBlock({ video, onUpdate }: { video: ImportVideoPreview; onUpdate?:
                 <Badge tone={IMAGE_SOURCE_TONE[s.imageSource]}>{s.imageSource}</Badge>
               </Td>
               <Td>
-                <PlanBadge plan={s.plan.image} />
+                <AssetCell s={s} kind="image" />
               </Td>
               <Td>
-                <PlanBadge
-                  plan={s.plan.video}
-                  freeLabel={s.motionSource === "LOCAL_MOTION" ? "LOCAL_FREE" : undefined}
-                />
+                <AssetCell s={s} kind="video" />
               </Td>
               <Td>
-                <PlanBadge plan={s.plan.voice} />
+                <AssetCell s={s} kind="voice" />
               </Td>
               <Td className="font-mono text-[11px]">{s.videoModel ?? "—"}</Td>
               <Td>
@@ -302,14 +413,7 @@ function VideoBlock({ video, onUpdate }: { video: ImportVideoPreview; onUpdate?:
         </tbody>
       </Table>
 
-      <div className="grid gap-1 text-xs text-muted-foreground md:grid-cols-3">
-        <div>Text {formatUSD(video.breakdown.text)}</div>
-        <div>Image {formatUSD(video.breakdown.image)}</div>
-        <div>Video {formatUSD(video.breakdown.video)}</div>
-        <div>Voice {formatUSD(video.breakdown.voice)}</div>
-        <div>Render {formatUSD(video.breakdown.render)} (FFmpeg tại máy)</div>
-        <div>Chấm chất lượng {formatUSD(video.breakdown.quality)}</div>
-      </div>
+      <StageTable video={video} />
 
       {video.warnings.map((w) => (
         <Alert key={w} tone="warn">
@@ -331,6 +435,35 @@ const IMAGE_SOURCE_TONE: Record<
   NONE: "neutral",
   MISSING: "danger",
 };
+
+/**
+ * X - Y = Z, exactly: what the runnable videos would cost if every asset were
+ * bought new, what reuse and imported pictures keep in the wallet, and what
+ * this run really adds. Only assets that will really not be bought count as
+ * saved - LOCAL_MOTION is free compute, not a saving.
+ */
+export function SavingsSummary({ preflight }: { preflight: Pick<ImportPreflight, "savings" | "ifCreatedNew" | "estimatedTotal"> }) {
+  const sv = preflight.savings;
+  return (
+    <div className="rounded-lg border border-ok-500/40 bg-ok-500/5 p-3">
+      <h4 className="mb-2 text-sm font-medium">Tái sử dụng — tiết kiệm</h4>
+      <div className="grid gap-1 font-mono text-xs md:grid-cols-3">
+        <div>
+          TỔNG DỰ TOÁN NẾU TẠO MỚI: <strong>{formatUSD(preflight.ifCreatedNew, 6)}</strong>
+        </div>
+        <div className="text-ok-500">
+          TÁI SỬ DỤNG / IMPORTED TIẾT KIỆM: <strong>-{formatUSD(sv.total, 6)}</strong>
+        </div>
+        <div>
+          CHI PHÍ TĂNG THÊM THỰC TẾ: <strong>{formatUSD(preflight.estimatedTotal, 6)}</strong>
+        </div>
+        <div className="text-ink-400">ảnh -{formatUSD(sv.image, 6)}</div>
+        <div className="text-ink-400">clip -{formatUSD(sv.video, 6)}</div>
+        <div className="text-ink-400">giọng -{formatUSD(sv.voice, 6)}</div>
+      </div>
+    </div>
+  );
+}
 
 export function PreflightPanel({
   preflight,
@@ -363,6 +496,9 @@ export function PreflightPanel({
         {preflight.videos.map((v) => (
           <VideoBlock key={v.projectId} video={v} onUpdate={onUpdate} />
         ))}
+
+        {/* ---- what reuse keeps in the wallet (QĐ-112) ---- */}
+        <SavingsSummary preflight={preflight} />
 
         {/* ---- images first: the purchase an import exists to avoid ---- */}
         <div className="rounded-lg border border-ink-800 p-3">

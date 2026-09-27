@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-27 (Phase 3 UI check PASS + đóng băng model đã duyệt qua resume QĐ-111, $0; READY cho Phase 4 — chờ duyệt)
+**Cập nhật:** 2026-09-27 (V1.2 Phase 4 — tái sử dụng asset xuyên cảnh/dự án, QĐ-112, $0; READY cho Phase 5 — chờ duyệt)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,17 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.2 PHASE 4 — ASSET REUSE / CHI PHÍ TĂNG THÊM (2026-09-27, $0, không POST trả phí) — QĐ-112
+
+Khoá tái sử dụng `reuse:v1:<kind>:<sha256>` (một hàm), hash nội dung cho mọi file, engine 3 tầng
+(cảnh → dự án → toàn cục, chính sách `assetReuseScope` mặc định GLOBAL), hardlink khi dùng xuyên dự án, khoá tạo
+chống mua trùng, NEEDS_RECOVERY dùng chung theo `ProviderJob.reuseKey`, vô hiệu hoá theo phụ thuộc, cache đoạn
+LOCAL_MOTION. Preflight: badge IMPORTED/REUSE/LOCAL/WILL CREATE/MISSING/INVALID + bảng theo hạng mục + tóm tắt
+"nếu tạo mới − tiết kiệm = tăng thêm". Nhập lại cùng storyboard: 0 POST ảnh/clip/giọng.
+Migration 20260927000000_asset_reuse_keys ĐÃ ÁP (sao lưu backups/app-before-asset-reuse-keys-20260927-202748.db);
+sổ production 116 Asset · 156 ProviderJob · 193 CostEntry · 57 reservation · $8.413060 / $8.50 — không đổi.
+Bộ đầy đủ 65/65 file · 1330/1330 test.
 
 ## ✅ PHASE 3 UI CHECK + MODEL FREEZE (2026-09-27, $0, không POST trả phí) — QĐ-111
 

@@ -596,7 +596,7 @@ export async function validateImport(scan: ScanResult): Promise<ValidationResult
           issue(
             "warning",
             "image_will_be_generated",
-            "Cảnh không có image_file nên keyframe sẽ được tạo bằng Image AI (có tính phí) sau khi bạn duyệt.",
+            "Cảnh không có image_file nên keyframe sẽ được tạo bằng Image AI (có tính phí) sau khi bạn duyệt — trừ khi đã có ảnh giống hệt (khi đó là REUSE, $0; xem dự toán).",
             at,
           ),
         );

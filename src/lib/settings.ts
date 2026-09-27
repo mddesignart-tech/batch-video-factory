@@ -24,6 +24,16 @@ export interface AppSettings {
    * Null = no scene cap (only the video / batch / global limits apply).
    */
   defaultMaxCostVideoAiScene: number | null;
+  /**
+   * How far an identical, already-paid asset may be reused (QĐ-112):
+   *   GLOBAL   any scene of any project (default - importing the same storyboard
+   *            again buys nothing it already has)
+   *   PROJECT  only within the same video
+   *   SCENE    only the scene's own assets (the pre-Phase-4 behaviour)
+   * `ASSET_REUSE_SCOPE` in the environment overrides it (the test suite runs
+   * SCENE so its files, which share one database, stay independent).
+   */
+  assetReuseScope: "GLOBAL" | "PROJECT" | "SCENE";
   jobConcurrency: number;
   workerEnabled: boolean;
   cleanupTempDays: number;
@@ -55,6 +65,7 @@ export function defaultSettings(): AppSettings {
     defaultMaxBudget: 10,
     defaultMaxCostPerVideo: 1.5,
     defaultMaxCostVideoAiScene: null,
+    assetReuseScope: "GLOBAL",
     jobConcurrency: e.JOB_CONCURRENCY,
     workerEnabled: e.JOB_WORKER_ENABLED,
     cleanupTempDays: e.CLEANUP_TEMP_DAYS,

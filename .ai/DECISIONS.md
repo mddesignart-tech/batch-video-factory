@@ -3133,3 +3133,71 @@ data/app.db và ngoài Mock Mode.
 
 Test: tests/model-freeze.test.ts (14, gồm kiểm dòng thoại không bị ghi khi render lại). $0, không POST
 trả phí, sổ production không đổi.
+
+## QĐ-112 — Tái sử dụng asset xuyên cảnh / dự án và chi phí tăng thêm (V1.2 Phase 4)
+
+**Khoá tái sử dụng (một hàm, có phiên bản):** `buildAssetReuseKey` (`src/domain/asset-reuse-key.ts`) →
+`reuse:v1:<kind>:<sha256 JSON chuẩn tắc>`. Chỉ các trường làm đổi OUTPUT; không có project/scene/batch/thời
+gian. Đổi thuật toán = tăng `REUSE_KEY_VERSION` (không khớp nhầm khoá cũ). Chuẩn hoá NHẸ: xuống dòng + khoảng
+trắng; giữ dấu câu, hoa/thường ("Hello!" ≠ "Hello?").
+- IMAGE: provider, model, prompt ĐÃ GHÉP (từ visual_description + character_action; image_prompt chỉ khi hai
+  trường kia trống), negative, kích thước, seed, hash NỘI DUNG ảnh tham chiếu (theo thứ tự gửi), `Tên@version`
+  nhân vật.
+- VIDEO: provider, model, prompt video (đã qua guardrail), thời lượng, kích thước, fps, hash NỘI DUNG keyframe
+  (null = text-to-video).
+- VOICE: provider, model, lời NÓI (không phải phụ đề), voiceId, instructions, speed, accent; `targetDuration`
+  chỉ với provider mock (adapter thật không dùng nó).
+- LOCAL_MOTION: danh sách tham số FFmpeg với mọi file đầu vào thay bằng hash nội dung (`src/media/segment-cache.ts`).
+Hàm dựng khoá dùng chung cho sinh media và preflight: `src/services/asset-keys.ts`.
+
+**Hash nội dung:** `src/services/asset-content.ts` — sha256 (nhớ đệm theo path+size+mtime), size, MIME, rộng/cao,
+thời lượng (ffprobe). Danh tính = nội dung, không phải tên file. Asset mới lưu sha256/size/mime/dims/duration
+SAU khi xử lý (giọng: sau chuẩn hoá âm lượng). Giọng tái dùng qua idempotency KHÔNG chuẩn hoá lại nữa (trước đây
+ghi đè file mỗi lần resume → hash đổi).
+
+**Engine** (`src/services/asset-reuse.ts`): tầng SAME_SCENE → SAME_PROJECT → GLOBAL. Chỉ dùng lại khi: cùng khoá,
+completed, validity VALID, file còn, >0 byte, hash khớp. File mất → MISSING_LOCAL_FILE; byte đổi → INVALID (ghi
+lên dòng Asset lúc chạy; preflight chỉ đọc). Không bao giờ dùng lại "mù".
+**Chính sách phạm vi** (Settings `assetReuseScope`, ghi đè bằng env `ASSET_REUSE_SCOPE`): GLOBAL (mặc định
+production) · PROJECT · SCENE. Bộ test chạy SCENE (các file dùng chung một DB); test Phase 4 bật GLOBAL.
+
+**Tham chiếu an toàn:** dùng lại = dòng Asset mới `source=REUSED`, `reusedFromAssetId`, cost 0, cùng khoá + sha.
+Cùng dự án: trỏ cùng file. Dự án khác: HARDLINK vào thư mục dự án mới (copy nếu không link được) — xoá/dọn dự án
+A không làm mất file của B. Ảnh nhập trùng nội dung ở dự án khác: hardlink (kiểm hash trước). Gắn lại hai lần →
+vẫn một mapping. Không GC, không xoá file trùng (để phase sau).
+
+**Luồng sinh media:** cảnh có asset có khoá mà đầu vào đổi → không trả lại (vô hiệu hoá theo phụ thuộc). Trước khi
+route: dò model router SẼ chọn nếu không có giới hạn tiền (`reuseByProbe`) — asset giống hệt được gắn $0 kể cả khi
+router sẽ từ chối vì ngân sách; với clip, việc này làm TRƯỚC các lệnh dừng APPROVED_* của QĐ-111 (dùng lại không
+cần duyệt chi). Sau route: `reuseOrCreate` dưới KHOÁ TẠO theo khoá tái dùng (tìm → tạo → ghi Asset trong cùng
+khoá): hai nơi cần cùng asset mới → một người mua, người kia chờ rồi dùng lại. `ProviderJob.reuseKey` (mới): request
+cùng asset đang bay không ai theo dõi / thất bại có thể đã tính tiền ở BẤT KỲ cảnh nào → mọi nơi khác nhận
+`PAID_ASSET_NEEDS_RECOVERY`, không POST lần hai. Idempotency: request mới thêm đuôi khoá (`|rk:`) để đổi đầu vào
+= request mới; request cũ (trước Phase 4) giữ nguyên danh tính (resume/recovery không đổi, không re-key lịch sử).
+
+**Vô hiệu hoá theo phụ thuộc (tự động từ khoá):** mô tả ảnh → ảnh + clip dựng từ ảnh đó (hash keyframe đổi);
+video prompt / camera → chỉ clip; lời thoại → chỉ giọng của dòng đó; chỉ phụ đề → không gì; version nhân vật →
+ảnh sinh ra có nhân vật đó (+ clip của ảnh đó); ảnh nhập và clip của ảnh nhập không đổi.
+
+**Chi phí tăng thêm:** dùng lại = $0 tăng thêm, không qua cổng chi, không reservation, không CostEntry $0 mới;
+CostEntry lịch sử không đổi. Mọi trần (toàn cục/lô/video/cảnh) chỉ thấy phần tăng thêm. Preflight: mỗi cảnh
+`reuseFrom` (IMPORTED/EXISTING/CACHE) + `saved` (giá mua mới theo router, không tính dự phòng) + badge IMPORTED ·
+REUSE · LOCAL · WILL CREATE (model + giá) · MISSING · INVALID; mỗi video bảng TEXT/IMAGE/VIDEO/VOICE/RENDER/
+CHẤM CHẤT LƯỢNG/RETRY RESERVE × REUSE/IMPORTED/LOCAL_FREE/WILL_CREATE; lô: NẾU TẠO MỚI X − TIẾT KIỆM Y =
+TĂNG THÊM Z (khớp 6 chữ số). LOCAL_MOTION là tiết kiệm tính toán, không phải tiền.
+
+**Migration** `20260927000000_asset_reuse_keys`: chỉ ADD COLUMN (Asset: reuseKey, reusedFromAssetId,
+durationSec, validity, validatedAt; ProviderJob: reuseKey) + index. Asset cũ không có khoá → vẫn theo luật
+cùng-cảnh cũ (QĐ-068/072), không được dùng xuyên dự án. ĐÃ ÁP lên data/app.db 2026-09-27 bằng
+`prisma migrate deploy` sau sao lưu `backups/app-before-asset-reuse-keys-20260927-202748.db`; trước/sau:
+Asset 116/116 · ProviderJob 156/156 · CostEntry 193/193 · CostReservation 57/57 · Character 3/3 ·
+chi $8.413060/$8.413060 · cap $8.50/$8.50 · routing không đổi.
+
+**Test cũ cập nhật (đúng ngữ nghĩa, không nới luật):** helper "asset bị mất" nay xoá cả dòng Asset (nếu chỉ xoá
+ProviderJob thì engine đúng ra phải gắn lại asset còn nguyên — yêu cầu T). Test Phase 4:
+tests/asset-reuse.test.ts (22). Bộ đầy đủ 65/65 file · 1330/1330 test, một process. Paid POST = 0.
+
+**QA giao diện (mock, DB nháp data/.ui-qa-p4, `scripts/qa-asset-reuse-ui.ts`):** lô 2 video / 10 cảnh sau một
+lần chạy trước. A (5 ảnh nhập · 4 LOCAL · 1 clip đã có · giọng đã có): $0, 0 POST, REUSE giọng 5 + clip 1.
+B (3 ảnh đã có · 2 ảnh mới · 4 LOCAL · 1 clip mới · giọng đã có): đúng 2 POST ảnh + 1 POST clip. Tóm tắt:
+nếu tạo mới $0.400450 − tiết kiệm $0.253150 = tăng thêm $0.147300 (giá mock).

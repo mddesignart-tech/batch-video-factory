@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-27 — Phase 3 UI check PASS + model freeze (QĐ-111) xong; READY cho Phase 4, CHỜ DUYỆT
+**Cập nhật:** 2026-09-27 — V1.2 Phase 4 (asset reuse, QĐ-112) XONG; READY cho Phase 5, CHỜ DUYỆT
 
 ---
 
@@ -9,8 +9,17 @@
 1. ✅ Nhịp cảnh theo giọng — XONG (Phase 1, QĐ-107).
 2. Nâng hạn mức / kế hoạch chi cho lô có Video AI tiếp theo (còn $0,086940 < 1 clip h3_max $0,40).
 3. Nút TIẾP TỤC / KIỂM TRA LẠI theo từng video COMPLETED (hiện có ở mức lô).
-4. Kiểm REUSE clip thật giữa hai lần nhập cùng storyboard (hiện mỗi lần nhập là video riêng, mua clip riêng).
+4. ✅ REUSE clip giữa hai lần nhập cùng storyboard — XONG (Phase 4, QĐ-112; mock).
 5. Test E2E trình duyệt tự động (Playwright) cho luồng Nhập → DUYỆT & CHẠY → Output, chạy mock.
+
+## ✅ V1.2 Phase 4 COMPLETE — tái sử dụng asset / chi phí tăng thêm (QĐ-112)
+
+- [ ] Còn mở: asset production CŨ (trước Phase 4) không có khoá → chỉ dùng lại trong chính cảnh đó, không xuyên
+      dự án. Backfill khoá cho asset cũ cần bằng chứng tham số (thời lượng, keyframe) — để sau.
+- [ ] Còn mở: GC / dọn file trùng hash (chỉ phát hiện, chưa xoá) — phase sau; cache đoạn LOCAL_MOTION
+      (`data/cache/segments`) chưa có giới hạn dung lượng.
+- [ ] Còn mở (nhỏ): thumbnail của ảnh sẽ được REUSE chưa hiện trong bảng dự toán (cảnh chưa trỏ tới file).
+- [ ] Còn mở (nhỏ): dự toán vẫn cộng "chấm chất lượng" cho cảnh HIGH mà executor lô không chạy.
 
 ## ✅ V1.2 Phase 3 COMPLETE — tiếp tục / khôi phục từng video (QĐ-110)
 

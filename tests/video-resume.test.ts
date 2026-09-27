@@ -119,6 +119,8 @@ async function dropVoice(projectId: string, sceneNumber: number): Promise<void> 
   await prisma.costReservation.deleteMany({ where: { idempotencyKey: { in: keys } } });
   await prisma.providerJob.deleteMany({ where: { sceneId: scene.id, kind: "audio" } });
   await prisma.dialogueLine.updateMany({ where: { sceneId: scene.id }, data: { status: "pending", outputPath: "" } });
+  // Never produced = no Asset row either; otherwise the reuse engine (QĐ-112) re-attaches it at $0.
+  await prisma.asset.deleteMany({ where: { sceneId: scene.id, kind: "audio" } });
   await prisma.scene.update({ where: { id: scene.id }, data: { audioPath: null, status: "image_ready" } });
   await prisma.project.update({ where: { id: projectId }, data: { status: "failed" } });
 }
@@ -127,6 +129,8 @@ async function dropVoice(projectId: string, sceneNumber: number): Promise<void> 
 async function unsettledJob(projectId: string, sceneNumber: number, shape: "failed-charged" | "in-flight" | "failed-released", batchId: string) {
   const scene = await prisma.scene.findFirstOrThrow({ where: { projectId, sceneNumber } });
   await prisma.scene.update({ where: { id: scene.id }, data: { videoPath: null } });
+  // The clip is not held: no Asset row the reuse engine (QĐ-112) could re-attach.
+  await prisma.asset.deleteMany({ where: { sceneId: scene.id, kind: "video" } });
   const key = `synthetic-${randomUUID()}`;
   const job = await prisma.providerJob.create({
     data: {
@@ -275,6 +279,7 @@ describe("mỗi video tự tiếp tục — không chạm video khác", () => {
     const keys = (await prisma.providerJob.findMany({ where: { sceneId: scene.id, kind: "video" } })).map((j) => j.idempotencyKey);
     await prisma.costReservation.deleteMany({ where: { idempotencyKey: { in: keys } } });
     await prisma.providerJob.deleteMany({ where: { sceneId: scene.id, kind: "video" } });
+    await prisma.asset.deleteMany({ where: { sceneId: scene.id, kind: "video" } });
     await prisma.scene.update({ where: { id: scene.id }, data: { videoPath: null, status: "image_ready" } });
     await prisma.project.update({ where: { id: ids.B! }, data: { status: "failed" } });
     const before = await ledger(ids.B!);

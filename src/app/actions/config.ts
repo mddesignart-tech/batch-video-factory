@@ -298,6 +298,7 @@ export async function updateSettings(formData: FormData): Promise<ActionResult> 
     cleanupFailedDays: z.coerce.number().min(1).max(365).optional(),
     maxRetries: z.coerce.number().min(1).max(10).optional(),
     defaultMaxCostPerVideo: z.coerce.number().positive("Trần mỗi video phải > 0.").max(1000).optional(),
+    assetReuseScope: z.enum(["GLOBAL", "PROJECT", "SCENE"]).optional(),
   });
   const raw = Object.fromEntries(formData.entries());
   const parsed = schema.safeParse(raw);

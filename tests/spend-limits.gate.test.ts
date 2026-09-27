@@ -357,6 +357,8 @@ describe("chạy một phần lô — mock, không POST thật", () => {
     // I. One voice missing (as if its file was never produced): only that voice is priced.
     const line = await prisma.dialogueLine.findFirstOrThrow({ where: { scene: { projectId: p } }, orderBy: { lineNumber: "asc" } });
     await prisma.dialogueLine.update({ where: { id: line.id }, data: { status: "pending", outputPath: "" } });
+    // Gone for real: no Asset row either, or the reuse engine (QĐ-112) rightly re-attaches it.
+    await prisma.asset.deleteMany({ where: { sceneId: line.sceneId, kind: "audio" } });
     await prisma.scene.update({ where: { id: line.sceneId }, data: { audioPath: null, status: "image_ready" } });
     await prisma.project.update({ where: { id: p }, data: { status: "media_generating" } });
     const partial = await preflightForApproval(batchId, { resume: true });

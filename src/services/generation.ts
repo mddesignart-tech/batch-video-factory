@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ModelRegistry, Project, Scene } from "@prisma/client";
+import type { Asset, ModelRegistry, Project, Scene } from "@prisma/client";
 import type { AssetKind, ModelType, QualityMode, RouterStrategy } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
@@ -69,6 +69,15 @@ import {
 import { overallQualityScore, QualityReportSchema } from "@/domain/script";
 import { jobPossiblyBilled, RECOVERY_MESSAGE } from "@/services/paid-recovery";
 import { frozenChoicesForBatch, type FrozenCode } from "@/services/frozen-video";
+import { contentInfo } from "@/services/asset-content";
+import {
+  acquireAssetCreationLock,
+  attachReusedAsset,
+  findReusableAsset,
+  validateAssetFile,
+  withAssetCreationLock,
+} from "@/services/asset-reuse";
+import { imageReuseKey, videoReuseKey, voiceReuseKey } from "@/services/asset-keys";
 
 /**
  * Scene media generation.
@@ -318,6 +327,8 @@ interface RunOptions {
   kind: AssetKind | "quality";
   decision: RouteDecision;
   prompt: string;
+  /** The asset this request creates (QĐ-112), recorded on the ProviderJob. */
+  reuseKey?: string;
   /** Extra billable parameters for the idempotency key. See idempotencyKey. */
   variant?: string;
   outputPath: string;
@@ -589,8 +600,10 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
         attempts: (existing?.attempts ?? 0) + 1,
         estimatedCost: decision.estimatedCost,
         previousExternalIds: JSON.stringify(priorIds),
+        reuseKey: opts.reuseKey ?? null,
       },
       update: {
+        ...(opts.reuseKey && !existing?.reuseKey ? { reuseKey: opts.reuseKey } : {}),
         externalId,
         status: "processing",
         requestJson,
@@ -844,12 +857,23 @@ async function saveAsset(opts: {
   decision: RouteDecision;
   prompt: string;
   asset: GeneratedAsset;
+  /** What this asset is (QĐ-112); with it the asset can be found and reused later. */
+  reuseKey?: string;
 }): Promise<void> {
   const { ctx, kind, decision, prompt, asset } = opts;
   // A reuse bought nothing. Recording it again added one Asset row and one $0
   // ledger line per spoken line on EVERY resume - ten per re-run of the first
   // two-video batch - so the ledger grew with each run that cost nothing.
-  if (asset.meta?.reused === true) return;
+  if (asset.meta?.reused === true) {
+    // An earlier purchase handed back by its idempotency key: give its Asset
+    // row the reuse key it was made without, so later scenes can find it. No
+    // new row, no ledger line.
+    if (opts.reuseKey) await adoptReuseKey(ctx, kind, asset.filePath, opts.reuseKey);
+    return;
+  }
+  // Identity is the content: hash, size, type, dimensions and length of the
+  // FINISHED file (after any levelling), never its name.
+  const content = await contentInfo(asset.filePath).catch(() => null);
   await prisma.asset.create({
     data: {
       projectId: ctx.project.id,
@@ -863,7 +887,14 @@ async function saveAsset(opts: {
       estimatedCost: decision.estimatedCost,
       actualCost: asset.actualCost,
       filePath: toRelative(asset.filePath),
-      bytes: asset.bytes,
+      bytes: content?.bytes ?? asset.bytes,
+      sha256: content?.sha256 ?? null,
+      mimeType: content?.mimeType ?? null,
+      width: content?.width ?? null,
+      height: content?.height ?? null,
+      durationSec: content?.durationSec ?? null,
+      reuseKey: content ? (opts.reuseKey ?? null) : null,
+      validatedAt: content ? new Date() : null,
     },
   });
   await recordCost({
@@ -875,6 +906,144 @@ async function saveAsset(opts: {
     model: decision.modelId,
     amount: asset.actualCost,
     isRetry: ctx.scene.retryCount > 0,
+  });
+}
+
+/** Give an existing (pre-key) Asset row for this very file its reuse key. */
+async function adoptReuseKey(ctx: SceneContext, kind: AssetKind, filePath: string, reuseKey: string): Promise<void> {
+  const row = await prisma.asset.findFirst({
+    where: { sceneId: ctx.scene.id, kind, filePath: toRelative(filePath), reuseKey: null, source: "GENERATED" },
+  });
+  if (!row) return;
+  const content = await contentInfo(filePath).catch(() => null);
+  if (!content) return;
+  await prisma.asset.update({
+    where: { id: row.id },
+    data: {
+      reuseKey,
+      sha256: content.sha256,
+      bytes: content.bytes,
+      mimeType: content.mimeType,
+      width: content.width,
+      height: content.height,
+      durationSec: content.durationSec,
+      validatedAt: new Date(),
+    },
+  });
+}
+
+/**
+ * The idempotency variant for a request that carries a reuse key (QĐ-112).
+ *
+ * New requests append the key's tail, so a request whose OUTPUT inputs changed
+ * (a new keyframe under the same prompt, a new character master under the same
+ * prompt, a new voice speed under the same text) is a new request - not the old
+ * finished job handed back. A request that already exists under the old
+ * (pre-key) identity keeps that identity: its resume, recovery and reuse stay
+ * exactly as they were, and production history is never re-keyed.
+ */
+async function keyedVariant(opts: {
+  ctx: SceneContext;
+  kind: AssetKind;
+  decision: Pick<RouteDecision, "provider" | "modelId">;
+  prompt: string;
+  legacyVariant: string;
+  reuseKey: string;
+}): Promise<string> {
+  const legacy = idempotencyKey({
+    sceneId: opts.ctx.scene.id,
+    kind: opts.kind,
+    provider: opts.decision.provider,
+    model: opts.decision.modelId,
+    prompt: opts.prompt,
+    generation: opts.ctx.scene.retryCount,
+    variant: opts.legacyVariant,
+  });
+  const job = await prisma.providerJob.findUnique({ where: { idempotencyKey: legacy }, select: { reuseKey: true } });
+  if (job && !job.reuseKey) return opts.legacyVariant;
+  return `${opts.legacyVariant}|rk:${opts.reuseKey.slice(-16)}`;
+}
+
+/**
+ * Reuse must never need money (QĐ-068, QĐ-112). The router refuses - or
+ * downgrades - on budget, so before the real route this asks it which model it
+ * would pick with no money limit at all; if an identical asset already exists
+ * for THAT model, it is attached at $0. The preflight asks the same question
+ * (priceOnly route in planScene), so both agree on what is reused.
+ */
+async function reuseByProbe(opts: {
+  ctx: SceneContext;
+  route: (ctx: SceneContext) => RouteDecision;
+  keyFor: (provider: string, model: string) => string;
+}): Promise<{ absolutePath: string; asset: Asset } | null> {
+  let probe: RouteDecision;
+  try {
+    probe = opts.route({ ...opts.ctx, budgetRemaining: Number.MAX_SAFE_INTEGER });
+  } catch {
+    return null;
+  }
+  const found = await findReusableAsset({
+    reuseKey: opts.keyFor(probe.provider, probe.modelId),
+    sceneId: opts.ctx.scene.id,
+    projectId: opts.ctx.project.id,
+  });
+  if (found.status !== "REUSE") return null;
+  const attached = await attachReusedAsset({
+    source: found.asset,
+    projectId: opts.ctx.project.id,
+    sceneId: opts.ctx.scene.id,
+    scope: found.scope,
+  });
+  return { absolutePath: attached.absolutePath, asset: attached.asset };
+}
+
+/** The LOW_AUTO facts with every MONEY condition lifted - for a reuse probe only. */
+function withoutMoney<T extends { providerBudgets: Record<string, number | null>; perVideoCapRemaining: number | null }>(facts: T): T {
+  return { ...facts, providerBudgets: {}, perVideoCapRemaining: null };
+}
+
+/**
+ * Reuse before purchase (QĐ-112). Under the creation lock for this key: an
+ * asset that already exists anywhere (scene, project, another project) and
+ * still verifies is attached at $0; a request for the same asset whose outcome
+ * is unknown blocks (NEEDS_RECOVERY) - no second paid request from any scene;
+ * only otherwise does `create` run. A second caller for the same key waits for
+ * the first and then finds its asset.
+ */
+async function reuseOrCreate<T>(opts: {
+  ctx: SceneContext;
+  kind: AssetKind;
+  reuseKey: string;
+  provider: string;
+  create: () => Promise<T>;
+}): Promise<{ reused: { absolutePath: string; asset: Asset } } | { created: T }> {
+  return withAssetCreationLock(opts.reuseKey, async () => {
+    const found = await findReusableAsset({
+      reuseKey: opts.reuseKey,
+      sceneId: opts.ctx.scene.id,
+      projectId: opts.ctx.project.id,
+      mark: true,
+      holdingLock: true,
+    });
+    if (found.status === "REUSE") {
+      const attached = await attachReusedAsset({
+        source: found.asset,
+        projectId: opts.ctx.project.id,
+        sceneId: opts.ctx.scene.id,
+        scope: found.scope,
+      });
+      return { reused: { absolutePath: attached.absolutePath, asset: attached.asset } };
+    }
+    if (found.status === "NEEDS_RECOVERY" || found.status === "IN_PROGRESS") {
+      throw new ProviderError(
+        `PAID_ASSET_NEEDS_RECOVERY: ${found.status === "NEEDS_RECOVERY" ? found.reason : "asset này đang được tạo ở nơi khác."} ` +
+          `Không gửi request thứ hai cho cùng asset (${opts.kind}).`,
+        opts.provider,
+        false,
+        "PAID_ASSET_NEEDS_RECOVERY",
+      );
+    }
+    return { created: await opts.create() };
   });
 }
 
@@ -967,7 +1136,50 @@ export async function generateSceneImage(
   // for. The test is the FILE plus a settled paid job for this scene - not the
   // prompt hash, which moves whenever a guardrail is improved and would make
   // every finished scene look unbought. QĐ-072.
-  if (!opts.force && scene.imagePath && fs.existsSync(toAbsolute(scene.imagePath))) {
+  // What this scene's picture IS, as a request (QĐ-112). Built before the
+  // same-scene check: a keyed image whose inputs changed (prompt, references,
+  // size, seed) is no longer this scene's picture, and must not be handed back.
+  const target = targetForAspect(project.aspectRatio);
+  const shot = await buildSceneImageRequest(scene, project.stylePresetId);
+  const seed = shot.characters.length === 1 ? (shot.characters[0]?.seed ?? undefined) : undefined;
+  const keyFor = (provider: string, model: string) =>
+    imageReuseKey({
+      provider,
+      model,
+      prompt: shot.prompt,
+      negativePrompt: shot.negativePrompt,
+      target,
+      seed,
+      referenceImages: shot.referenceImages,
+      characters: shot.characters,
+    });
+  const keyed = opts.force
+    ? null
+    : await prisma.asset.findFirst({
+        where: { sceneId: scene.id, kind: "image", status: "completed", reuseKey: { not: null }, source: { in: ["GENERATED", "REUSED"] } },
+        orderBy: { createdAt: "desc" },
+      });
+  if (keyed) {
+    if (keyed.reuseKey === keyFor(keyed.provider, keyed.model) && validateAssetFile(keyed) === "VALID") {
+      if (scene.imagePath !== keyed.filePath) {
+        await prisma.scene.update({
+          where: { id: scene.id },
+          data: { imagePath: keyed.filePath, imageProvider: keyed.provider, imageModel: keyed.model, status: "image_ready", errorMessage: null },
+        });
+      }
+      await logger.info({
+        event: "provider.job.reused",
+        provider: keyed.provider,
+        model: keyed.model,
+        projectId: project.id,
+        sceneId: scene.id,
+        message: `Cảnh ${scene.sceneNumber} đã có đúng ảnh này (khoá tái sử dụng khớp), dùng lại. Chi phí ảnh: $0,00.`,
+      });
+      return toAbsolute(keyed.filePath);
+    }
+    // Inputs changed since that picture was made (or its file is gone): it is
+    // no longer this scene's image. Fall through - reuse by key, else buy.
+  } else if (!opts.force && scene.imagePath && fs.existsSync(toAbsolute(scene.imagePath))) {
     const paid = await prisma.providerJob.findFirst({
       where: { sceneId: scene.id, kind: "image", status: "completed" },
     });
@@ -986,17 +1198,46 @@ export async function generateSceneImage(
     }
   }
 
-  const decision = routeFor(ctx, "image", { images: 1, jobs: 1 }, {
-    provider: scene.imageProvider,
-    model: scene.imageModel,
-  });
-  const target = targetForAspect(project.aspectRatio);
+  // A named model is known before routing: an identical picture that already
+  // exists (this project or another) is attached at $0 even when the router
+  // would refuse on budget - reuse must never need money (QĐ-068).
+  if (!opts.force && scene.imageProvider && scene.imageModel) {
+    const early = await findReusableAsset({
+      reuseKey: keyFor(scene.imageProvider, scene.imageModel),
+      sceneId: scene.id,
+      projectId: project.id,
+    });
+    if (early.status === "REUSE") {
+      const attached = await attachReusedAsset({ source: early.asset, projectId: project.id, sceneId: scene.id, scope: early.scope });
+      await prisma.scene.update({
+        where: { id: scene.id },
+        data: { imagePath: toRelative(attached.absolutePath), imageProvider: early.asset.provider, imageModel: early.asset.model, status: "image_ready", errorMessage: null },
+      });
+      return attached.absolutePath;
+    }
+  }
+
+  const routeImage = (c: SceneContext) =>
+    routeFor(c, "image", { images: 1, jobs: 1 }, {
+      provider: scene.imageProvider,
+      model: scene.imageModel,
+    });
+  if (!opts.force) {
+    const probed = await reuseByProbe({ ctx, route: routeImage, keyFor });
+    if (probed) {
+      await prisma.scene.update({
+        where: { id: scene.id },
+        data: { imagePath: toRelative(probed.absolutePath), imageProvider: probed.asset.provider, imageModel: probed.asset.model, status: "image_ready", errorMessage: null },
+      });
+      return probed.absolutePath;
+    }
+  }
+  const decision = routeImage(ctx);
   const outputPath = path.join(
     projectSubdir(project.id, "images"),
     uuidFilename(".png"),
   );
 
-  const shot = await buildSceneImageRequest(scene, project.stylePresetId);
   for (const clash of shot.contradictions) {
     // WARN, and before anything is generated: this is the moment two records of
     // what the picture should be were found to disagree. An unresolved one is
@@ -1023,13 +1264,23 @@ export async function generateSceneImage(
     });
   }
 
-  const { result, used } = await withFallback(ctx, decision, async (d) => {
+  // The purchase AND its Asset row happen inside the creation lock, so a second
+  // caller for the same picture finds the row the moment it gets the lock.
+  const makeImage = async () => {
+    const made = await buyImage();
+    await saveAsset({ ctx, kind: "image", decision: made.used, prompt: shot.prompt, asset: made.result, reuseKey: keyFor(made.used.provider, made.used.modelId) });
+    return made;
+  };
+  const buyImage = () => withFallback(ctx, decision, async (d) => {
     const provider = await getImageProvider(d.provider, d.modelId);
+    const reuseKey = keyFor(d.provider, d.modelId);
     return runProviderJob({
       ctx,
       kind: "image",
       decision: d,
       prompt: shot.prompt,
+      reuseKey,
+      variant: await keyedVariant({ ctx, kind: "image", decision: d, prompt: shot.prompt, legacyVariant: "", reuseKey }),
       outputPath,
       create: async () =>
         provider.createImage({
@@ -1055,7 +1306,26 @@ export async function generateSceneImage(
     });
   });
 
-  await saveAsset({ ctx, kind: "image", decision: used, prompt: shot.prompt, asset: result });
+  // An explicit regenerate (force) wants a NEW picture, so it skips reuse.
+  const outcome = opts.force
+    ? { created: await makeImage() }
+    : await reuseOrCreate({
+        ctx,
+        kind: "image",
+        reuseKey: keyFor(decision.provider, decision.modelId),
+        provider: decision.provider,
+        create: makeImage,
+      });
+  if ("reused" in outcome) {
+    const { absolutePath, asset } = outcome.reused;
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: { imagePath: toRelative(absolutePath), imageProvider: asset.provider, imageModel: asset.model, status: "image_ready", errorMessage: null },
+    });
+    return absolutePath;
+  }
+  const { result, used } = outcome.created;
+
   await prisma.scene.update({
     where: { id: scene.id },
     data: {
@@ -1590,7 +1860,49 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
   // the prompt as it would be sent now, the duration, and `retryCount`. So a
   // deliberate retry - which bumps `retryCount` - produces a different key, does
   // not match, and goes on to buy a new clip as intended.
-  if (scene.videoPath && scene.videoProvider && scene.videoModel) {
+  //
+  // A clip made since QĐ-112 carries its reuse key, which includes the
+  // keyframe's CONTENT: it is handed back only while prompt, model, duration,
+  // size and the keyframe itself are unchanged. A new picture under the same
+  // prompt is a new keyframe hash, so the old clip no longer belongs to this
+  // scene (dependency invalidation). Clips from before the key keep the rule
+  // below unchanged.
+  const clipTarget = targetForAspect(project.aspectRatio);
+  const keyframeFile = scene.imagePath
+    ? path.join(projectSubdir(project.id, "images"), path.basename(scene.imagePath))
+    : undefined;
+  const clipKeyFor = (provider: string, model: string) =>
+    videoReuseKey({
+      provider,
+      model,
+      prompt: videoPrompt,
+      durationSeconds: scene.duration,
+      target: clipTarget,
+      keyframe: keyframeFile ? { path: keyframeFile } : { hash: null },
+    });
+  const keyedClip = await prisma.asset.findFirst({
+    where: { sceneId: scene.id, kind: "video", status: "completed", reuseKey: { not: null }, source: { in: ["GENERATED", "REUSED"] } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (keyedClip) {
+    if (keyedClip.reuseKey === clipKeyFor(keyedClip.provider, keyedClip.model) && validateAssetFile(keyedClip) === "VALID") {
+      if (scene.videoPath !== keyedClip.filePath) {
+        await prisma.scene.update({
+          where: { id: scene.id },
+          data: { videoPath: keyedClip.filePath, videoProvider: keyedClip.provider, videoModel: keyedClip.model, status: "video_ready", errorMessage: null },
+        });
+      }
+      await logger.info({
+        event: "provider.job.reused",
+        provider: keyedClip.provider,
+        model: keyedClip.model,
+        projectId: project.id,
+        sceneId: scene.id,
+        message: `Cảnh ${scene.sceneNumber} đã có đúng clip này (khoá tái sử dụng khớp), dùng lại, không định tuyến lại.`,
+      });
+      return toAbsolute(keyedClip.filePath);
+    }
+  } else if (scene.videoPath && scene.videoProvider && scene.videoModel) {
     const settledKey = idempotencyKey({
       sceneId: scene.id,
       kind: "video",
@@ -1642,6 +1954,28 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
   }
 
   const videoPinned = isOperatorVideoPin(scene);
+
+  // An identical clip that already exists - this scene, this project or
+  // another - costs nothing to use, so it needs no approval and no money:
+  // checked for the model(s) already known (the approved one, a pin) BEFORE
+  // routing and before any stop that exists to protect a purchase (QĐ-112).
+  const frozenForReuse = (await frozenChoicesForBatch(project.batchId))?.[scene.id] ?? null;
+  const knownModels = [
+    frozenForReuse ? `${frozenForReuse.provider}/${frozenForReuse.model}` : null,
+    videoPinned ? `${scene.videoProvider}/${scene.videoModel}` : null,
+  ].filter((k, i, all): k is string => Boolean(k) && all.indexOf(k) === i);
+  for (const known of knownModels) {
+    const [provider, ...rest] = known.split("/");
+    const early = await findReusableAsset({ reuseKey: clipKeyFor(provider!, rest.join("/")), sceneId: scene.id, projectId: project.id });
+    if (early.status !== "REUSE") continue;
+    const attached = await attachReusedAsset({ source: early.asset, projectId: project.id, sceneId: scene.id, scope: early.scope });
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: { videoPath: toRelative(attached.absolutePath), videoProvider: early.asset.provider, videoModel: early.asset.model, status: "video_ready", errorMessage: null },
+    });
+    return attached.absolutePath;
+  }
+
   // The scene facts a LOW_AUTO candidate is judged against. VIDEO stage: this
   // is the call that spends, so a keyframe that is merely expected later is a
   // keyframe that does not exist.
@@ -1668,6 +2002,31 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
       false,
     );
   };
+  // Nothing approved for this scene, but an identical clip may already exist
+  // for the model the router would pick: using it buys nothing, so it needs no
+  // approval - checked BEFORE any stop that exists to protect a purchase.
+  if (!frozen) {
+    const probed = await reuseByProbe({
+      ctx,
+      route: (c) =>
+        routeFor(
+          c,
+          "video",
+          { seconds: scene.duration, jobs: 1 },
+          videoPinned ? { provider: scene.videoProvider, model: scene.videoModel } : { provider: null, model: null },
+          withoutMoney(lowAutoFacts),
+          videoPinned ? "MANUAL" : "AUTO",
+        ),
+      keyFor: clipKeyFor,
+    });
+    if (probed) {
+      await prisma.scene.update({
+        where: { id: scene.id },
+        data: { videoPath: toRelative(probed.absolutePath), videoProvider: probed.asset.provider, videoModel: probed.asset.model, status: "video_ready", errorMessage: null },
+      });
+      return probed.absolutePath;
+    }
+  }
   if (frozenMap && !frozen) {
     stop("APPROVED_MODEL_MISSING", "quyền chi của lô không có model video nào được duyệt cho cảnh này.");
   }
@@ -1727,37 +2086,44 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
       message: `Cảnh ${scene.sceneNumber}: dùng đúng model đã duyệt ${approvedKey} (${frozen.pinned ? "ghim tay" : "LOW_AUTO/đã chốt"}), không định tuyến lại.`,
     });
   } else {
-    decision = routeFor(
-      ctx,
-      "video",
-      { seconds: scene.duration, jobs: 1 },
-      videoPinned
-        ? { provider: scene.videoProvider, model: scene.videoModel }
-        : { provider: null, model: null },
-      lowAutoFacts,
-      videoPinned ? "MANUAL" : "AUTO",
-    );
+    const routeClip = (c: SceneContext, facts: typeof lowAutoFacts) =>
+      routeFor(
+        c,
+        "video",
+        { seconds: scene.duration, jobs: 1 },
+        videoPinned
+          ? { provider: scene.videoProvider, model: scene.videoModel }
+          : { provider: null, model: null },
+        facts,
+        videoPinned ? "MANUAL" : "AUTO",
+      );
+    decision = routeClip(ctx, lowAutoFacts);
   }
-  const target = targetForAspect(project.aspectRatio);
+  const target = clipTarget;
   const outputPath = path.join(
     projectSubdir(project.id, "videos"),
     uuidFilename(".mp4"),
   );
-  const keyframe = scene.imagePath
-    ? path.join(projectSubdir(project.id, "images"), path.basename(scene.imagePath))
-    : undefined;
+  const keyframe = keyframeFile;
 
-  const { result, used } = await withFallback(ctx, decision, async (d) => {
+  const makeClip = async () => {
+    const made = await buyClip();
+    await saveAsset({ ctx, kind: "video", decision: made.used, prompt: videoPrompt, asset: made.result, reuseKey: clipKeyFor(made.used.provider, made.used.modelId) });
+    return made;
+  };
+  const buyClip = () => withFallback(ctx, decision, async (d) => {
     const provider = await getVideoProvider(d.provider, d.modelId);
+    const reuseKey = clipKeyFor(d.provider, d.modelId);
     return runProviderJob({
       ctx,
       kind: "video",
       decision: d,
       prompt: videoPrompt,
+      reuseKey,
       // Duration is billable and is not implied by the model id, so it has to
       // be part of the key: a 5s and a 10s clip of the same scene are two
       // different purchases, not one job to resume.
-      variant: videoKeyVariant(scene),
+      variant: await keyedVariant({ ctx, kind: "video", decision: d, prompt: videoPrompt, legacyVariant: videoKeyVariant(scene), reuseKey }),
       outputPath,
       create: async () =>
         provider.createVideo({
@@ -1778,7 +2144,23 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
     });
   });
 
-  await saveAsset({ ctx, kind: "video", decision: used, prompt: videoPrompt, asset: result });
+  const clipOutcome = await reuseOrCreate({
+    ctx,
+    kind: "video",
+    reuseKey: clipKeyFor(decision.provider, decision.modelId),
+    provider: decision.provider,
+    create: makeClip,
+  });
+  if ("reused" in clipOutcome) {
+    const { absolutePath, asset } = clipOutcome.reused;
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: { videoPath: toRelative(absolutePath), videoProvider: asset.provider, videoModel: asset.model, status: "video_ready", errorMessage: null },
+    });
+    return absolutePath;
+  }
+  const { result, used } = clipOutcome.created;
+
   await prisma.scene.update({
     where: { id: scene.id },
     data: {
@@ -1812,7 +2194,7 @@ function stripSpeakerLabel(line: string): string {
  * which is what lets an operator switch a character to ElevenLabs later
  * without a deploy.
  */
-async function voiceSettingsFor(
+export async function voiceSettingsFor(
   speaker: string,
 ): Promise<{
   characterId: string | null;
@@ -1869,12 +2251,35 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
   for (const line of lines) {
     const settings = await voiceSettingsFor(line.speaker);
 
-    const decision = routeFor(
-      ctx,
-      "voice",
-      { characters: line.text.length, jobs: 1 },
-      { provider: settings.provider, model: settings.model },
-    );
+    const routeLine = (c: SceneContext) =>
+      routeFor(
+        c,
+        "voice",
+        { characters: line.text.length, jobs: 1 },
+        { provider: settings.provider, model: settings.model },
+      );
+    // Budget-free probe first (see reuseByProbe): an identical line that exists
+    // is attached even when the router would refuse this line on money.
+    let decision: RouteDecision;
+    try {
+      decision = routeLine(ctx);
+    } catch (err) {
+      if (!(err instanceof RoutingError) || err.code !== "over_budget") throw err;
+      decision = routeLine({ ...ctx, budgetRemaining: Number.MAX_SAFE_INTEGER });
+      const blocked = err;
+      const probeKey = voiceReuseKey({
+        provider: decision.provider,
+        model: decision.modelId,
+        text: line.text,
+        voiceId: settings.voiceId,
+        instructions: settings.instructions,
+        speed: settings.speed,
+        accent: settings.accent,
+        targetDuration: scene.duration,
+      });
+      const found = await findReusableAsset({ reuseKey: probeKey, sceneId: scene.id, projectId: project.id });
+      if (found.status !== "REUSE") throw blocked;
+    }
 
     // A line that is already DONE - same words, same voice, same model, file
     // still on disk - is handed back untouched: no upsert, no re-levelling, no
@@ -1883,6 +2288,17 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
     // browser check: an SQLite socket timeout under load) the catch below marked
     // a finished, paid-for line "failed", and a $0 render-only video turned
     // into one that asked to buy its voice again.
+    const lineKeyFor = (provider: string, model: string) =>
+      voiceReuseKey({
+        provider,
+        model,
+        text: line.text,
+        voiceId: settings.voiceId,
+        instructions: settings.instructions,
+        speed: settings.speed,
+        accent: settings.accent,
+        targetDuration: scene.duration,
+      });
     const done = await prisma.dialogueLine.findUnique({
       where: { sceneId_lineNumber: { sceneId: scene.id, lineNumber: line.lineNumber } },
     });
@@ -1893,143 +2309,215 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
       done.provider === decision.provider &&
       done.model === decision.modelId &&
       done.outputPath &&
-      fileOnDiskSafe(done.outputPath)
+      fileOnDiskSafe(done.outputPath) &&
+      // A keyed file must still be THIS line's audio (speed, instructions,
+      // accent are not on the row); a pre-key file keeps the rule above.
+      (await lineAssetMatches(scene.id, done.outputPath, lineKeyFor(decision.provider, decision.modelId)))
     ) {
       written.push(toAbsolute(done.outputPath));
       continue;
     }
 
-    const outputPath = path.join(
-      projectSubdir(project.id, "audio"),
-      uuidFilename(extensionForVoice(decision.provider)),
-    );
-
-    // The row exists BEFORE the call, so a crash mid-generation leaves a line
-    // marked pending rather than no trace that the work was attempted.
-    const row = await prisma.dialogueLine.upsert({
-      where: { sceneId_lineNumber: { sceneId: scene.id, lineNumber: line.lineNumber } },
-      create: {
-        sceneId: scene.id,
-        characterId: settings.characterId,
-        lineNumber: line.lineNumber,
-        text: line.text,
-        provider: decision.provider,
-        model: decision.modelId,
-        voiceId: settings.voiceId,
-        instructions: settings.instructions,
-        speed: settings.speed,
-        estimatedCost: decision.estimatedCost,
-        status: "processing",
-      },
-      update: {
-        characterId: settings.characterId,
-        text: line.text,
-        provider: decision.provider,
-        model: decision.modelId,
-        voiceId: settings.voiceId,
-        instructions: settings.instructions,
-        speed: settings.speed,
-        estimatedCost: decision.estimatedCost,
-        status: "processing",
-        error: "",
-      },
-    });
-
+    // The same spoken line, same voice and settings, already exists - on this
+    // scene, elsewhere in the project, or in another project: attach it at $0
+    // (QĐ-112). The row is written straight to its finished state.
+    // Held from the lookup to the end of the purchase: a second caller for the
+    // same line waits, then finds this one's audio instead of buying it again.
+    const lineKey = lineKeyFor(decision.provider, decision.modelId);
+    const releaseLine = await acquireAssetCreationLock(lineKey);
     try {
-      const { result, used } = await withFallback(ctx, decision, async (d) => {
-        const provider = await getVoiceProvider(d.provider, d.modelId);
-        return runProviderJob({
-          ctx,
-          kind: "audio",
-          decision: d,
-          prompt: line.text,
-          // Two lines in one scene differ by speaker and wording, and both are
-          // billable, so both belong in the key.
-          variant: `line${line.lineNumber}:${settings.voiceId}`,
-          outputPath,
-          create: async () =>
-            provider.createVoice({
-              projectId: project.id,
-              sceneId: scene.id,
-              model: d.modelId,
-              text: line.text,
-              voiceId: settings.voiceId,
-              instructions: settings.instructions,
-              accent: settings.accent,
-              gender: settings.gender,
-              speed: settings.speed,
-              targetDuration: scene.duration,
-              outputPath,
-            }),
-          poll: (id) => provider.getJobStatus(id),
-          download: (id) => provider.downloadResult(id),
+      const found = await findReusableAsset({ reuseKey: lineKey, sceneId: scene.id, projectId: project.id, mark: true, holdingLock: true });
+      if (found.status === "NEEDS_RECOVERY" || found.status === "IN_PROGRESS") {
+        throw new ProviderError(
+          `PAID_ASSET_NEEDS_RECOVERY: ${found.status === "NEEDS_RECOVERY" ? found.reason : "asset này đang được tạo ở nơi khác."} ` +
+            `Không gửi request thứ hai cho cùng câu thoại.`,
+          decision.provider,
+          false,
+          "PAID_ASSET_NEEDS_RECOVERY",
+        );
+      }
+      const reusedLine =
+        found.status === "REUSE"
+          ? await attachReusedAsset({ source: found.asset, projectId: project.id, sceneId: scene.id, scope: found.scope })
+          : null;
+      if (reusedLine) {
+        const fields = {
+          characterId: settings.characterId,
+          text: line.text,
+          provider: reusedLine.asset.provider,
+          model: reusedLine.asset.model,
+          voiceId: settings.voiceId,
+          instructions: settings.instructions,
+          speed: settings.speed,
+          estimatedCost: 0,
+          actualCost: 0,
+          durationSec: reusedLine.asset.durationSec ?? (await probeDuration(reusedLine.absolutePath).catch(() => 0)),
+          outputPath: toRelative(reusedLine.absolutePath),
+          status: "completed",
+          error: "",
+        };
+        await prisma.dialogueLine.upsert({
+          where: { sceneId_lineNumber: { sceneId: scene.id, lineNumber: line.lineNumber } },
+          create: { sceneId: scene.id, lineNumber: line.lineNumber, ...fields },
+          update: fields,
         });
-      });
-
-      await saveAsset({
-        ctx,
-        kind: "audio",
-        decision: used,
-        prompt: line.text,
-        asset: result,
-      });
-
-      // Level and trim BEFORE measuring.
-      //
-      // The three test clips came off the same model spanning more than ten
-      // decibels - Max at -16.0 LUFS, Leo at -26.9. A viewer sets the volume
-      // for Leo and then gets shouted at by Max. Per-character gain would fix
-      // those three and break the next three, so it is measured and automatic.
-      //
-      // Trimming also changes the length, which is why duration is taken from
-      // the FINISHED file: subtitles line up against the audio that ships, not
-      // against what came back from the vendor.
-      let durationSec = 0;
-      try {
-        const levelled = await normalizeVoiceClip(result.filePath, result.filePath);
-        durationSec = levelled.durationSec;
-      } catch (normErr) {
-        // A levelling failure must not throw away audio that was paid for. Keep
-        // the clip, record the real duration, and say plainly that it is not
-        // levelled rather than letting it into a mix as if it were.
-        await logger.warn({
-          event: "audio.normalize_failed",
-          provider: used.provider,
-          model: used.modelId,
-          projectId: project.id,
-          sceneId: scene.id,
-          message: `Không chuẩn hoá được âm lượng, giữ nguyên tệp gốc: ${
-            normErr instanceof Error ? normErr.message : String(normErr)
-          }`,
-        });
-        try {
-          durationSec = await probeDuration(result.filePath);
-        } catch {
-          durationSec = 0;
-        }
+        written.push(reusedLine.absolutePath);
+        continue;
       }
 
-      await prisma.dialogueLine.update({
-        where: { id: row.id },
-        data: {
-          provider: used.provider,
-          model: used.modelId,
-          actualCost: result.actualCost,
-          durationSec,
-          outputPath: toRelative(result.filePath),
-          status: "completed",
+      const outputPath = path.join(
+        projectSubdir(project.id, "audio"),
+        uuidFilename(extensionForVoice(decision.provider)),
+      );
+
+      // The row exists BEFORE the call, so a crash mid-generation leaves a line
+      // marked pending rather than no trace that the work was attempted.
+      const row = await prisma.dialogueLine.upsert({
+        where: { sceneId_lineNumber: { sceneId: scene.id, lineNumber: line.lineNumber } },
+        create: {
+          sceneId: scene.id,
+          characterId: settings.characterId,
+          lineNumber: line.lineNumber,
+          text: line.text,
+          provider: decision.provider,
+          model: decision.modelId,
+          voiceId: settings.voiceId,
+          instructions: settings.instructions,
+          speed: settings.speed,
+          estimatedCost: decision.estimatedCost,
+          status: "processing",
+        },
+        update: {
+          characterId: settings.characterId,
+          text: line.text,
+          provider: decision.provider,
+          model: decision.modelId,
+          voiceId: settings.voiceId,
+          instructions: settings.instructions,
+          speed: settings.speed,
+          estimatedCost: decision.estimatedCost,
+          status: "processing",
+          error: "",
         },
       });
-      written.push(result.filePath);
-    } catch (err) {
-      await prisma.dialogueLine.update({
-        where: { id: row.id },
-        data: {
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-        },
-      });
-      throw err;
+
+      try {
+        const { result, used } = await withFallback(ctx, decision, async (d) => {
+          const provider = await getVoiceProvider(d.provider, d.modelId);
+          const reuseKey = lineKeyFor(d.provider, d.modelId);
+          return runProviderJob({
+            ctx,
+            kind: "audio",
+            decision: d,
+            prompt: line.text,
+            reuseKey,
+            // Two lines in one scene differ by speaker and wording, and both are
+            // billable, so both belong in the key.
+            variant: await keyedVariant({
+              ctx,
+              kind: "audio",
+              decision: d,
+              prompt: line.text,
+              legacyVariant: `line${line.lineNumber}:${settings.voiceId}`,
+              reuseKey,
+            }),
+            outputPath,
+            create: async () =>
+              provider.createVoice({
+                projectId: project.id,
+                sceneId: scene.id,
+                model: d.modelId,
+                text: line.text,
+                voiceId: settings.voiceId,
+                instructions: settings.instructions,
+                accent: settings.accent,
+                gender: settings.gender,
+                speed: settings.speed,
+                targetDuration: scene.duration,
+                outputPath,
+              }),
+            poll: (id) => provider.getJobStatus(id),
+            download: (id) => provider.downloadResult(id),
+          });
+        });
+
+        // Level and trim BEFORE measuring.
+        //
+        // The three test clips came off the same model spanning more than ten
+        // decibels - Max at -16.0 LUFS, Leo at -26.9. A viewer sets the volume
+        // for Leo and then gets shouted at by Max. Per-character gain would fix
+        // those three and break the next three, so it is measured and automatic.
+        //
+        // Trimming also changes the length, which is why duration is taken from
+        // the FINISHED file: subtitles line up against the audio that ships, not
+        // against what came back from the vendor.
+        let durationSec = 0;
+        try {
+          if (result.meta?.reused === true) {
+            // Handed back by its idempotency key: it was levelled when it was
+            // made. Levelling it again rewrote a finished file on every resume
+            // (and changed its bytes, so its content hash no longer matched).
+            durationSec = await probeDuration(result.filePath);
+          } else {
+            const levelled = await normalizeVoiceClip(result.filePath, result.filePath);
+            durationSec = levelled.durationSec;
+          }
+        } catch (normErr) {
+          // A levelling failure must not throw away audio that was paid for. Keep
+          // the clip, record the real duration, and say plainly that it is not
+          // levelled rather than letting it into a mix as if it were.
+          await logger.warn({
+            event: "audio.normalize_failed",
+            provider: used.provider,
+            model: used.modelId,
+            projectId: project.id,
+            sceneId: scene.id,
+            message: `Không chuẩn hoá được âm lượng, giữ nguyên tệp gốc: ${
+              normErr instanceof Error ? normErr.message : String(normErr)
+            }`,
+          });
+          try {
+            durationSec = await probeDuration(result.filePath);
+          } catch {
+            durationSec = 0;
+          }
+        }
+
+        // Recorded AFTER levelling, so the stored hash is the hash of the file
+        // that ships (QĐ-112).
+        await saveAsset({
+          ctx,
+          kind: "audio",
+          decision: used,
+          prompt: line.text,
+          asset: result,
+          reuseKey: lineKeyFor(used.provider, used.modelId),
+        });
+
+        await prisma.dialogueLine.update({
+          where: { id: row.id },
+          data: {
+            provider: used.provider,
+            model: used.modelId,
+            actualCost: result.actualCost,
+            durationSec,
+            outputPath: toRelative(result.filePath),
+            status: "completed",
+          },
+        });
+        written.push(result.filePath);
+      } catch (err) {
+        await prisma.dialogueLine.update({
+          where: { id: row.id },
+          data: {
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        throw err;
+      }
+    } finally {
+      releaseLine();
     }
   }
 
@@ -2047,6 +2535,18 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
     });
   }
   return written;
+}
+
+/**
+ * A finished line's file is still this line's audio: its keyed Asset row (if
+ * any) carries the key of the line as it stands now. Pre-key files: true.
+ */
+async function lineAssetMatches(sceneId: string, outputPath: string, reuseKey: string): Promise<boolean> {
+  const row = await prisma.asset.findFirst({
+    where: { sceneId, kind: "audio", filePath: outputPath, reuseKey: { not: null } },
+    orderBy: { createdAt: "desc" },
+  });
+  return !row || row.reuseKey === reuseKey;
 }
 
 function fileOnDiskSafe(relative: string): boolean {

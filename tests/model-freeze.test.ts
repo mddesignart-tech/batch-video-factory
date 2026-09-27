@@ -115,6 +115,8 @@ async function dropClip(projectId: string, sceneId: string): Promise<void> {
   const keys = (await prisma.providerJob.findMany({ where: { sceneId, kind: "video" } })).map((j) => j.idempotencyKey);
   await prisma.costReservation.deleteMany({ where: { idempotencyKey: { in: keys } } });
   await prisma.providerJob.deleteMany({ where: { sceneId, kind: "video" } });
+  // Never bought = no Asset row either; otherwise the reuse engine (QĐ-112) re-attaches it at $0.
+  await prisma.asset.deleteMany({ where: { sceneId, kind: "video" } });
   await prisma.scene.update({ where: { id: sceneId }, data: { videoPath: null, status: "image_ready" } });
   await prisma.project.update({ where: { id: projectId }, data: { status: "failed" } });
 }

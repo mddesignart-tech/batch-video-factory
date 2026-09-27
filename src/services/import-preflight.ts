@@ -7,6 +7,8 @@ import { confirmedProviders, spendStatus } from "./spend-guard";
 import { providerSpendBreakdown } from "./provider-budget";
 import { productionProviderNames, availableProviderNames } from "./provider-health";
 import { fileOnDisk, previewProjectCost } from "./project-service";
+import { validateAssetFile } from "./asset-reuse";
+import type { ScenePlan } from "./cost-estimator";
 import {
   characterReadiness,
   CORE_BIBLE_FIELDS,
@@ -129,6 +131,20 @@ export interface ImportSceneLine {
   videoModel: string | null;
   /** The clip's route as priced: what an approval freezes (QĐ-111). Null when no clip is bought. */
   videoRoute: { provider: string; model: string; estimatedCost: number; lowAuto: boolean } | null;
+  /** Where each reused asset comes from (QĐ-112): IMPORTED / EXISTING / CACHE, or null (bought / not needed). */
+  reuseFrom: ScenePlan["reuseFrom"];
+  /** What each reused asset would have cost this run - money NOT spent. */
+  saved: ScenePlan["saved"];
+  /** What this run spends on this scene, per kind ($0 when reused or local). */
+  costs: { image: number; video: number; voice: number };
+  /** The model a WILL_CREATE image / voice would use. */
+  models: { image: string | null; voice: string | null };
+  /**
+   * The scene's own asset that failed verification: its file is gone
+   * (MISSING_LOCAL_FILE) or its bytes no longer match (INVALID). It is never
+   * reused blind - the scene is priced as WILL_CREATE and this says why.
+   */
+  invalid: { image: "MISSING_LOCAL_FILE" | "INVALID" | null; video: "MISSING_LOCAL_FILE" | "INVALID" | null };
   keyframe: "supplied" | "will-generate";
   /**
    * Where this scene's picture comes from, in the words the operator decides on:
@@ -302,6 +318,8 @@ export interface ImportVideoPreview {
   blockedReason: string | null;
   /** Scenes that cannot be routed as they stand (incl. APPROVED_* stops of a frozen choice, QĐ-111). */
   needsProvider: string[];
+  /** Money reuse keeps in the wallet for this video this run (QĐ-112). */
+  savings: { image: number; video: number; voice: number; total: number };
   warnings: string[];
   /** Cast of this video, resolved against the character table. */
   characters: ImportVideoCharacter[];
@@ -445,6 +463,13 @@ export interface ImportPreflight {
   /** How many of each asset the whole batch will buy vs. already owns. */
   counts: AssetCounts;
   /**
+   * QĐ-112, for the runnable videos: what this batch would cost if every asset
+   * were bought new, what reuse / imported pictures keep in the wallet, and what
+   * it really adds. ifCreatedNew - savings.total = estimatedTotal, exactly.
+   */
+  savings: { image: number; video: number; voice: number; total: number };
+  ifCreatedNew: number;
+  /**
    * Each vendor's own wallet, as it stands right now.
    *
    * `remainingUsd` is null when the vendor meters itself and we hold no wallet
@@ -469,6 +494,32 @@ export interface ImportPreflight {
  * `planJson` to know which videos to start, and `approveAuthorization` reads it
  * to check the amount being approved against the amount that was shown.
  */
+/**
+ * A scene's own generated image / clip that no longer verifies (QĐ-112). Reads
+ * only: the file is checked, nothing is marked. Imported pictures are reported
+ * as MISSING by the image-source column instead.
+ */
+async function ownAssetProblems(scene: {
+  id: string;
+  imagePath: string | null;
+  imageSource: string;
+  videoPath: string | null;
+}): Promise<ImportSceneLine["invalid"]> {
+  const problem = async (kind: "image" | "video", current: string | null) => {
+    if (!current) return null;
+    if (kind === "image" && scene.imageSource === "IMPORTED") return null;
+    if (!fileOnDisk(current)) return "MISSING_LOCAL_FILE" as const;
+    const keyed = await prisma.asset.findFirst({
+      where: { sceneId: scene.id, kind, filePath: current, reuseKey: { not: null } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!keyed) return null;
+    const v = validateAssetFile(keyed);
+    return v === "VALID" ? null : v;
+  };
+  return { image: await problem("image", scene.imagePath), video: await problem("video", scene.videoPath) };
+}
+
 export async function preflightImportedBatch(batchId: string): Promise<ImportPreflight> {
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
@@ -564,6 +615,18 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
         characters: scene ? sceneCharacters(scene).present : [],
         camera: scene?.camera ?? "",
         videoModel: row.video ? `${row.video.provider}/${row.video.modelId}` : null,
+        reuseFrom: row.reuseFrom,
+        saved: row.saved,
+        costs: {
+          image: round(row.image?.estimatedCost ?? 0, 6),
+          video: round(row.video?.estimatedCost ?? 0, 6),
+          voice: round(row.voice?.estimatedCost ?? 0, 6),
+        },
+        models: {
+          image: row.image ? `${row.image.provider}/${row.image.modelId}` : null,
+          voice: row.voice ? `${row.voice.provider}/${row.voice.modelId}` : null,
+        },
+        invalid: scene ? await ownAssetProblems(scene) : { image: null, video: null },
         videoRoute: row.video
           ? {
               provider: row.video.provider,
@@ -804,6 +867,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       lifecycle,
       blockedReason,
       needsProvider: estimate.needsProvider,
+      savings: estimate.savings,
       videoLimit,
       order: videos.length,
       spend: overScene
@@ -966,7 +1030,15 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
       `$${estimatedTotal.toFixed(6)}. Chưa cấp phép chi gì.`,
   });
 
+  const runnableIds = new Set(runnable.map((v) => v.projectId));
+  const runnableVideos = videos.filter((v) => runnableIds.has(v.projectId));
+  const savingsOf = (k: "image" | "video" | "voice") => round(runnableVideos.reduce((n, v) => n + v.savings[k], 0), 6);
+  const savings = { image: savingsOf("image"), video: savingsOf("video"), voice: savingsOf("voice"), total: 0 };
+  savings.total = round(savings.image + savings.video + savings.voice, 6);
+
   return {
+    savings,
+    ifCreatedNew: round(estimatedTotal + savings.total, 6),
     batchId,
     batchName: batch.name,
     videos,

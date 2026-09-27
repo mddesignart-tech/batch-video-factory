@@ -319,10 +319,15 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
     data: {
       subtitlesBurned: result.subtitlesBurned,
       bytes: result.bytes,
+      // Scene segments copied from the local cache: compute saved, $0 either way (QĐ-112).
+      segmentsReused: result.segmentsReused ?? 0,
     },
   });
 
-  return { deferred: false, result: { videoPath: toRelative(result.videoPath) } };
+  return {
+    deferred: false,
+    result: { videoPath: toRelative(result.videoPath), segmentsReused: result.segmentsReused ?? 0 },
+  };
 }
 
 /**

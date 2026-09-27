@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Asset, Scene } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sha256Bytes } from "@/lib/crypto";
+import { fileSha256 } from "@/services/asset-content";
 import { projectSubdir, toAbsolute, toRelative, uuidFilename } from "@/lib/paths";
 import { logger } from "@/lib/logger";
 import { ffmpeg, ffprobe } from "@/media/ffmpeg";
@@ -248,7 +249,28 @@ export async function storeImportedImage(opts: {
     deduplicated = true;
   } else {
     originalAbs = path.join(imagesDir, `import-${uuidFilename(info.ext)}`);
-    fs.writeFileSync(originalAbs, opts.bytes);
+    // The same bytes imported by ANOTHER project (a storyboard imported twice):
+    // hard-link that file instead of writing a second copy (QĐ-112). A link, not
+    // a shared path - deleting or cleaning up the other project can never take
+    // this project's picture with it. Verified by hash before linking.
+    const elsewhere = await prisma.asset.findFirst({
+      where: { source: "IMPORTED", sha256: info.sha256, projectId: { not: project.id } },
+      orderBy: { createdAt: "asc" },
+    });
+    let linked = false;
+    if (elsewhere) {
+      try {
+        const from = toAbsolute(elsewhere.filePath);
+        if (fs.existsSync(from) && fileSha256(from) === info.sha256) {
+          fs.linkSync(from, originalAbs);
+          linked = true;
+          deduplicated = true;
+        }
+      } catch {
+        linked = false;
+      }
+    }
+    if (!linked) fs.writeFileSync(originalAbs, opts.bytes);
   }
 
   const framing = framingFor(info.width, info.height, target, opts.fit ?? "auto");

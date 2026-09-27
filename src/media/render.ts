@@ -10,6 +10,7 @@ import {
   supportsSubtitleBurn,
 } from "./ffmpeg";
 import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
+import { renderSegmentCached } from "./segment-cache";
 import {
   DEFAULT_MIX,
   DUCK_RATIO,
@@ -147,6 +148,8 @@ export interface RenderResult {
   sceneAudioPaths: string[];
   /** How long every scene ended up, and why - in scene order. */
   sceneTimings: SceneTiming[];
+  /** Scene segments copied from the local segment cache (compute saved, $0 either way). */
+  segmentsReused?: number;
   plannedTotal: number;
   finalTotal: number;
 }
@@ -562,6 +565,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
 
   // ---- Pass 1 - normalise every scene to identical codec parameters -------
   const normalised: string[] = [];
+  let segmentsReused = 0;
   for (let i = 0; i < usable.length; i += 1) {
     const scene = usable[i];
     if (!scene) continue;
@@ -569,17 +573,25 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     if (!source) continue;
     const audio = sceneAudio[i];
     const name = `norm_${String(scene.sceneNumber).padStart(3, "0")}.mp4`;
-    await ffmpeg(
-      buildSceneNormalizeArgs({
+    // The scene's own dialogue track when it has one; the legacy single file
+    // only when it has no lines at all.
+    const audioInput = audio ? audio.audioPath : scene.audioPath;
+    const output = path.join(tempDir, name);
+    // Identical segment work done before (same picture/clip, audio, length,
+    // motion, codec) is copied from the local cache - compute saved, $0 either
+    // way (QĐ-112).
+    const segment = await renderSegmentCached({
+      args: buildSceneNormalizeArgs({
         videoInput: source,
-        // The scene's own dialogue track when it has one; the legacy single
-        // file only when it has no lines at all.
-        audioInput: audio ? audio.audioPath : scene.audioPath,
+        audioInput,
         duration: sceneDurations[i] ?? scene.duration,
         target: req.target,
-        output: path.join(tempDir, name),
+        output,
       }),
-    );
+      inputs: [source, ...(audioInput ? [audioInput] : [])],
+      output,
+    });
+    if (segment.reused) segmentsReused += 1;
     normalised.push(name);
   }
 
@@ -751,6 +763,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     audioWarnings,
     sceneAudioPaths,
     sceneTimings,
+    segmentsReused,
     plannedTotal: Math.round(sceneTimings.reduce((n, t) => n + t.plannedDuration, 0) * 1000) / 1000,
     finalTotal: Math.round(sceneDurations.reduce((n, d) => n + d, 0) * 1000) / 1000,
   };

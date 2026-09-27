@@ -8,6 +8,23 @@ import { formatUSD } from "@/lib/utils";
 import { approveAndRunBatch, preflightBatch } from "@/app/actions/batch-run";
 import type { ApprovalPreflight } from "@/services/batch-executor";
 import { SpendPlanTable } from "@/components/spend-plan-table";
+import { SavingsSummary } from "@/app/import/preflight-panel";
+
+/**
+ * Savings of exactly the videos this approval runs (QĐ-112), so that
+ * "nếu tạo mới" - "tiết kiệm" = the incremental estimate shown above.
+ */
+function approvalSavings(pre: ApprovalPreflight) {
+  const ids = pre.runnableProjectIds ? new Set(pre.runnableProjectIds) : null;
+  const videos = (pre.preflight?.videos ?? []).filter((v) =>
+    ids ? ids.has(v.projectId) : v.lifecycle !== "BLOCKED" && v.lifecycle !== "COMPLETED",
+  );
+  const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
+  const sum = (k: "image" | "video" | "voice") => r6(videos.reduce((n, v) => n + v.savings[k], 0));
+  const savings = { image: sum("image"), video: sum("video"), voice: sum("voice"), total: 0 };
+  savings.total = r6(savings.image + savings.video + savings.voice);
+  return { savings, estimatedTotal: pre.estimatedTotal, ifCreatedNew: r6(pre.estimatedTotal + savings.total) };
+}
 
 /**
  * PREFLIGHT, then DUYỆT & CHẠY BATCH - the whole approval, in the UI.
@@ -139,6 +156,8 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
                 {pre.textPosts > 0 ? ` · TEXT API POST: ${pre.textPosts}` : ""}
               </div>
             </div>
+
+            {pre.preflight ? <SavingsSummary preflight={approvalSavings(pre)} /> : null}
 
             {pre.spendPlan ? <SpendPlanTable plan={pre.spendPlan} preflight={pre.preflight} /> : null}
 

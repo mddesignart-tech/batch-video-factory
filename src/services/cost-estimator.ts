@@ -52,6 +52,17 @@ export interface PlannedSceneInput {
    */
   frozenVideo?: { provider: string; model: string; pinned: boolean; durationSeconds: number } | null;
   /**
+   * What the reuse engine already holds for this scene (QĐ-112, services/reuse-plan):
+   * per model, whether an identical image / clip / set of spoken lines exists.
+   * A routed model found here costs $0 and is counted as saving, not spending.
+   */
+  reuseFacts?: {
+    imageModels: Record<string, string>;
+    ownedKeyframeHash: string | null;
+    videoByKeyframe: Record<string, string[]>;
+    voiceModels: string[];
+  } | null;
+  /**
    * The scene already HAS its keyframe, supplied with an imported storyboard.
    *
    * Priced at zero, because it will be bought zero times. Leaving it out of the
@@ -173,6 +184,22 @@ export interface ScenePlan {
   reuse: { image: boolean; video: boolean; voice: boolean };
   /** Assets this run really will buy. */
   needs: { image: boolean; video: boolean; voice: boolean };
+  /**
+   * Where each reused asset comes from (QĐ-112): IMPORTED (a person supplied
+   * it), EXISTING (this scene already has it), CACHE (an identical asset made
+   * for another scene or project). Null when it is bought, or not needed.
+   */
+  reuseFrom: {
+    image: "IMPORTED" | "EXISTING" | "CACHE" | null;
+    video: "EXISTING" | "CACHE" | null;
+    voice: "EXISTING" | "CACHE" | null;
+  };
+  /**
+   * What each reused asset WOULD have cost to buy now, priced by the same
+   * router - money this run does not spend. Only assets that really will not
+   * be bought are counted; LOCAL_MOTION saves compute, not money, and is 0 here.
+   */
+  saved: { image: number; video: number; voice: number };
 }
 
 export interface CostBreakdown {
@@ -190,6 +217,8 @@ export interface ProjectEstimate {
   qualityMode: QualityMode;
   scenes: ScenePlan[];
   breakdown: CostBreakdown;
+  /** Money reuse keeps in the wallet this run (QĐ-112): per kind and total. */
+  savings: { image: number; video: number; voice: number; total: number };
   /** Populated when a scene could not be routed at all. */
   errors: string[];
   /** Scenes that want a video model nobody has approved for them. */
@@ -374,10 +403,17 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
   breakdown.quality = round(breakdown.quality);
   breakdown.total = round(subtotal + breakdown.retries);
 
+  // Full precision (6 dp), like every other money figure that is compared
+  // against a limit - a $0.00002 voice line must not round to nothing.
+  const sum = (k: "image" | "video" | "voice") => round(plans.reduce((n, p) => n + p.saved[k], 0), 6);
+  const savings = { image: sum("image"), video: sum("video"), voice: sum("voice"), total: 0 };
+  savings.total = round(savings.image + savings.video + savings.voice, 6);
+
   return {
     qualityMode,
     scenes: plans,
     breakdown,
+    savings,
     errors,
     needsProvider,
     errorCodes,
@@ -506,8 +542,42 @@ export function planScene(opts: {
      */
     optional = false,
     pool: ModelRegistry[] = models,
+    /**
+     * Price only (QĐ-112): route to learn what the asset WOULD cost, for the
+     * savings line - never spend budget on it, never record a failure.
+     */
+    priceOnly = false,
   ): RouteDecision | null => {
-    if (!enabled || error) return null;
+    if (!enabled || (error && !priceOnly)) return null;
+    if (priceOnly) {
+      try {
+        return routeScene(pool, {
+          type,
+          qualityMode,
+          strategy,
+          complexity: scene.complexity,
+          spendPriority: scene.spendPriority,
+          durationSeconds: scene.duration,
+          characterCount: scene.characterCount,
+          consistencyRequired: type === "image" || type === "video",
+          needs1080p: type === "video" ? needs1080p : false,
+          needsReferenceImage: false,
+          budgetRemaining: Number.MAX_SAFE_INTEGER,
+          usage,
+          availableProviders,
+          manualProvider,
+          manualModel,
+          // Money conditions lifted: this route only asks WHICH model, never
+          // whether it can be paid for.
+          lowAuto:
+            type === "video" && lowAutoForEstimate
+              ? { ...lowAutoForEstimate, providerBudgets: {}, perVideoCapRemaining: null }
+              : undefined,
+        });
+      } catch {
+        return null;
+      }
+    }
     try {
       const decision = routeScene(pool, {
         type,
@@ -542,13 +612,50 @@ export function planScene(opts: {
     }
   };
 
-  const image = routeOrNull(
-    "image",
-    wantsKeyframe,
-    { images: 1, jobs: 1 },
-    scene.manualImageProvider,
-    scene.manualImageModel,
-  );
+  const facts = scene.reuseFacts ?? null;
+  const saved = { image: 0, video: 0, voice: 0 };
+  const reuseFrom: ScenePlan["reuseFrom"] = { image: null, video: null, voice: null };
+  const modelKey = (d: RouteDecision) => `${d.provider}/${d.modelId}`;
+
+  // Reuse never needs money: first ask which model the router would pick with
+  // no limit at all (the same probe generation makes); an identical picture for
+  // it is reused without touching the budget. Only otherwise route for real.
+  const imageProbe =
+    wantsKeyframe && facts
+      ? routeOrNull("image", true, { images: 1, jobs: 1 }, scene.manualImageProvider, scene.manualImageModel, false, models, true)
+      : null;
+  const imageProbeHit = imageProbe && facts?.imageModels[modelKey(imageProbe)] ? imageProbe : null;
+  let image = imageProbeHit
+    ? null
+    : routeOrNull(
+        "image",
+        wantsKeyframe,
+        { images: 1, jobs: 1 },
+        scene.manualImageProvider,
+        scene.manualImageModel,
+      );
+  const imageHit = imageProbeHit ?? (image && facts?.imageModels[modelKey(image)] ? image : null);
+  // The keyframe the clip will be made FROM, by content - known only when the
+  // picture already exists (owned) or will be reused; a picture bought in this
+  // run is a new keyframe, so no existing clip can match it.
+  let keyframeHash: string | null | undefined;
+  if (imageHit) {
+    // An identical picture already exists (another scene or project): $0.
+    keyframeHash = facts!.imageModels[modelKey(imageHit)];
+    saved.image = imageHit.estimatedCost;
+    if (image) remaining += image.estimatedCost;
+    reuseFrom.image = "CACHE";
+    image = null;
+  } else if (ownsKeyframe) {
+    keyframeHash = facts?.ownedKeyframeHash ?? undefined;
+    reuseFrom.image = scene.hasSuppliedKeyframe === true ? "IMPORTED" : "EXISTING";
+    const would = routeOrNull("image", true, { images: 1, jobs: 1 }, scene.manualImageProvider, scene.manualImageModel, false, models, true);
+    saved.image = would?.estimatedCost ?? 0;
+  } else if (!wantsKeyframe) {
+    keyframeHash = null; // no picture at all: a text-to-video clip
+  }
+  const clipsForKeyframe =
+    keyframeHash === undefined ? [] : (facts?.videoByKeyframe[keyframeHash ?? "none"] ?? []);
   // A locally animated scene never reaches the router, so it can neither cost
   // anything nor fail for want of a provider.
   //
@@ -573,8 +680,15 @@ export function planScene(opts: {
   const frozenPinMoved = Boolean(
     frozen && wantsClip && pinNow !== (frozen.pinned ? `${frozen.provider}/${frozen.model}` : null),
   );
-  const video =
-    wantsClip && !frozenDurationMoved && !frozenPinMoved
+  const clipManualProvider = frozen ? (frozen.pinned ? frozen.provider : null) : scene.manualVideoProvider;
+  const clipManualModel = frozen ? (frozen.pinned ? frozen.model : null) : scene.manualVideoModel;
+  const clipProbe =
+    wantsClip && !frozenDurationMoved && !frozenPinMoved && clipsForKeyframe.length > 0
+      ? routeOrNull("video", true, { seconds: scene.duration, jobs: 1 }, clipManualProvider, clipManualModel, false, frozenPool, true)
+      : null;
+  const clipProbeHit = clipProbe && clipsForKeyframe.includes(modelKey(clipProbe)) ? clipProbe : null;
+  let video =
+    wantsClip && !frozenDurationMoved && !frozenPinMoved && !clipProbeHit
       ? routeOrNull(
           "video",
           true,
@@ -621,7 +735,7 @@ export function planScene(opts: {
     needsProvider =
       `APPROVED_PARAMS_CHANGED: thời lượng cảnh đổi từ ${frozen.durationSeconds}s (đã duyệt) ` +
       `thành ${scene.duration}s. Không tạo clip — hãy LẬP LẠI KẾ HOẠCH MODEL và duyệt lại.`;
-  } else if (frozen && wantsClip && !video && !errorBeforeVideo && errorCode !== "over_budget") {
+  } else if (frozen && wantsClip && !video && !clipProbeHit && !errorBeforeVideo && errorCode !== "over_budget") {
     // Whatever the router said - disabled, shut down, no longer LOW_AUTO,
     // degraded - the approved model cannot be used as approved.
     needsProvider =
@@ -629,14 +743,56 @@ export function planScene(opts: {
       `(${needsProvider ?? error ?? "không rõ"}). Không tự đổi sang model khác — hãy LẬP LẠI KẾ HOẠCH MODEL và duyệt lại.`;
     error = errorBeforeVideo;
   }
+  // An identical clip already exists (same keyframe CONTENT, prompt, model,
+  // duration, size): $0, and whatever stopped the purchase no longer matters -
+  // nothing is being bought (QĐ-112).
+  if (clipProbeHit) {
+    saved.video = clipProbeHit.estimatedCost;
+    reuseFrom.video = "CACHE";
+  } else if (motion.source === "AI_VIDEO" && scene.hasExistingVideo === true) {
+    reuseFrom.video = "EXISTING";
+    const would = routeOrNull("video", true, { seconds: scene.duration, jobs: 1 }, scene.manualVideoProvider, scene.manualVideoModel, false, models, true);
+    saved.video = would?.estimatedCost ?? 0;
+  } else if (video && clipsForKeyframe.includes(modelKey(video))) {
+    saved.video = video.estimatedCost;
+    remaining += video.estimatedCost;
+    reuseFrom.video = "CACHE";
+    video = null;
+  } else if (!video && wantsClip && frozen && clipsForKeyframe.includes(`${frozen.provider}/${frozen.model}`)) {
+    // The approved model can no longer be BOUGHT, but the identical clip for it
+    // exists: it is reused, so the stop below does not apply.
+    reuseFrom.video = "CACHE";
+    needsProvider = undefined;
+  }
+
   const speechChars = scene.speechText.trim().length;
-  const voice = routeOrNull(
-    "voice",
-    speechChars > 0 && scene.hasExistingVoice !== true,
-    { characters: speechChars, jobs: 1 },
-    scene.manualVoiceProvider,
-    scene.manualVoiceModel,
-  );
+  const voiceProbe =
+    speechChars > 0 && scene.hasExistingVoice !== true && (facts?.voiceModels.length ?? 0) > 0
+      ? routeOrNull("voice", true, { characters: speechChars, jobs: 1 }, scene.manualVoiceProvider, scene.manualVoiceModel, false, models, true)
+      : null;
+  const voiceProbeHit = voiceProbe && facts?.voiceModels.includes(modelKey(voiceProbe)) ? voiceProbe : null;
+  let voice = voiceProbeHit
+    ? null
+    : routeOrNull(
+        "voice",
+        speechChars > 0 && scene.hasExistingVoice !== true,
+        { characters: speechChars, jobs: 1 },
+        scene.manualVoiceProvider,
+        scene.manualVoiceModel,
+      );
+  if (voiceProbeHit) {
+    saved.voice = voiceProbeHit.estimatedCost;
+    reuseFrom.voice = "CACHE";
+  } else if (speechChars > 0 && scene.hasExistingVoice === true) {
+    reuseFrom.voice = "EXISTING";
+    const would = routeOrNull("voice", true, { characters: speechChars, jobs: 1 }, scene.manualVoiceProvider, scene.manualVoiceModel, false, models, true);
+    saved.voice = would?.estimatedCost ?? 0;
+  } else if (voice && facts?.voiceModels.includes(modelKey(voice))) {
+    saved.voice = voice.estimatedCost;
+    remaining += voice.estimatedCost;
+    reuseFrom.voice = "CACHE";
+    voice = null;
+  }
   // Optional: the generator skips scoring when no quality model is configured,
   // so the estimate has to as well.
   const quality = routeOrNull("quality", wantsQuality, { jobs: 1 }, null, null, true);
@@ -682,10 +838,12 @@ export function planScene(opts: {
       // contributes $0 of video, and it is not reuse - nothing was ever bought
       // for it. Merging the two would let a preview report six reused clips for
       // a batch that has never called a video model. QĐ-071.
-      image: ownsKeyframe,
-      video: motion.source === "AI_VIDEO" && scene.hasExistingVideo === true,
-      voice: speechChars > 0 && scene.hasExistingVoice === true,
+      image: reuseFrom.image !== null,
+      video: reuseFrom.video !== null,
+      voice: reuseFrom.voice !== null,
     },
+    reuseFrom,
+    saved: { image: round(saved.image, 6), video: round(saved.video, 6), voice: round(saved.voice, 6) },
     needs: {
       image: image !== null,
       video: video !== null,

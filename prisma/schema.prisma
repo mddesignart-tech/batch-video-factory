@@ -627,10 +627,25 @@ model Asset {
   /// recognisable as the same picture.
   sha256           String?
 
+  /// V1.2 Phase 4 (QĐ-112). What this file IS, as a request: `reuse:v1:<kind>:<hash>`
+  /// over every input that changes the output (buildAssetReuseKey). Two rows with
+  /// the same key are the same asset; NULL on rows made before the key existed.
+  reuseKey          String?
+  /// Set on a REUSED row: the asset whose content this use points at. A reuse is
+  /// a new REFERENCE (own row, own file link), never a second purchase.
+  reusedFromAssetId String?
+  /// Media length in seconds (video/audio), when measured.
+  durationSec       Float?
+  /// VALID · MISSING_LOCAL_FILE · INVALID (hash/size mismatch). Only VALID is reused.
+  validity          String    @default("VALID")
+  validatedAt       DateTime?
+
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   scene   Scene?  @relation(fields: [sceneId], references: [id], onDelete: Cascade)
 
   @@index([projectId, kind])
+  @@index([reuseKey])
+  @@index([sha256])
 }
 
 // ------------------------------------------------------------------- jobs ---
@@ -835,6 +850,11 @@ model ProviderJob {
 
   externalId     String?
   idempotencyKey String    @unique
+  /// The asset this request creates (QĐ-112). Scene-independent: two scenes
+  /// asking for the same asset share it, so a request in flight - or one whose
+  /// outcome is unknown - blocks a second purchase from ANY scene. NULL on
+  /// historical rows.
+  reuseKey       String?
   status         String    @default("pending")
   requestJson    String    @default("{}")
   responseJson   String?
@@ -868,6 +888,7 @@ model ProviderJob {
 
   @@index([status])
   @@index([sceneId, kind])
+  @@index([reuseKey])
 }
 
 // -------------------------------------------------------- cost + telemetry ---
