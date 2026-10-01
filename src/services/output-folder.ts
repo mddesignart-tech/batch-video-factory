@@ -14,7 +14,7 @@ import { existingOutputFor } from "@/services/output-export";
 export async function resolveOutputFolder(projectId: string): Promise<string | null> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, title: true, finalVideoPath: true },
+    select: { id: true, title: true, finalVideoPath: true, outputDir: true },
   });
   if (!project) return null;
   // The exported folder (final.mp4 + thumbnail + subtitles + metadata) is what

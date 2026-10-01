@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-09-27 — V1.2 Phase 5 (thư viện asset / backfill / bảo trì cache, QĐ-113) XONG; READY cho Phase 6, CHỜ DUYỆT
+**Cập nhật:** 2026-10-01 — V1.2 Phase 6 (quy trình hằng ngày / xuất file sẵn đăng, QĐ-114) XONG; READY cho Phase 7, CHỜ DUYỆT
 
 ---
 
@@ -11,6 +11,14 @@
 3. Nút TIẾP TỤC / KIỂM TRA LẠI theo từng video COMPLETED (hiện có ở mức lô).
 4. ✅ REUSE clip giữa hai lần nhập cùng storyboard — XONG (Phase 4, QĐ-112; mock).
 5. Test E2E trình duyệt tự động (Playwright) cho luồng Nhập → DUYỆT & CHẠY → Output, chạy mock.
+
+## ✅ V1.2 Phase 6 COMPLETE — quy trình hằng ngày / xuất file sẵn đăng (QĐ-114)
+
+- [ ] Còn mở: intro/outro, watermark, AI viết metadata đăng bài — cố ý KHÔNG làm ở Phase 6.
+- [ ] Còn mở: huỷ riêng một video đang gửi request (vendor không có cancel).
+- [ ] Còn mở (vận hành): nhập 100 video/500 cảnh mất ~195 s với journal DELETE (WAL nhanh hơn nhiều) — đổi DB
+      production sang WAL là quyết định của người dùng (sao lưu phải chép cả file -wal).
+- [ ] Còn mở: lô cũ chưa có slug — được gán khi xuất lần đầu (không di chuyển thư mục cũ).
 
 ## ✅ V1.2 Phase 5 COMPLETE — thư viện asset, backfill, bảo trì cache (QĐ-113)
 

@@ -265,7 +265,7 @@ export async function buildBatchResumePlans(batchId: string, opts: { ignoreLockO
   const pre = await preflightImportedBatch(batchId);
   const projects = await prisma.project.findMany({
     where: { batchId },
-    select: { id: true, title: true, status: true, finalVideoPath: true, subtitlePath: true },
+    select: { id: true, title: true, status: true, finalVideoPath: true, subtitlePath: true, outputDir: true },
   });
   const byId = new Map(projects.map((p) => [p.id, p]));
   const frozen = await frozenChoicesForBatch(batchId);
@@ -469,6 +469,40 @@ export interface ContinueAllResult {
   /** Of the runnable plans together; a confirmation carries it back. */
   fingerprint?: string;
   run?: RunSummary;
+  /**
+   * V1.2 Phase 6 (QĐ-114), what a person reads before pressing anything:
+   * "12 video: 8 tiếp tục $0 · 3 cần thêm $0.42 · 1 bị chặn".
+   */
+  summary: BulkResumeSummary;
+}
+
+export interface BulkResumeSummary {
+  total: number;
+  completed: number;
+  /** Can continue without any paid request. */
+  zeroCost: number;
+  /** Need at least one paid request, and how much together (incremental). */
+  paid: number;
+  paidAmount: number;
+  blocked: number;
+  needsRecovery: number;
+  running: number;
+}
+
+export function summarizeResumePlans(plans: VideoResumePlan[]): BulkResumeSummary {
+  const s: BulkResumeSummary = { total: plans.length, completed: 0, zeroCost: 0, paid: 0, paidAmount: 0, blocked: 0, needsRecovery: 0, running: 0 };
+  for (const p of plans) {
+    if (p.nextStep === "NONE") s.completed += 1;
+    else if (p.nextStep === "BLOCKED") s.blocked += 1;
+    else if (p.nextStep === "RECOVER") s.needsRecovery += 1;
+    else if (p.nextStep === "ALREADY_RUNNING") s.running += 1;
+    else if (p.paidRequestsRequired.total > 0) {
+      s.paid += 1;
+      s.paidAmount += p.estimatedIncrementalCost ?? 0;
+    } else s.zeroCost += 1;
+  }
+  s.paidAmount = round(s.paidAmount, 6);
+  return s;
 }
 
 /**
@@ -478,17 +512,33 @@ export interface ContinueAllResult {
  */
 export async function continueAllEligible(
   batchId: string,
-  opts: { confirmPaid?: boolean; wait?: boolean; expectedFingerprint?: string } = {},
+  opts: {
+    confirmPaid?: boolean;
+    wait?: boolean;
+    expectedFingerprint?: string;
+    /** Phase 6: only the videos that need no paid request (no confirmation asked). */
+    zeroCostOnly?: boolean;
+    /** Phase 6: only these videos (TIẾP TỤC VIDEO ĐÃ CHỌN). */
+    onlyProjectIds?: string[];
+  } = {},
 ): Promise<ContinueAllResult> {
-  const plans = await buildBatchResumePlans(batchId);
+  const all = await buildBatchResumePlans(batchId);
+  const plans = opts.onlyProjectIds ? all.filter((p) => opts.onlyProjectIds!.includes(p.videoId)) : all;
+  const summary = summarizeResumePlans(plans);
   const skipped: ContinueAllResult["skipped"] = [];
   const eligible: VideoResumePlan[] = [];
   for (const p of plans) {
-    if (p.nextStep === "GENERATE" || p.nextStep === "RENDER_ONLY") eligible.push(p);
-    else skipped.push({ plan: p, why: p.nextStep === "NONE" ? "COMPLETED" : p.nextStep });
+    if ((p.nextStep === "GENERATE" || p.nextStep === "RENDER_ONLY") && !(opts.zeroCostOnly && p.paidRequestsRequired.total > 0)) {
+      eligible.push(p);
+    } else {
+      skipped.push({
+        plan: p,
+        why: p.nextStep === "NONE" ? "COMPLETED" : opts.zeroCostOnly && p.paidRequestsRequired.total > 0 ? "CẦN CHI PHÍ — không nằm trong lượt $0" : p.nextStep,
+      });
+    }
   }
   if (eligible.length === 0) {
-    return { status: "NOTHING_TO_DO", message: "Không có video nào cần tiếp tục.", runnable: [], skipped, authorizationAmount: 0 };
+    return { status: "NOTHING_TO_DO", message: "Không có video nào cần tiếp tục.", runnable: [], skipped, authorizationAmount: 0, summary };
   }
   const first = eligible[0]!.budget;
   const money = planBatchSpend({
@@ -512,7 +562,7 @@ export async function continueAllEligible(
     .update(runnable.map((p) => `${p.videoId}:${p.fingerprint}`).join("|"))
     .digest("hex")
     .slice(0, 16);
-  const base = { runnable, skipped, authorizationAmount: money.authorizationAmount, fingerprint };
+  const base = { runnable, skipped, authorizationAmount: money.authorizationAmount, fingerprint, summary };
   if (runnable.length === 0) return { ...base, status: "BLOCKED", message: "Không video nào vừa hạn mức còn lại." };
   if (paid > 0 && !opts.confirmPaid) {
     return {

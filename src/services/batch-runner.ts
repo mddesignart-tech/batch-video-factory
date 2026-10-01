@@ -404,7 +404,15 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
 export async function settleBatchIfDone(batchId: string): Promise<BatchStatus | null> {
   const progress = await batchProgress(batchId);
   if (!progress) return null;
-  if (progress.counts.running > 0 || progress.counts.queued > 0) return null;
+  // Videos an approval does not cover (a $0-only or a picked-videos approval,
+  // QĐ-114) are waiting for a person, not for this run: they do not keep the
+  // batch RUNNING.
+  const auth = await prisma.batchAuthorization.findUnique({ where: { batchId }, select: { note: true } });
+  const covered = parseJson<{ runnableProjectIds?: string[] | null }>(auth?.note, {}).runnableProjectIds ?? null;
+  const waiting = progress.videos.filter((v) => ["draft", "script_ready", "media_ready"].includes(v.status));
+  const queuedCovered = covered ? waiting.filter((v) => covered.includes(v.projectId)).length : waiting.length;
+  const awaitingApproval = waiting.length - queuedCovered;
+  if (progress.counts.running > 0 || queuedCovered > 0) return null;
 
   // Videos in the plan that no project exists for yet mean expansion has more
   // to do - but ONLY while the approval is still live. A batch that stopped
@@ -424,15 +432,20 @@ export async function settleBatchIfDone(batchId: string): Promise<BatchStatus | 
   } else if (progress.authorization?.status === "EXHAUSTED") {
     status = "BUDGET_EXHAUSTED";
     reason = "Đã dùng hết hạn mức được duyệt.";
+  } else if (awaitingApproval > 0) {
+    status = "NEEDS_REVIEW";
+    reason = `${awaitingApproval} video chờ duyệt thêm (chưa nằm trong phần đã duyệt).`;
+  } else if (counts.completed > 0 && counts.failed + counts.needsReview > 0) {
+    // Failure isolation (QĐ-114): finished videos are finished; the batch says
+    // so, and names the rest.
+    status = "COMPLETED_WITH_ERRORS";
+    reason = `${counts.completed} video hoàn thành, ${counts.failed} thất bại, ${counts.needsReview} bị chặn / cần xem lại.`;
   } else if (counts.needsReview > 0) {
     status = "NEEDS_REVIEW";
     reason = `${counts.needsReview} video cần người xem lại.`;
-  } else if (counts.failed > 0 && counts.completed === 0) {
+  } else if (counts.failed > 0) {
     status = "FAILED";
     reason = "Không video nào hoàn thành.";
-  } else if (counts.failed > 0) {
-    status = "NEEDS_REVIEW";
-    reason = `${counts.failed} video thất bại, ${counts.completed} video hoàn thành.`;
   }
 
   await prisma.batch.update({ where: { id: batchId }, data: { status } });

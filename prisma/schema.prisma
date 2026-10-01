@@ -432,6 +432,26 @@ model Project {
   /// V1.2 Phase 5 (QĐ-113): hash of everything the final MP4 is made from (media,
   /// timing, audio, subtitles, render settings). Equal hash = SAME_RENDER_INPUT.
   renderRecipe      String?
+  /// V1.2 Phase 6 (QĐ-114): stable, filesystem-safe folder name of this video
+  /// inside its batch's output folder. Assigned once, never re-derived from a
+  /// changed title, unique inside the batch ("-2", "-3" on a clash).
+  outputSlug        String?
+  /// Export folder, relative to data/. Null = never exported in the Phase 6
+  /// layout (a legacy data/output/<slug>-<id8> folder is still honoured).
+  outputDir         String?
+  /// Title / description / tags / hashtags a person typed or imported. JSON.
+  socialMetaJson    String?
+  /// DEFAULT | SCENE (+ sceneNumber) | UPLOAD (+ path). JSON. Local only.
+  thumbnailChoiceJson String?
+  /// Last EXPORT READY check (ffprobe, files, paths). JSON.
+  exportReadyJson   String?
+  /// When the executor last started / finished this video (queue view).
+  runStartedAt      DateTime?
+  runFinishedAt     DateTime?
+  /// The step the executor is on, persisted so a refresh shows the truth.
+  currentStep       String?
+  /// Position in the run order the executor chose (queue view).
+  queueOrder        Int?
   finalVideoPath  String?
   subtitlePath    String?
   errorMessage    String?
@@ -694,6 +714,14 @@ model Batch {
   /// Idioms the operator picked by hand, as a JSON array of ids. Empty means
   /// "choose from the library using category/difficulty".
   idiomIdsJson String @default("[]")
+
+  /// V1.2 Phase 6 (QĐ-114). Output folder name under data/output. Unique.
+  slug String?
+  /// PARTIAL (default): a blocked / failed video never stops the others.
+  /// STRICT: any blocker before the run = the batch does not start.
+  batchMode String @default("PARTIAL")
+  /// Output preset id this batch renders/exports with ("" = Settings default).
+  outputPresetId String @default("")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

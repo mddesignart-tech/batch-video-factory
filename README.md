@@ -82,6 +82,40 @@ Phụ đề (SRT + ASS)  →  FFmpeg ghép + ghi phụ đề  →  MP4
 Việc tạo kịch bản **không bao giờ** tự động kéo theo việc tiêu tiền. Đó là hai
 thao tác riêng biệt, và thao tác thứ hai bị chặn nếu vượt ngân sách.
 
+### Làm việc hằng ngày — `/workspace` (V1.2 Phase 6)
+
+Quy trình thường ngày không cần dòng lệnh:
+
+```
+IMPORT → REVIEW → PREFLIGHT → APPROVE → QUEUE → GENERATE → RENDER → EXPORT
+```
+
+1. **Mở ứng dụng**: `npm run dev` (hoặc `npm run build && npm start`), vào
+   `http://localhost:3000/workspace`.
+2. **TẠO LÔ VIDEO**: kéo thả thư mục / nhiều thư mục / ZIP / file JSON-CSV + ảnh.
+   Bấm KIỂM TRA; tên lô được đề xuất từ tiêu đề + ngày (sửa được). DỰ TOÁN & TẠO
+   LÔ không chi đồng nào.
+3. **Xem lại** trên trang làm việc của lô: thẻ hoặc bảng video, trạng thái
+   (NHÁP · CẦN KIỂM TRA · SẴN SÀNG · ĐANG CHỜ · ĐANG TẠO · ĐANG RENDER · HOÀN
+   THÀNH · CẦN XỬ LÝ · BỊ CHẶN), chọn preset (YouTube Shorts / TikTok / Reels /
+   YouTube ngang / tuỳ chỉnh) và chế độ PARTIAL / STRICT.
+4. **KIỂM TRA & DỰ TOÁN**: số video sẵn sàng / bị chặn, dùng lại, ảnh nhập,
+   LOCAL, Ảnh AI, Video AI, giọng, chi phí cần, đề xuất duyệt, hạn mức toàn cục.
+   Không đủ tiền thì hiện rõ "Thiếu $X" và các lựa chọn — không tự đổi nội dung.
+5. **Hạn mức**: hạn mức toàn cục chỉ đổi trong Cài đặt, bởi bạn.
+6. **Duyệt**: CHẠY VIDEO $0 TRƯỚC (trần $0 — không yêu cầu trả phí nào đi được),
+   rồi DUYỆT & CHẠY / DUYỆT THÊM với số tiền bạn gõ.
+7. **Chạy**: hàng đợi chạy video $0 trước, rồi ảnh/giọng trả phí, rồi Video AI;
+   video lỗi không chặn video khác (PARTIAL).
+8. **Tiếp tục khi cần**: TIẾP TỤC (từng video) / TIẾP TỤC TẤT CẢ — tổng kết
+   "N video $0 · M cần thêm $X · K bị chặn"; phần trả phí luôn hỏi lại giá.
+   Khởi động lại ứng dụng giữa chừng: video dang dở thành CẦN XỬ LÝ, không tự gửi gì.
+9. **Mở output**: `data/output/<lô>/<video>/` gồm `final.mp4`, `thumbnail.jpg`,
+   `subtitles.srt`, `metadata.json`, `storyboard.json`, `captions.txt`,
+   `description.txt`. Có MỞ THƯ MỤC, PHÁT VIDEO, COPY PATH/TITLE/DESCRIPTION,
+   XUẤT BÁO CÁO (CSV + JSON).
+10. **Đăng thủ công** lên YouTube Shorts / TikTok / Reels (Phase 6 không tự đăng).
+
 ### Batch Video Factory — nhiều video trong một lần duyệt
 
 Trang `/batches` làm việc trên cùng nguyên tắc đó, chỉ mở rộng cho nhiều video:

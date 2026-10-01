@@ -78,3 +78,38 @@ export function CopyPathButton({ path, className }: { path: string; className?: 
     </button>
   );
 }
+
+/**
+ * COPY TITLE / COPY DESCRIPTION / COPY DANH SÁCH (V1.2 Phase 6): the same
+ * honest copy as COPY PATH - Clipboard API with a deadline, textarea fallback,
+ * and when both fail the text is shown selected so it can be copied by hand.
+ */
+export function CopyTextButton({ text, label, className }: { text: string; label: string; className?: string }) {
+  const [state, setState] = useState<"idle" | "busy" | CopyOutcome>("idle");
+  return (
+    <span className="inline-flex flex-col gap-1">
+      <button
+        type="button"
+        className={
+          className ?? "rounded border border-ink-700 px-2 py-0.5 text-[11px] text-ink-300 hover:border-brand-500"
+        }
+        onClick={async () => {
+          setState("busy");
+          setState(await copyText(text, () => setState("ok")));
+        }}
+        title={text.slice(0, 300)}
+      >
+        {state === "ok" ? "ĐÃ COPY" : state === "failed" ? "COPY LỖI — chép tay bên dưới" : state === "busy" ? "ĐANG COPY…" : label}
+      </button>
+      {state === "failed" ? (
+        <textarea
+          readOnly
+          value={text}
+          className="h-20 w-64 rounded border border-ink-700 bg-ink-900 p-1 text-[11px] text-ink-200"
+          onFocus={(e) => e.currentTarget.select()}
+          autoFocus
+        />
+      ) : null}
+    </span>
+  );
+}

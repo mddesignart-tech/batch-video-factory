@@ -15,6 +15,7 @@ import {
 } from "@/domain/storyboard";
 import { sha256, sha256Bytes } from "@/lib/crypto";
 import { toAbsolute } from "@/lib/paths";
+import { getSettings } from "@/lib/settings";
 import { classifyScene, assignSpendPriority } from "./complexity";
 import {
   attachImportedImage,
@@ -791,6 +792,9 @@ export async function materialiseImport(
       maxCostPerVideo: opts.maxCostPerVideo,
       idiomIdsJson: "[]",
       planJson: "{}",
+      // Settings > default batch mode (V1.2 Phase 6); the preset stays "" =
+      // Settings default until the person picks one for this batch.
+      batchMode: (await getSettings()).defaultBatchMode,
     },
   });
 

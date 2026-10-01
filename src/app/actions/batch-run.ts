@@ -21,6 +21,7 @@ import {
   type VideoResumePlan,
 } from "@/services/video-resume";
 import { acknowledgeRecovery, type RecoveryItem } from "@/services/paid-recovery";
+import { tryLockAction, unlockAction } from "@/services/run-registry";
 import { replanVideoModels } from "@/services/frozen-video";
 import { prisma } from "@/lib/prisma";
 
@@ -148,14 +149,27 @@ export async function continueAllAction(
   batchId: string,
   confirmPaid: boolean,
   expectedFingerprint?: string,
+  scope: { zeroCostOnly?: boolean; onlyProjectIds?: string[] } = {},
 ): Promise<ContinueAllResult & { ok: boolean }> {
+  // A double click is refused before any work (QĐ-114).
+  const key = `continue-all:${batchId}`;
+  if (!tryLockAction(key)) {
+    return { ok: false, status: "BLOCKED", message: "ALREADY_RUNNING: đang xử lý TIẾP TỤC TẤT CẢ — không bấm hai lần.", runnable: [], skipped: [], authorizationAmount: 0, summary: emptySummary() };
+  }
   try {
-    const r = await continueAllEligible(batchId, { confirmPaid, expectedFingerprint });
+    const r = await continueAllEligible(batchId, { confirmPaid, expectedFingerprint, ...scope });
     revalidatePath(`/batches/${batchId}`);
+    revalidatePath(`/workspace/${batchId}`);
     return { ...r, ok: r.status !== "BLOCKED" };
   } catch (err) {
-    return { ok: false, status: "BLOCKED", message: errorMessage(err), runnable: [], skipped: [], authorizationAmount: 0 };
+    return { ok: false, status: "BLOCKED", message: errorMessage(err), runnable: [], skipped: [], authorizationAmount: 0, summary: emptySummary() };
+  } finally {
+    unlockAction(key);
   }
+}
+
+function emptySummary() {
+  return { total: 0, completed: 0, zeroCost: 0, paid: 0, paidAmount: 0, blocked: 0, needsRecovery: 0, running: 0 };
 }
 
 /** KIỂM TRA: re-attach to requests the vendor accepted; report the possibly-charged ones. Never re-sends. */

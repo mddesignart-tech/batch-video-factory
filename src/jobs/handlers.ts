@@ -10,7 +10,7 @@ import { projectSubdir, toAbsolute, toRelative } from "@/lib/paths";
 import { evaluateScene } from "@/services/generation";
 import { syncBatchActualCost, syncProjectActualCost } from "@/services/cost-tracker";
 import { settleBatchIfDone } from "@/services/batch-runner";
-import { renderProject, targetForAspect, type RenderRequest } from "@/media/render";
+import { renderProject, type RenderRequest } from "@/media/render";
 import { renderMediaHashes, renderRecipeHash, sameRenderInput } from "@/services/render-recipe";
 import { contentInfo } from "@/services/asset-content";
 import { pacingSummary, parseDurationMode } from "@/domain/scene-timing";
@@ -168,10 +168,18 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
   }
 
   const settings = await getSettings();
+  // Output preset (V1.2 Phase 6, QĐ-114): frame, subtitles burn, encoder. With
+  // the defaults this is exactly V1's target + Settings' burn switch.
+  const { renderSettingsFrom } = await import("@/services/output-layout");
+  const batchPreset = project.batchId
+    ? (await prisma.batch.findUnique({ where: { id: project.batchId }, select: { outputPresetId: true } }))?.outputPresetId
+    : null;
+  const output = renderSettingsFrom(project, batchPreset, settings);
   const request: RenderRequest = {
     projectId,
-    target: targetForAspect(project.aspectRatio),
-    burnSubtitles: settings.burnSubtitles,
+    target: output.render.target,
+    burnSubtitles: output.render.burnSubtitles,
+    ...(output.render.encode ? { encode: output.render.encode } : {}),
     highlightPhrase: project.idiom.phrase,
     mixSettings: settings.audioMix,
     scenes: active.map((s) => ({

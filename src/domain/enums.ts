@@ -238,6 +238,12 @@ export const BATCH_STATUSES = [
   "QUEUED",
   "RUNNING",
   "COMPLETED",
+  /**
+   * V1.2 Phase 6 (QĐ-114): some videos finished, some failed or are blocked.
+   * The batch is NOT a failure - finished videos are ready to post - and the
+   * rest can still be continued, so it is not terminal either.
+   */
+  "COMPLETED_WITH_ERRORS",
   "FAILED",
   /** Stopped for a decision - over per-video budget, or needs a provider. */
   "NEEDS_REVIEW",
@@ -391,6 +397,7 @@ export const VI_BATCH_STATUS: Record<BatchStatus, string> = {
   QUEUED: "Đã duyệt, chờ chạy",
   RUNNING: "Đang chạy",
   COMPLETED: "Hoàn thành",
+  COMPLETED_WITH_ERRORS: "Hoàn thành (có video lỗi)",
   FAILED: "Thất bại",
   NEEDS_REVIEW: "Cần xem lại",
   BUDGET_EXHAUSTED: "Hết ngân sách đã duyệt",

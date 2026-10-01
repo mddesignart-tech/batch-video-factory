@@ -158,10 +158,12 @@ export function ActionButtonWithFeedback({
   action,
   confirm,
   children,
+  onDone,
   ...props
 }: Omit<ButtonProps, "onClick"> & {
   action: () => Promise<ActionResult>;
   confirm?: string;
+  onDone?: (result: ActionResult) => void;
 }) {
   const [result, setResult] = React.useState<ActionResult | null>(null);
   return (
@@ -170,7 +172,10 @@ export function ActionButtonWithFeedback({
         {...props}
         action={action}
         confirm={confirm}
-        onDone={setResult}
+        onDone={(r) => {
+          setResult(r);
+          onDone?.(r);
+        }}
       >
         {children}
       </ActionButton>

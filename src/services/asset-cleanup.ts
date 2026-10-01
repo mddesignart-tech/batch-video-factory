@@ -84,7 +84,7 @@ async function referencedPaths(): Promise<Set<string>> {
     prisma.asset.findMany({ select: { filePath: true } }),
     prisma.scene.findMany({ select: { imagePath: true, videoPath: true, audioPath: true } }),
     prisma.dialogueLine.findMany({ select: { outputPath: true } }),
-    prisma.project.findMany({ select: { finalVideoPath: true, subtitlePath: true } }),
+    prisma.project.findMany({ select: { finalVideoPath: true, subtitlePath: true, thumbnailChoiceJson: true } }),
     prisma.characterReference.findMany({ select: { filePath: true } }),
   ]);
   const out = new Set<string>();
@@ -101,6 +101,13 @@ async function referencedPaths(): Promise<Set<string>> {
   projects.forEach((p) => {
     add(p.finalVideoPath);
     add(p.subtitlePath);
+    // A person's uploaded thumbnail (Phase 6) is referenced by the choice JSON.
+    try {
+      const choice = JSON.parse(p.thumbnailChoiceJson ?? "{}") as { path?: unknown };
+      if (typeof choice.path === "string") add(choice.path);
+    } catch {
+      // not JSON: nothing referenced
+    }
   });
   refs.forEach((r) => add(r.filePath));
   return out;

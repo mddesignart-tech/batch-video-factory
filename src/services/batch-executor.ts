@@ -25,9 +25,22 @@ import { generateSceneImage, generateSceneVideo, generateSceneVoice } from "@/se
 import { existingOutputFor, exportProjectOutput, missingOutputFiles } from "@/services/output-export";
 import { recommendAuthorization } from "@/domain/cost-basis";
 import { planBatchSpend, type BatchSpendPlan, type PlannedVideo, type SpendReasonCode } from "@/domain/spend-limits";
-import { currentRun, isRunning, registerRun, tryLockVideo, unlockVideo } from "@/services/run-registry";
+import {
+  currentRun,
+  isRunning,
+  registerRun,
+  isVideoRunning,
+  tryLockAction,
+  tryLockVideo,
+  unlockAction,
+  unlockVideo,
+} from "@/services/run-registry";
 import { completeJob, failJob } from "@/jobs/queue";
 import { runJob } from "@/jobs/handlers";
+import { getSettings } from "@/lib/settings";
+import { mapPool, withSemaphore } from "@/lib/semaphore";
+import { costClass, orderForRun, type CostClass } from "@/domain/queue-order";
+import { invalidVoiceLines, invalidVoiceMessage } from "@/services/voice-validity";
 
 /**
  * THE production executor for a batch whose videos already exist as rows - an
@@ -126,6 +139,8 @@ interface ApprovalInput {
   importedImages: number;
   willCreateImages: number;
   usesLowAuto: boolean;
+  /** BLOCKED videos in the WHOLE batch, whatever the selection (STRICT mode). */
+  batchBlockedCount?: number;
 }
 
 /** IDIOM_GENERATED, before its projects exist: priced from the approved plan. */
@@ -196,12 +211,21 @@ async function idiomApprovalInput(batchId: string): Promise<ApprovalInput> {
 }
 
 /** Rows exist (imported storyboard, or a project wrapped into a batch). */
-async function rowsApprovalInput(batchId: string, resume: boolean): Promise<ApprovalInput> {
+async function rowsApprovalInput(batchId: string, resume: boolean, select: ApprovalSelection = {}): Promise<ApprovalInput> {
   const pre = await preflightImportedBatch(batchId);
-  const runnable = pre.videos.filter((v) =>
-    resume ? v.lifecycle !== "BLOCKED" && v.lifecycle !== "COMPLETED" : v.lifecycle === "READY",
+  // Phase 6 (QĐ-114): an approval may cover only the videos a person picked,
+  // or only the ones that cost nothing. The others are simply not part of it -
+  // not blocked, not changed - and can be approved later.
+  const picked = (v: (typeof pre.videos)[number]) =>
+    (!select.onlyProjectIds || select.onlyProjectIds.includes(v.projectId)) &&
+    (!select.zeroCostOnly || isZeroCostVideo(v));
+  const runnable = pre.videos.filter(
+    (v) => (resume ? v.lifecycle !== "BLOCKED" && v.lifecycle !== "COMPLETED" : v.lifecycle === "READY") && picked(v),
   );
-  const blocked = pre.videos.filter((v) => v.lifecycle === "BLOCKED");
+  const blocked = pre.videos.filter(
+    (v) => v.lifecycle === "BLOCKED" && (!select.onlyProjectIds || select.onlyProjectIds.includes(v.projectId)),
+  );
+  const scopeModels = select.onlyProjectIds || select.zeroCostOnly;
   // A clip the ROUTER will choose (no hand pin) needs the separate LOW_AUTO yes.
   let usesLowAuto = false;
   const perVideo: ApprovalInput["perVideo"] = {};
@@ -247,16 +271,38 @@ async function rowsApprovalInput(batchId: string, resume: boolean): Promise<Appr
           : null,
     })),
     perVideo,
-    estimatedTotal: pre.estimatedTotal,
-    paidModels: pre.paidModels,
+    estimatedTotal: scopeModels ? runnable.reduce((n, v) => n + v.estimatedCost, 0) : pre.estimatedTotal,
+    // Only the models the covered videos would pay need a confirmation.
+    paidModels: scopeModels
+      ? [...new Map(runnable.flatMap((v) => v.paidModels).map((m) => [m.key, m])).values()]
+      : pre.paidModels,
     plannedVideoModels: [
       ...new Set(runnable.flatMap((v) => v.scenes.map((sc) => sc.videoModel).filter((m): m is string => Boolean(m)))),
     ],
-    posts: { text: 0, image: pre.counts.imagePosts, video: pre.counts.videoPosts, voice: pre.counts.voicePosts },
+    posts: scopeModels
+      ? {
+          text: 0,
+          image: runnable.reduce((n, v) => n + v.counts.imagePosts, 0),
+          video: runnable.reduce((n, v) => n + v.counts.videoPosts, 0),
+          voice: runnable.reduce((n, v) => n + v.counts.voicePosts, 0),
+        }
+      : { text: 0, image: pre.counts.imagePosts, video: pre.counts.videoPosts, voice: pre.counts.voicePosts },
     importedImages: pre.counts.imageImported,
     willCreateImages: pre.counts.imageBuy,
     usesLowAuto,
+    batchBlockedCount: pre.videos.filter((v) => v.lifecycle === "BLOCKED").length,
   };
+}
+
+/** Which videos one approval covers (Phase 6 selection / $0 filter). */
+export interface ApprovalSelection {
+  onlyProjectIds?: string[];
+  zeroCostOnly?: boolean;
+}
+
+/** No paid POST at all: everything is imported / reused / local. */
+export function isZeroCostVideo(v: { estimatedCost: number; counts: { imagePosts: number; videoPosts: number; voicePosts: number } }): boolean {
+  return v.estimatedCost <= 1e-9 && v.counts.imagePosts + v.counts.videoPosts + v.counts.voicePosts === 0;
 }
 
 /** The reason code for a video the preflight already BLOCKED. */
@@ -290,7 +336,7 @@ export function approvalVideoLimit(videoLimit: number, batchPerVideo: number, ty
 async function gateChecks(
   batchId: string,
   input: ApprovalInput,
-  opts: { maxBatch?: number; maxPerVideo?: number; resume?: boolean },
+  opts: { maxBatch?: number; maxPerVideo?: number; resume?: boolean; zeroCostOnly?: boolean },
 ): Promise<ApprovalPreflight> {
   const [cap, providers, token, batch, auth, wallets] = await Promise.all([
     spendStatus(),
@@ -356,8 +402,20 @@ async function gateChecks(
       add(`${v.title} ≤ trần/video ${money(opts.maxPerVideo)}`, v.estimatedCost <= opts.maxPerVideo + 1e-9, money(v.estimatedCost));
     }
   }
+  // STRICT (QĐ-114): any blocker in the batch before the run = no start.
+  if (batch.batchMode === "STRICT" && !opts.resume) {
+    const n = input.batchBlockedCount ?? input.blocked.length;
+    add(
+      "Chế độ STRICT: không video nào bị chặn",
+      n === 0,
+      n === 0 ? "0 video bị chặn" : `STRICT_MODE_BLOCKED: ${n} video bị chặn — sửa, hoặc đổi lô sang PARTIAL`,
+    );
+  }
   if (opts.maxBatch !== undefined) {
-    add("Trần lô > 0", opts.maxBatch > 0, money(opts.maxBatch));
+    // A $0-only approval may carry a $0 ceiling: then no paid POST can pass
+    // the gate at all, which is exactly what "run the free videos" means.
+    const zeroOk = opts.zeroCostOnly === true && input.estimatedTotal <= 1e-9 && opts.maxBatch === 0;
+    add("Trần lô > 0", opts.maxBatch > 0 || zeroOk, zeroOk ? "$0 — chỉ video không tốn phí" : money(opts.maxBatch));
     add(`Dự toán ≤ trần lô ${money(opts.maxBatch)}`, input.estimatedTotal <= opts.maxBatch + 1e-9, money(input.estimatedTotal));
     add(
       "Trần lô ≤ ngân sách toàn cục còn lại",
@@ -469,12 +527,15 @@ async function gateChecks(
  */
 export async function preflightForApproval(
   batchId: string,
-  opts: { maxBatch?: number; maxPerVideo?: number; resume?: boolean } = {},
+  opts: { maxBatch?: number; maxPerVideo?: number; resume?: boolean } & ApprovalSelection = {},
 ): Promise<ApprovalPreflight> {
   const input =
     (await pendingIdiomVideos(batchId)) > 0
       ? await idiomApprovalInput(batchId)
-      : await rowsApprovalInput(batchId, Boolean(opts.resume));
+      : await rowsApprovalInput(batchId, Boolean(opts.resume), {
+          onlyProjectIds: opts.onlyProjectIds,
+          zeroCostOnly: opts.zeroCostOnly,
+        });
   return gateChecks(batchId, input, opts);
 }
 
@@ -537,10 +598,26 @@ export async function approveAndRun(opts: {
   expectedVideoModels?: string[];
   /** Tests await the run; the UI does not. */
   wait?: boolean;
+  /** Phase 6: approve only these videos (the others stay untouched, approvable later). */
+  onlyProjectIds?: string[];
+  /** Phase 6: approve only the videos that cost $0 (then maxBatch may be 0). */
+  zeroCostOnly?: boolean;
 }): Promise<{ preflight: ApprovalPreflight; run?: RunSummary }> {
-  if (!Number.isFinite(opts.maxBatch) || opts.maxBatch <= 0) {
+  const zero = opts.zeroCostOnly === true;
+  if (!Number.isFinite(opts.maxBatch) || opts.maxBatch < 0 || (opts.maxBatch === 0 && !zero)) {
     throw new ExecutorError("Trần chi của lô phải là một số lớn hơn 0.");
   }
+  // A double click reaches here twice: the second is refused before any await.
+  const actionKey = `approve:${opts.batchId}`;
+  if (!tryLockAction(actionKey)) throw new ExecutorError("ALREADY_RUNNING: đang duyệt lô này — không bấm hai lần.");
+  try {
+    return await approveAndRunLocked(opts);
+  } finally {
+    unlockAction(actionKey);
+  }
+}
+
+async function approveAndRunLocked(opts: Parameters<typeof approveAndRun>[0]): Promise<{ preflight: ApprovalPreflight; run?: RunSummary }> {
   if (opts.maxPerVideo !== undefined && (!Number.isFinite(opts.maxPerVideo) || opts.maxPerVideo <= 0)) {
     throw new ExecutorError("Trần chi mỗi video phải là một số lớn hơn 0.");
   }
@@ -549,6 +626,8 @@ export async function approveAndRun(opts: {
   const check = await preflightForApproval(opts.batchId, {
     maxBatch: opts.maxBatch,
     maxPerVideo: opts.maxPerVideo,
+    onlyProjectIds: opts.onlyProjectIds,
+    zeroCostOnly: opts.zeroCostOnly,
   });
   if (!check.ready) {
     const failed = check.checks.filter((c) => !c.ok && c.blocking).map((c) => `${c.label} (${c.detail})`);
@@ -607,7 +686,13 @@ export async function approveAndRun(opts: {
     lowAutoApproved: opts.lowAutoApproved,
   });
 
-  const run = startRun(opts.batchId, { resume: false });
+  // A picked-videos / $0-only approval runs exactly those videos; the others
+  // are left as they are (not marked blocked) for a later DUYỆT THÊM.
+  const scoped = Boolean(opts.onlyProjectIds) || opts.zeroCostOnly === true;
+  const run = startRun(opts.batchId, {
+    resume: false,
+    onlyProjectIds: scoped ? (check.runnableProjectIds ?? []) : undefined,
+  });
   return { preflight: check, run: opts.wait ? await run : undefined };
 }
 
@@ -705,13 +790,18 @@ async function assertHeadroom(projectId: string, batchId: string, ceilings: Ceil
     spendStatus(),
     providerSpendBreakdown(),
   ]);
-  if (video >= ceilings.perVideo) {
-    throw new ExecutorError(`${what}: video đã chi ${money(video)} ≥ trần ${money(ceilings.perVideo)}. DỪNG.`);
+  // A limit that is REACHED stops the next PAID step - at its POST, by the gate,
+  // inside the reservation lock. It must not stop free work: a $0-only approval
+  // (ceiling $0) or an exhausted global budget still lets imported / reused /
+  // local videos finish (QĐ-114). Only a limit already OVERRUN stops here.
+  const EPS = 1e-9;
+  if (video > ceilings.perVideo + EPS) {
+    throw new ExecutorError(`${what}: video đã chi ${money(video)} > trần ${money(ceilings.perVideo)}. DỪNG.`);
   }
-  if (batch >= ceilings.batch) {
-    throw new ExecutorError(`${what}: lô đã chi ${money(batch)} ≥ trần ${money(ceilings.batch)}. DỪNG.`);
+  if (batch > ceilings.batch + EPS) {
+    throw new ExecutorError(`${what}: lô đã chi ${money(batch)} > trần ${money(ceilings.batch)}. DỪNG.`);
   }
-  if (cap.remaining <= 0) {
+  if (cap.remaining < -EPS) {
     throw new ExecutorError(`${what}: hạn mức toàn cục đã hết (${money(cap.remaining)}). DỪNG.`);
   }
   for (const w of wallets) {
@@ -727,8 +817,16 @@ async function runScene(
   projectId: string,
   batchId: string,
   ceilings: Ceilings,
+  progress?: { scene: number; of: number; paidSlots: number },
 ): Promise<void> {
-  await generateSceneImage(sceneId);
+  // Each media step may send a paid request: MAX CONCURRENT PAID REQUESTS
+  // bounds how many run at once across the app. The gates inside are unchanged.
+  const step = async <T>(label: string, work: () => Promise<T>): Promise<T> => {
+    if (!progress) return work();
+    await setStep(projectId, `${label} · cảnh ${progress.scene}/${progress.of}`);
+    return withSemaphore("paid-media", progress.paidSlots, work);
+  };
+  await step("Ảnh", () => generateSceneImage(sceneId));
   await assertHeadroom(projectId, batchId, ceilings, "sau ảnh");
 
   // Which model the clip may use is NOT checked here any more. This used to
@@ -736,9 +834,9 @@ async function runScene(
   // `generateSceneVideo` route again - so it judged one model and the POST used
   // another. The generator now buys exactly the frozen choice, and the batch
   // gate (2c) refuses any other model at the POST itself (QĐ-111).
-  await generateSceneVideo(sceneId);
+  await step("Clip", () => generateSceneVideo(sceneId));
   await assertHeadroom(projectId, batchId, ceilings, "sau clip");
-  await generateSceneVoice(sceneId);
+  await step("Giọng", () => generateSceneVoice(sceneId));
 
   const done = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
   if (done.status !== "completed" || done.errorMessage !== null) {
@@ -833,6 +931,7 @@ export async function runBatch(
     providers: parseJson<string[]>(auth.providerScopeJson, []),
   };
   await prisma.batch.update({ where: { id: batchId }, data: { status: "RUNNING" } });
+  const settings = await getSettings();
 
   // IDIOM_GENERATED: write the scripts (paid Text AI, through the same gates)
   // and turn the plan into projects. Resumable - an idiom that already has a
@@ -843,11 +942,32 @@ export async function runBatch(
   // decides - the verdict they saw. For idiom projects, the per-video re-check
   // against the real script has already marked them needs_review.
   const blocked = new Map<string, string>();
+  // Run order (V1.2 Phase 6, QĐ-114): $0 / reuse first, then local-only, then
+  // paid images/voices, then paid Video AI; ties keep the import order.
+  const classOf = new Map<string, CostClass>();
+  // Blocked by the preflight itself (not merely outside the approval).
+  const preflightBlocked = new Set<string>();
   // The approval covers named videos only (partial batch, QĐ-108).
   const approvedIds = parseJson<{ runnableProjectIds?: string[] | null }>(auth.note, {}).runnableProjectIds ?? null;
   if ((await batchSource(batchId)) === "STORYBOARD_IMPORTED") {
     const pre = await preflightImportedBatch(batchId);
-    for (const v of pre.videos) if (v.lifecycle === "BLOCKED") blocked.set(v.projectId, v.blockedReason ?? v.status);
+    for (const v of pre.videos) {
+      classOf.set(
+        v.projectId,
+        costClass({
+          buyImages: v.counts.imageBuy,
+          buyVideos: v.counts.videoBuy,
+          buyVoices: v.counts.voiceBuy,
+          localMotion: v.localMotionCount,
+          incrementalCost: v.estimatedCost,
+        }),
+      );
+    }
+    for (const v of pre.videos) {
+      if (v.lifecycle !== "BLOCKED") continue;
+      blocked.set(v.projectId, v.blockedReason ?? v.status);
+      preflightBlocked.add(v.projectId);
+    }
     if (approvedIds) {
       for (const v of pre.videos) {
         if (!approvedIds.includes(v.projectId) && !blocked.has(v.projectId) && v.lifecycle !== "COMPLETED") {
@@ -869,121 +989,199 @@ export async function runBatch(
       blocked.set(p.id, (p.errorMessage ?? "chưa có kịch bản").replace(/^BLOCKED: /, ""));
     }
   }
-  const projects = await prisma.project.findMany({ where: { batchId }, orderBy: { createdAt: "asc" } });
-  const outcomes: VideoOutcome[] = [];
+  const all = await prisma.project.findMany({ where: { batchId }, orderBy: { createdAt: "asc" } });
+
+  // A voice file that is present but broken is never re-bought on its own
+  // (paid TTS); the video waits for a person. QĐ-114.
+  const badVoices = await invalidVoiceLines(all.filter((p) => p.status !== "completed").map((p) => p.id));
+  for (const [projectId, lines] of badVoices) {
+    if (!blocked.has(projectId)) blocked.set(projectId, invalidVoiceMessage(lines));
+    preflightBlocked.add(projectId);
+  }
+
+  // A scoped run ($0-only / picked videos) leaves the other videos alone - but a
+  // video the preflight BLOCKED is blocked whatever the scope, and says so, so
+  // the batch can settle instead of waiting on it.
+  if (opts.onlyProjectIds) {
+    for (const p of all) {
+      if (opts.onlyProjectIds.includes(p.id) || !preflightBlocked.has(p.id)) continue;
+      if (p.status === "completed" || isVideoRunning(p.id)) continue;
+      await prisma.project.update({
+        where: { id: p.id },
+        data: { status: "needs_review", errorMessage: `BLOCKED: ${blocked.get(p.id)}`.slice(0, 1000), currentStep: null },
+      });
+    }
+  }
+
+  const projects = orderForRun(
+    all
+      .filter((p) => !opts.onlyProjectIds || opts.onlyProjectIds.includes(p.id))
+      .map((p, i) => ({ project: p, order: i, cls: classOf.get(p.id) ?? ("FREE" as CostClass) })),
+  ).map((x) => x.project);
+  for (let i = 0; i < projects.length; i += 1) {
+    if (projects[i]!.queueOrder !== i + 1) {
+      await prisma.project.update({ where: { id: projects[i]!.id }, data: { queueOrder: i + 1 } });
+    }
+  }
 
   // One active execution per VIDEO (QĐ-110): a video another run is already
   // working on is reported ALREADY_RUNNING and left to it - never run twice.
   const owner =
     opts.lockOwner ?? `run:${batchId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
-  for (const project of projects) {
-    if (opts.onlyProjectIds && !opts.onlyProjectIds.includes(project.id)) continue;
+
+  const runOne = async (project: (typeof projects)[number]): Promise<VideoOutcome> => {
     if (!tryLockVideo(project.id, owner)) {
-      outcomes.push({
+      return {
         projectId: project.id,
         title: project.title,
         stopped: "ALREADY_RUNNING: video này đang được một lần chạy khác xử lý.",
         rendered: false,
         skipped: true,
         outputDir: null,
-      });
-      continue;
+      };
     }
     try {
-    // Finished = the MP4 AND its subtitle file are still on disk. A missing
-    // subtitle file sends the video back through the scenes (all reused, $0)
-    // to a local re-render, which writes the subtitles again.
-    const finished =
-      project.status === "completed" &&
-      Boolean(project.finalVideoPath) &&
-      fs.existsSync(toAbsolute(project.finalVideoPath!)) &&
-      (!project.subtitlePath || fs.existsSync(toAbsolute(project.subtitlePath)));
-    if (finished && opts.resume) {
-      // Done is done: no scene is walked, nothing is re-rendered, nothing is
-      // bought. Only the export folder is checked, and re-made locally (copy +
-      // one FFmpeg frame, $0) when a file in it has gone missing.
-      let outputDir = existingOutputFor(project)?.dir ?? null;
-      const missing = missingOutputFiles(project);
-      if (missing.length > 0) {
+      // DỪNG (cancel) is honoured between videos: a video not yet started stays
+      // exactly as it was - not failed, not blocked - and TIẾP TỤC picks it up.
+      const live = await prisma.batchAuthorization.findUnique({ where: { batchId }, select: { status: true } });
+      if (live?.status === "CANCELLED") {
+        return {
+          projectId: project.id,
+          title: project.title,
+          stopped: "CANCELLED: lô đã được DỪNG trước khi video này bắt đầu.",
+          rendered: false,
+          skipped: true,
+          outputDir: null,
+        };
+      }
+      // Finished = the MP4 AND its subtitle file are still on disk. A missing
+      // subtitle file sends the video back through the scenes (all reused, $0)
+      // to a local re-render, which writes the subtitles again.
+      const finished =
+        project.status === "completed" &&
+        Boolean(project.finalVideoPath) &&
+        fs.existsSync(toAbsolute(project.finalVideoPath!)) &&
+        (!project.subtitlePath || fs.existsSync(toAbsolute(project.subtitlePath)));
+      if (finished && opts.resume) {
+        // Done is done: no scene is walked, nothing is re-rendered, nothing is
+        // bought. Only the export folder is checked, and re-made locally (copy +
+        // one FFmpeg frame, $0) when a file in it has gone missing.
+        let outputDir = existingOutputFor(project)?.dir ?? null;
+        const missing = missingOutputFiles(project);
+        if (missing.length > 0) {
+          try {
+            outputDir = await exportProjectOutput(project.id);
+            await logger.info({
+              event: "output.reexported",
+              projectId: project.id,
+              message: `Xuất lại output (thiếu ${missing.join(", ")}) tại máy, không gọi provider.`,
+            });
+          } catch (err) {
+            outputDir = null;
+            await logger.warn({
+              event: "output.export_failed",
+              projectId: project.id,
+              message: `Không xuất được thư mục output (thiếu ${missing.join(", ")}): ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+        }
+        return { projectId: project.id, title: project.title, stopped: "", rendered: true, skipped: false, outputDir };
+      }
+      const reason = blocked.get(project.id);
+      if (reason) {
+        await prisma.project.update({
+          where: { id: project.id },
+          data: { status: "needs_review", errorMessage: `BLOCKED: ${reason}`.slice(0, 1000), currentStep: null },
+        });
+        return { projectId: project.id, title: project.title, stopped: `BLOCKED: ${reason}`, rendered: false, skipped: true, outputDir: null };
+      }
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { status: "media_generating", errorMessage: null, runStartedAt: new Date(), runFinishedAt: null, currentStep: "Bắt đầu" },
+      });
+      const scenes = await prisma.scene.findMany({
+        where: { projectId: project.id, skipped: false },
+        orderBy: { sceneNumber: "asc" },
+      });
+      let stopped = "";
+      for (const scene of scenes) {
         try {
-          outputDir = await exportProjectOutput(project.id);
-          await logger.info({
-            event: "output.reexported",
-            projectId: project.id,
-            message: `Xuất lại output (thiếu ${missing.join(", ")}) tại máy, không gọi provider.`,
+          await assertHeadroom(project.id, batchId, ceilings, `cảnh ${scene.sceneNumber}`);
+          await runScene(scene.id, project.id, batchId, ceilings, {
+            scene: scene.sceneNumber,
+            of: scenes.length,
+            paidSlots: settings.maxConcurrentPaidRequests,
           });
         } catch (err) {
-          outputDir = null;
-          await logger.warn({
-            event: "output.export_failed",
-            projectId: project.id,
-            message: `Không xuất được thư mục output (thiếu ${missing.join(", ")}): ${err instanceof Error ? err.message : String(err)}`,
+          stopped = err instanceof Error ? err.message : String(err);
+          await prisma.scene.update({
+            where: { id: scene.id },
+            data: { status: "failed", errorMessage: stopped.slice(0, 500) },
           });
+          await logger.warn({
+            event: "batch.video_stopped",
+            projectId: project.id,
+            sceneId: scene.id,
+            message: `Dừng video "${project.title}" ở cảnh ${scene.sceneNumber}: ${stopped}. Không thử lại, không đổi provider.`,
+          });
+          break;
         }
       }
-      outcomes.push({ projectId: project.id, title: project.title, stopped: "", rendered: true, skipped: false, outputDir });
-      continue;
-    }
-    const reason = blocked.get(project.id);
-    if (reason) {
+
+      // A render that fails never reaches back for the paid API - the assets are
+      // on disk. Resume renders again from them.
+      let rendered = false;
+      let outputDir: string | null = null;
+      if (!stopped) {
+        try {
+          await setStep(project.id, "Render tại máy");
+          await withSemaphore("local-render", settings.maxConcurrentLocalRenders, () => renderProjectNow(project.id));
+          rendered = true;
+          const done = await prisma.project.findUniqueOrThrow({ where: { id: project.id } });
+          outputDir = existingOutputFor(done)?.dir ?? null;
+        } catch (err) {
+          stopped = `render: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      }
       await prisma.project.update({
         where: { id: project.id },
-        data: { status: "needs_review", errorMessage: `BLOCKED: ${reason}`.slice(0, 1000) },
+        data: {
+          ...(stopped ? { status: "failed", errorMessage: stopped.slice(0, 1000) } : {}),
+          runFinishedAt: new Date(),
+          currentStep: null,
+        },
       });
-      outcomes.push({ projectId: project.id, title: project.title, stopped: `BLOCKED: ${reason}`, rendered: false, skipped: true, outputDir: null });
-      continue;
-    }
-
-    await prisma.project.update({ where: { id: project.id }, data: { status: "media_generating", errorMessage: null } });
-    const scenes = await prisma.scene.findMany({
-      where: { projectId: project.id, skipped: false },
-      orderBy: { sceneNumber: "asc" },
-    });
-    let stopped = "";
-    for (const scene of scenes) {
-      try {
-        await assertHeadroom(project.id, batchId, ceilings, `cảnh ${scene.sceneNumber}`);
-        await runScene(scene.id, project.id, batchId, ceilings);
-      } catch (err) {
-        stopped = err instanceof Error ? err.message : String(err);
-        await prisma.scene.update({
-          where: { id: scene.id },
-          data: { status: "failed", errorMessage: stopped.slice(0, 500) },
-        });
-        await logger.warn({
-          event: "batch.video_stopped",
-          projectId: project.id,
-          sceneId: scene.id,
-          message: `Dừng video "${project.title}" ở cảnh ${scene.sceneNumber}: ${stopped}. Không thử lại, không đổi provider.`,
-        });
-        break;
-      }
-    }
-
-    // A render that fails never reaches back for the paid API - the assets are
-    // on disk. Resume renders again from them.
-    let rendered = false;
-    let outputDir: string | null = null;
-    if (!stopped) {
-      try {
-        await renderProjectNow(project.id);
-        rendered = true;
-        const done = await prisma.project.findUniqueOrThrow({ where: { id: project.id } });
-        outputDir = existingOutputFor(done)?.dir ?? null;
-      } catch (err) {
-        stopped = `render: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    }
-    if (stopped) {
-      await prisma.project.update({
-        where: { id: project.id },
-        data: { status: "failed", errorMessage: stopped.slice(0, 1000) },
-      });
-    }
-    outcomes.push({ projectId: project.id, title: project.title, stopped, rendered, skipped: false, outputDir });
+      return { projectId: project.id, title: project.title, stopped, rendered, skipped: false, outputDir };
     } finally {
       unlockVideo(project.id, owner);
     }
+  };
+
+  // Videos are independent (failure isolation): one that throws is recorded as
+  // stopped and the others carry on. MAX CONCURRENT VIDEOS = 1 is the V1
+  // behaviour - one after another.
+  const results = await mapPool(projects, settings.maxConcurrentVideos, runOne);
+  const outcomes: VideoOutcome[] = results.map((r, i) =>
+    r.ok
+      ? r.value
+      : {
+          projectId: projects[i]!.id,
+          title: projects[i]!.title,
+          stopped: r.error instanceof Error ? r.error.message : String(r.error),
+          rendered: false,
+          skipped: false,
+          outputDir: null,
+        },
+  );
+  for (let i = 0; i < results.length; i += 1) {
+    if (results[i]!.ok) continue;
+    await prisma.project
+      .update({
+        where: { id: projects[i]!.id },
+        data: { status: "failed", errorMessage: outcomes[i]!.stopped.slice(0, 1000), currentStep: null, runFinishedAt: new Date() },
+      })
+      .catch(() => undefined);
   }
 
   // Money held for a request that never finished is handed back - never left
@@ -1002,4 +1200,123 @@ export async function runBatch(
       `chi lô ${money(await spentOnBatch(batchId))}, trạng thái ${settledStatus ?? "?"}.`,
   });
   return { batchId, outcomes, settledStatus, releasedReservations: stranded.length };
+}
+
+/** The step a video is on, persisted so a refresh (or another tab) shows the truth. */
+async function setStep(projectId: string, step: string): Promise<void> {
+  await prisma.project.update({ where: { id: projectId }, data: { currentStep: step.slice(0, 120) } }).catch(() => undefined);
+}
+
+// ------------------------------------------------------------ approve more ---
+
+/**
+ * DUYỆT THÊM (V1.2 Phase 6, QĐ-114): add videos to an approval that already
+ * exists - after a $0-only run, or after running a few picked videos.
+ *
+ * A NEW decision, made the same way as the first: the person types the extra
+ * amount, the same preflight judges it (every limit, confirmations, models,
+ * STRICT), and the global cap must still cover it - never raised here. The
+ * batch ceiling grows by exactly the typed amount; the videos covered so far
+ * keep their approval and their frozen models; the new ones get theirs.
+ */
+export async function extendApproval(opts: {
+  batchId: string;
+  addMaxSpend: number;
+  onlyProjectIds?: string[];
+  lowAutoApproved: boolean;
+  expectedVideoModels?: string[];
+  wait?: boolean;
+}): Promise<{ preflight: ApprovalPreflight; added: string[]; run?: RunSummary }> {
+  if (!Number.isFinite(opts.addMaxSpend) || opts.addMaxSpend < 0) {
+    throw new ExecutorError("Số tiền duyệt thêm phải là một số ≥ 0.");
+  }
+  const actionKey = `approve:${opts.batchId}`;
+  if (!tryLockAction(actionKey)) throw new ExecutorError("ALREADY_RUNNING: đang duyệt lô này — không bấm hai lần.");
+  try {
+    if (isRunning(opts.batchId)) throw new ExecutorError("Lô này đang chạy — chờ xong rồi duyệt thêm.");
+    const auth = await prisma.batchAuthorization.findUnique({ where: { batchId: opts.batchId } });
+    if (!auth || auth.status === "DRAFT") {
+      throw new ExecutorError("Lô chưa được duyệt lần nào — dùng DUYỆT & CHẠY.");
+    }
+    const note = parseJson<{ runnableProjectIds?: string[] | null; plannedVideoModels?: string[] }>(auth.note, {});
+    const covered = new Set(note.runnableProjectIds ?? []);
+    if (note.runnableProjectIds === null || note.runnableProjectIds === undefined) {
+      throw new ExecutorError("Quyền chi hiện tại đã phủ cả lô — dùng TIẾP TỤC.");
+    }
+    const pre = await preflightImportedBatch(opts.batchId);
+    const candidates = pre.videos
+      .filter((v) => v.lifecycle !== "BLOCKED" && v.lifecycle !== "COMPLETED" && !covered.has(v.projectId))
+      .filter((v) => !opts.onlyProjectIds || opts.onlyProjectIds.includes(v.projectId))
+      .map((v) => v.projectId);
+    if (candidates.length === 0) throw new ExecutorError("Không có video nào cần duyệt thêm.");
+
+    const check = await preflightForApproval(opts.batchId, {
+      maxBatch: opts.addMaxSpend,
+      resume: true,
+      onlyProjectIds: candidates,
+      zeroCostOnly: false,
+    });
+    // $0 extra is allowed when the added videos cost nothing.
+    const failing = check.checks.filter(
+      (c) => !c.ok && c.blocking && !(c.label === "Trần lô > 0" && check.estimatedTotal <= 1e-9 && opts.addMaxSpend === 0),
+    );
+    if (failing.length > 0) {
+      throw new ExecutorError(`Chưa duyệt thêm được: ${failing.map((c) => `${c.label} (${c.detail})`).join(" · ")}`);
+    }
+    if (opts.expectedVideoModels) {
+      const seen = [...new Set(opts.expectedVideoModels)].sort().join(", ");
+      const now = [...new Set(check.plannedVideoModels)].sort().join(", ");
+      if (seen !== now) {
+        throw new ExecutorError(
+          `APPROVED_MODEL_CHANGED: preflight bạn đã xem có model video [${seen || "không có"}], ` +
+            `kế hoạch lúc duyệt là [${now || "không có"}]. Hãy KIỂM TRA & DỰ TOÁN lại rồi duyệt.`,
+        );
+      }
+    }
+    if (check.usesLowAuto && !opts.lowAutoApproved && !check.mockMode) {
+      throw new ExecutorError(
+        "Các video thêm có clip do router tự chọn (LOW_AUTO). Hãy tick đồng ý cho router tự chọn model, hoặc ghim model cho cảnh.",
+      );
+    }
+    const added = check.runnableProjectIds ?? [];
+    if (added.length === 0) throw new ExecutorError("Không video nào vừa số tiền duyệt thêm.");
+    const status = await spendStatus();
+    if (opts.addMaxSpend > status.remaining + 1e-9) {
+      throw new ExecutorError(
+        `Số tiền duyệt thêm $${opts.addMaxSpend.toFixed(2)} vượt phần còn lại của hạn mức toàn cục ($${status.remaining.toFixed(6)}). Không tự nâng hạn mức.`,
+      );
+    }
+    const frozen = { ...(frozenFromNote(auth.note) ?? {}), ...(await frozenFromPreflight(check)) };
+    await prisma.batchAuthorization.update({
+      where: { batchId: opts.batchId },
+      data: {
+        status: "APPROVED",
+        authorizedMaxSpend: round(auth.authorizedMaxSpend + opts.addMaxSpend),
+        closedAt: null,
+        closedReason: "",
+        lowAutoApproved: opts.lowAutoApproved === true,
+        note: JSON.stringify({
+          plannedVideoModels: [...new Set([...(note.plannedVideoModels ?? []), ...check.plannedVideoModels])],
+          runnableProjectIds: [...covered, ...added],
+          frozenVideo: frozen,
+        }),
+      },
+    });
+    await logger.warn({
+      event: "batch.authorization_extended",
+      message:
+        `Lô ${opts.batchId}: DUYỆT THÊM ${added.length} video, +$${opts.addMaxSpend.toFixed(2)} ` +
+        `(trần lô $${auth.authorizedMaxSpend.toFixed(2)} → $${(auth.authorizedMaxSpend + opts.addMaxSpend).toFixed(2)}).`,
+    });
+    // Unblock the videos an earlier partial approval had marked; the run
+    // re-judges each one against the approval it now has.
+    await prisma.project.updateMany({
+      where: { id: { in: added }, status: "needs_review" },
+      data: { status: "script_ready", errorMessage: null },
+    });
+    const run = startRun(opts.batchId, { resume: true, onlyProjectIds: added });
+    return { preflight: check, added, run: opts.wait ? await run : undefined };
+  } finally {
+    unlockAction(actionKey);
+  }
 }

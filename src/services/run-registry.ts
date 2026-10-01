@@ -56,3 +56,24 @@ export function unlockVideo(projectId: string, owner: string): void {
 export function isVideoRunning(projectId: string): boolean {
   return videos.has(projectId);
 }
+
+// ------------------------------------------------ one action per batch ---
+//
+// V1.2 Phase 6 (QĐ-114): DUYỆT & CHẠY, TIẾP TỤC TẤT CẢ and RENDER LẠI must not
+// run twice from a double click. Taken synchronously before the first await,
+// like the video lock; the second click gets a clear "already in progress".
+
+const ACTION_KEY = "__batchActionRegistry";
+const actions: Set<string> =
+  ((globalThis as Record<string, unknown>)[ACTION_KEY] as Set<string>) ?? new Set();
+(globalThis as Record<string, unknown>)[ACTION_KEY] = actions;
+
+export function tryLockAction(key: string): boolean {
+  if (actions.has(key)) return false;
+  actions.add(key);
+  return true;
+}
+
+export function unlockAction(key: string): void {
+  actions.delete(key);
+}

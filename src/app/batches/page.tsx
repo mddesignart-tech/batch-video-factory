@@ -31,6 +31,7 @@ const STATUS_TONE: Record<BatchStatus, "neutral" | "info" | "ok" | "warn" | "dan
   QUEUED: "info",
   RUNNING: "info",
   COMPLETED: "ok",
+  COMPLETED_WITH_ERRORS: "warn",
   FAILED: "danger",
   NEEDS_REVIEW: "warn",
   BUDGET_EXHAUSTED: "warn",

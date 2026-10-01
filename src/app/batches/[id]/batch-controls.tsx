@@ -80,9 +80,9 @@ export function RetryVideoButton({ projectId }: { projectId: string }) {
       action={() => retryBatchVideo(projectId)}
       variant="outline"
       size="sm"
-      confirm="Chạy lại video này? Vẫn chịu hạn mức lô và hạn mức/video như cũ."
+      confirm="Chạy lại video này? Có thể phát sinh chi phí; vẫn chịu hạn mức lô và hạn mức/video như cũ."
     >
-      Thử lại
+      TẠO LẠI — CÓ THỂ PHÁT SINH CHI PHÍ
     </ActionButtonWithFeedback>
   );
 }

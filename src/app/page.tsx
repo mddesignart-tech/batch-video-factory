@@ -89,11 +89,18 @@ export default async function DashboardPage() {
         title="Tổng quan"
         description="Tình trạng sản xuất video và chi phí API."
         actions={
-          <Link href="/projects">
+          <>
+          <Link href="/workspace">
             <Button variant="primary">
+              Làm việc hằng ngày <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
+          <Link href="/projects">
+            <Button variant="secondary">
               Tạo dự án mới <ArrowRight className="h-3.5 w-3.5" />
             </Button>
           </Link>
+          </>
         }
       />
 

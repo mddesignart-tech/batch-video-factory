@@ -31,6 +31,7 @@ import {
   ResumeRunButton,
 } from "./batch-controls";
 import { ApproveRunPanel } from "@/components/approve-run-panel";
+import { ContinueVideoButton } from "@/components/continue-video-button";
 import { LIFECYCLE_TONE } from "@/domain/video-lifecycle";
 import { POLL_INTERVAL_MS, useBatchProgress } from "./use-batch-progress";
 
@@ -347,7 +348,8 @@ export function BatchProgressView({
                         </>
                       ) : ["failed", "needs_review", "budget_exhausted"].includes(video.status) ? (
                         progress.running ? null : (
-                          <ResumeRunButton batchId={batch.id} projectId={video.projectId} label="Thử lại video này" />
+                          // Phase 6 (QĐ-114): priced again first; paid work asks for its amount.
+                          <ContinueVideoButton projectId={video.projectId} paidHint={false} />
                         )
                       ) : null}
                       <Link

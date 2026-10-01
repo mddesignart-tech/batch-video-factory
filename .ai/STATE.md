@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-09-27 (V1.2 Phase 5 — thư viện asset, backfill asset cũ, bảo trì cache, QĐ-113, $0; READY cho Phase 6 — chờ duyệt)
+**Cập nhật:** 2026-10-01 (V1.2 Phase 6 — quy trình sản xuất hằng ngày, QĐ-114, $0; READY cho Phase 7 — chờ duyệt)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,23 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.2 PHASE 6 — QUY TRÌNH HẰNG NGÀY / XUẤT FILE SẴN ĐĂNG (2026-10-01, $0, không POST trả phí) — QĐ-114
+
+Trang `/workspace` (HÔM NAY · hàng đợi · lịch sử + tìm kiếm) và `/workspace/[id]` (8 bước, preset, PARTIAL/STRICT,
+KIỂM TRA & DỰ TOÁN, thẻ/bảng video, chi tiết video, tổng kết xuất); `/batches/[id]` giữ làm "Nâng cao / Debug".
+Trạng thái thân thiện + lỗi tiếng Việt; ba cửa chạy (CHẠY VIDEO $0 TRƯỚC với trần $0 · DUYỆT (THÊM) & CHẠY ·
+TIẾP TỤC TẤT CẢ); thứ tự hàng đợi FREE→LOCAL→PAID_LIGHT→PAID_VIDEO; song song cấu hình được (mặc định 1);
+COMPLETED_WITH_ERRORS; khôi phục sau khởi động lại (INTERRUPTED); khoá bấm đúp; output
+`data/output/<batch-slug>/<video-slug>/` (final.mp4 · thumbnail.jpg · subtitles.srt khi có lời · metadata.json v2 ·
+storyboard.json · captions.txt · description.txt · .export.json); preset Shorts/TikTok/Reels/ngang/tuỳ chỉnh (chỉ
+render lại tại máy); thumbnail chọn cảnh/tải lên; cảnh báo vùng an toàn; EXPORT READY; batch-report.csv/json;
+giọng hỏng → CẦN XỬ LÝ (không tự gọi TTS).
+Migration 20260929000000_daily_workflow ĐÃ ÁP (sao lưu backups/app-before-daily-workflow-20260928-111850.db);
+sổ production 116 Asset · 156 ProviderJob · 193 CostEntry · 57 reservation · $8.413060 / $8.50 — không đổi.
+Bộ đầy đủ 82/82 file · 1438/1438 test, một process (6117 s). Lint · tsc · build PASS; quét secret sạch.
+Kiểm tra giao diện trên bản sao DB (data/.ui-qa-p6, mock, worker tắt): /, /workspace, 6 trang lô, /batches,
+/settings, /import, /assets đều 200, không lỗi render.
 
 ## ✅ V1.2 PHASE 5 — THƯ VIỆN ASSET / BACKFILL / BẢO TRÌ CACHE (2026-09-27, $0, không POST trả phí) — QĐ-113
 

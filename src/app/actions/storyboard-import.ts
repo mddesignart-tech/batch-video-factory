@@ -28,6 +28,7 @@ import {
 } from "@/services/character-master";
 import { sceneCharacters } from "@/domain/scene-characters";
 import { DURATION_MODES } from "@/domain/scene-timing";
+import { suggestBatchName } from "@/domain/output-naming";
 
 /**
  * Server actions for the storyboard import screen.
@@ -77,6 +78,8 @@ export interface ImportValidationView {
   issues: ImportIssue[];
   errorCount: number;
   warningCount: number;
+  /** A batch name from the titles and today's date (Phase 6) - editable, never a UUID. */
+  suggestedName: string;
 }
 
 export async function validateStoryboardSource(
@@ -116,6 +119,7 @@ export async function validateStoryboardSource(
     issues: validated.issues,
     errorCount: validated.issues.filter((i) => i.level === "error").length,
     warningCount: validated.issues.filter((i) => i.level === "warning").length,
+    suggestedName: suggestBatchName(validated.videos.map((v) => v.title)),
   };
 }
 
@@ -165,7 +169,7 @@ export async function createImportBatch(input: {
     }
 
     const created = await materialiseImport(validated, {
-      batchName: input.name.trim() || "Lô nhập storyboard",
+      batchName: input.name.trim() || suggestBatchName(validated.videos.map((v) => v.title)),
       maxCostPerVideo: input.maxCostPerVideo,
       maxCostForBatch: input.maxCostForBatch,
       allowPartial: input.allowPartial === true,

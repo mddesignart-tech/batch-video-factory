@@ -19,11 +19,13 @@ import {
   FileUp,
   ListChecks,
   Library,
+  Rocket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** Vietnamese admin navigation, per the product spec. */
 const NAV_ITEMS = [
+  { href: "/workspace", label: "Làm việc hằng ngày", icon: Rocket },
   { href: "/", label: "Tổng quan", icon: LayoutDashboard },
   { href: "/idioms", label: "Thành ngữ", icon: Sparkles },
   { href: "/projects", label: "Dự án video", icon: Clapperboard },

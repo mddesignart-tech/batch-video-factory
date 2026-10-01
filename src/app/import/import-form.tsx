@@ -114,6 +114,8 @@ export function ImportForm({ defaultMaxCostPerVideo = 1.5 }: { defaultMaxCostPer
       setSource(staged.source);
       const result = await validateStoryboardSource(staged.source);
       setView(result);
+      // A name a person would type (titles + date), editable; never a UUID.
+      setName((current) => (current.trim().length > 0 ? current : result.suggestedName));
       setPreflight(null);
       setBatchId(null);
       setMessage(
@@ -136,6 +138,7 @@ export function ImportForm({ defaultMaxCostPerVideo = 1.5 }: { defaultMaxCostPer
     try {
       const result = await validateStoryboardSource(source);
       setView(result);
+      setName((current) => (current.trim().length > 0 ? current : result.suggestedName));
       if (!result.ok) {
         setMessage({
           tone: "danger",
@@ -243,7 +246,7 @@ export function ImportForm({ defaultMaxCostPerVideo = 1.5 }: { defaultMaxCostPer
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Lô nhập storyboard"
+                placeholder="Tự đề xuất sau khi KIỂM TRA (vd. AI Tools - 2026-09-28)"
               />
             </Field>
             <Field label="Trần chi MỖI VIDEO ($)">
@@ -394,6 +397,16 @@ export function ImportForm({ defaultMaxCostPerVideo = 1.5 }: { defaultMaxCostPer
             ))}
           </CardContent>
         </Card>
+      ) : null}
+
+      {batchId ? (
+        <Alert tone="ok" title="Lô đã tạo — chưa chi đồng nào">
+          Mở trang làm việc để xem từng video, chọn preset, KIỂM TRA &amp; DỰ TOÁN, chạy video $0 trước, rồi duyệt phần
+          trả phí.{" "}
+          <a href={`/workspace/${batchId}`} className="font-semibold text-brand-400 underline">
+            MỞ TRANG LÀM VIỆC CỦA LÔ →
+          </a>
+        </Alert>
       ) : null}
 
       {batchId ? (

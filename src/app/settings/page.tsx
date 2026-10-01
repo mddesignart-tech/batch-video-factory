@@ -12,6 +12,8 @@ import { isProductionDatabase, resolveDatabaseFile } from "@/lib/db-location";
 import { ffmpegVersion, resolveFfmpeg, resolveFfprobe } from "@/media/ffmpeg";
 import { SettingsForm } from "./settings-form";
 import { AudioMixForm } from "./audio-mix-form";
+import { DailySettingsForm } from "./daily-form";
+import { OUTPUT_ROOT } from "@/services/output-layout";
 import { SpendCapForm } from "@/components/spend-gate";
 import { ProviderBudgets } from "@/components/provider-budgets";
 import { providerSpendBreakdown } from "@/services/provider-budget";
@@ -52,6 +54,26 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <SettingsForm settings={settings} />
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-start-1">
+          <CardHeader>
+            <CardTitle>Sản xuất hằng ngày</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DailySettingsForm
+              initial={{
+                defaultOutputPresetId: settings.defaultOutputPresetId,
+                defaultBatchMode: settings.defaultBatchMode,
+                maxConcurrentVideos: settings.maxConcurrentVideos,
+                maxConcurrentLocalRenders: settings.maxConcurrentLocalRenders,
+                maxConcurrentPaidRequests: settings.maxConcurrentPaidRequests,
+                socialTemplates: settings.socialTemplates,
+                customPresets: settings.customPresets,
+              }}
+              outputRoot={OUTPUT_ROOT}
+            />
           </CardContent>
         </Card>
 

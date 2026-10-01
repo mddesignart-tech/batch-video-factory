@@ -130,7 +130,19 @@ export interface RenderRequest {
   mixSettings?: Partial<AudioMixSettings>;
   /** Voice-aware timing thresholds. Missing = DEFAULT_TIMING. */
   timingConfig?: TimingConfig;
+  /**
+   * Final-pass encoder settings from the output preset (V1.2 Phase 6). Missing =
+   * V1's CRF 20 / AAC 192k, and then it is left out of the render recipe too.
+   */
+  encode?: FinalEncode;
 }
+
+export interface FinalEncode {
+  crf: number;
+  audioBitrateKbps: number;
+}
+
+const DEFAULT_ENCODE: FinalEncode = { crf: 20, audioBitrateKbps: 192 };
 
 export interface RenderResult {
   videoPath: string;
@@ -300,8 +312,10 @@ export function buildFinalArgs(opts: {
   musicFile: string | null;
   target: RenderTarget;
   output: string;
+  encode?: FinalEncode;
 }): string[] {
   const { input, subtitleFile, musicFile, target, output } = opts;
+  const encode = opts.encode ?? DEFAULT_ENCODE;
 
   const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", input];
   if (musicFile) args.push("-stream_loop", "-1", "-i", musicFile);
@@ -326,7 +340,7 @@ export function buildFinalArgs(opts: {
     "-preset",
     "medium",
     "-crf",
-    "20",
+    String(encode.crf),
     "-profile:v",
     "high",
     "-level",
@@ -338,7 +352,7 @@ export function buildFinalArgs(opts: {
     "-c:a",
     "aac",
     "-b:a",
-    "192k",
+    `${encode.audioBitrateKbps}k`,
     "-ar",
     "48000",
     "-ac",
@@ -366,8 +380,10 @@ export function buildFinalWithMixArgs(opts: {
   subtitleFile: string | null;
   target: RenderTarget;
   output: string;
+  encode?: FinalEncode;
 }): string[] {
   const { videoInput, audioInput, subtitleFile, target, output } = opts;
+  const encode = opts.encode ?? DEFAULT_ENCODE;
   const args = [
     "-y",
     "-hide_banner",
@@ -390,7 +406,7 @@ export function buildFinalWithMixArgs(opts: {
     "-preset",
     "medium",
     "-crf",
-    "20",
+    String(encode.crf),
     "-profile:v",
     "high",
     "-level",
@@ -402,7 +418,7 @@ export function buildFinalWithMixArgs(opts: {
     "-c:a",
     "aac",
     "-b:a",
-    "192k",
+    `${encode.audioBitrateKbps}k`,
     "-ar",
     "48000",
     "-movflags",
@@ -726,6 +742,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         subtitleFile: canBurn ? assTempName : null,
         target: req.target,
         output: outName,
+        encode: req.encode,
       }),
       { cwd: tempDir, timeoutMs: 20 * 60 * 1000 },
     );
@@ -743,6 +760,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         musicFile: musicTempName,
         target: req.target,
         output: outName,
+        encode: req.encode,
       }),
       { cwd: tempDir, timeoutMs: 20 * 60 * 1000 },
     );

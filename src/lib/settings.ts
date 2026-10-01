@@ -2,6 +2,8 @@ import { prisma } from "./prisma";
 import { env } from "./env";
 import { parseJson } from "./utils";
 import { DEFAULT_MIX, resolveMix, type AudioMixSettings } from "@/media/mix-config";
+import { DEFAULT_PRESET_ID, outputPresetSchema, type OutputPreset } from "@/domain/output-preset";
+import { DEFAULT_SOCIAL_TEMPLATES, type SocialTemplates } from "@/domain/social-metadata";
 
 /**
  * App settings live in the DB so they survive restarts and can be edited from
@@ -55,6 +57,55 @@ export interface AppSettings {
    * may still override at render time.
    */
   audioMix: AudioMixSettings;
+  /** V1.2 Phase 6 (QĐ-114): preset a new batch renders/exports with. */
+  defaultOutputPresetId: string;
+  /** PARTIAL: a blocked video never stops the others. STRICT: any blocker = no start. */
+  defaultBatchMode: "PARTIAL" | "STRICT";
+  /** Videos one batch run works on at the same time (1 = one after another). */
+  maxConcurrentVideos: number;
+  /** FFmpeg final renders at the same time, across every run in this app. */
+  maxConcurrentLocalRenders: number;
+  /** Media steps that may send a paid request at the same time, across every run. */
+  maxConcurrentPaidRequests: number;
+  /** Presets the person made. Built-ins are not stored. */
+  customPresets: OutputPreset[];
+  /** Title / description templates for metadata.json and description.txt. */
+  socialTemplates: SocialTemplates;
+}
+
+/** Hard bounds: more parallelism than this buys SQLite contention, not speed. */
+export const CONCURRENCY_LIMITS = {
+  maxConcurrentVideos: { min: 1, max: 4 },
+  maxConcurrentLocalRenders: { min: 1, max: 2 },
+  maxConcurrentPaidRequests: { min: 1, max: 2 },
+} as const;
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+/** Stored values are data from an older version or a hand edit: bound them. */
+function sanitizeDaily(s: AppSettings): AppSettings {
+  const presets = Array.isArray(s.customPresets)
+    ? s.customPresets.filter((p) => outputPresetSchema.safeParse(p).success)
+    : [];
+  return {
+    ...s,
+    defaultBatchMode: s.defaultBatchMode === "STRICT" ? "STRICT" : "PARTIAL",
+    maxConcurrentVideos: clampInt(s.maxConcurrentVideos, 1, CONCURRENCY_LIMITS.maxConcurrentVideos.max, 1),
+    maxConcurrentLocalRenders: clampInt(s.maxConcurrentLocalRenders, 1, CONCURRENCY_LIMITS.maxConcurrentLocalRenders.max, 1),
+    maxConcurrentPaidRequests: clampInt(s.maxConcurrentPaidRequests, 1, CONCURRENCY_LIMITS.maxConcurrentPaidRequests.max, 1),
+    customPresets: presets,
+    defaultOutputPresetId:
+      typeof s.defaultOutputPresetId === "string" && s.defaultOutputPresetId ? s.defaultOutputPresetId : DEFAULT_PRESET_ID,
+    socialTemplates: {
+      title: typeof s.socialTemplates?.title === "string" ? s.socialTemplates.title : DEFAULT_SOCIAL_TEMPLATES.title,
+      description:
+        typeof s.socialTemplates?.description === "string" ? s.socialTemplates.description : DEFAULT_SOCIAL_TEMPLATES.description,
+    },
+  };
 }
 
 export const SETTINGS_KEY = "app.settings";
@@ -82,6 +133,13 @@ export function defaultSettings(): AppSettings {
     burnSubtitles: true,
     maxRetries: 3,
     audioMix: { ...DEFAULT_MIX },
+    defaultOutputPresetId: DEFAULT_PRESET_ID,
+    defaultBatchMode: "PARTIAL",
+    maxConcurrentVideos: 1,
+    maxConcurrentLocalRenders: 1,
+    maxConcurrentPaidRequests: 1,
+    customPresets: [],
+    socialTemplates: { ...DEFAULT_SOCIAL_TEMPLATES },
   };
 }
 
@@ -89,7 +147,7 @@ export async function getSettings(): Promise<AppSettings> {
   const row = await prisma.setting.findUnique({ where: { key: SETTINGS_KEY } });
   const stored = parseJson<Partial<AppSettings>>(row?.valueJson, {});
   const base = defaultSettings();
-  return {
+  return sanitizeDaily({
     ...base,
     ...stored,
     // A nested object would otherwise be replaced wholesale by a stored value
@@ -97,18 +155,18 @@ export async function getSettings(): Promise<AppSettings> {
     // also clamps anything out of range, so a bad stored value cannot reach a
     // render.
     audioMix: resolveMix({ ...base.audioMix, ...(stored.audioMix ?? {}) }),
-  };
+  });
 }
 
 export async function saveSettings(
   patch: Partial<AppSettings>,
 ): Promise<AppSettings> {
   const current = await getSettings();
-  const next = {
+  const next = sanitizeDaily({
     ...current,
     ...patch,
     audioMix: resolveMix({ ...current.audioMix, ...(patch.audioMix ?? {}) }),
-  };
+  });
   const valueJson = JSON.stringify(next);
   await prisma.setting.upsert({
     where: { key: SETTINGS_KEY },

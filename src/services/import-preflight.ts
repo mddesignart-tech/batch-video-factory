@@ -22,6 +22,7 @@ import { sceneCharacters } from "@/domain/scene-characters";
 import { evaluateSpendLimits, usd, type SpendVerdict } from "@/domain/spend-limits";
 import { sceneSpendLimit, videoSpendLimit } from "./batch-authorization";
 import { getSettings } from "@/lib/settings";
+import { invalidVoiceLines, invalidVoiceMessage } from "./voice-validity";
 import {
   estimateVoiceDuration,
   pacingSummary,
@@ -610,6 +611,8 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     getSettings(),
   ]);
   const moneyApproved = authorization?.status === "APPROVED";
+  // A voice file present but broken (QĐ-114): never re-bought automatically.
+  const badVoices = await invalidVoiceLines(batch.projects.filter((p) => p.status !== "completed").map((p) => p.id));
 
   const videos: ImportVideoPreview[] = [];
   const planned: PlannedVideo[] = [];
@@ -880,6 +883,11 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     let lifecycle: ImportVideoLifecycle;
     if (project.status === "completed") {
       lifecycle = "COMPLETED";
+    } else if (badVoices.has(project.id)) {
+      // NEEDS_ATTENTION: replacing the voice is a paid TTS request - a person
+      // decides; no plan, run or resume may buy it on its own.
+      lifecycle = "BLOCKED";
+      blockedReason = invalidVoiceMessage(badVoices.get(project.id)!);
     } else if (project.status === "failed" || project.status === "cancelled") {
       lifecycle = "FAILED";
       blockedReason = project.errorMessage ?? null;

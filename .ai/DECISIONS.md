@@ -3303,3 +3303,123 @@ dòng cũ cùng SHA.
 **Test mới:** asset-backfill (9), asset-health (1), asset-library (5), asset-delete-safety (5), thumbnail-reuse (6),
 output-recipe (4), cost-reconciliation (6), legacy-project (3), cross-project-reuse (4), concurrency (1),
 windows-fs (8). Bộ đầy đủ 76/76 file · 1382/1382 test, một process. Paid POST = 0.
+
+## QĐ-114 — V1.2 Phase 6: quy trình sản xuất hằng ngày, tạo lô, xuất file sẵn đăng (2026-09-28, $0, không POST trả phí)
+
+**Trang làm việc.** `/workspace` (HÔM NAY · hàng đợi · lịch sử + tìm kiếm) và `/workspace/[id]` (một lô: đổi tên,
+bước IMPORT→REVIEW→PREFLIGHT→APPROVE→QUEUE→GENERATE→RENDER→EXPORT, preset, PARTIAL/STRICT, KIỂM TRA & DỰ TOÁN,
+thẻ/bảng video, chọn video, chi tiết video, tổng kết xuất). Trang lô cũ `/batches/[id]` giữ nguyên làm "Nâng cao /
+Debug". Mọi số đọc từ DB qua `buildWorkspace` (src/services/daily-workspace.ts); trang hỏi lại mỗi 3 s khi có video
+chạy — không giữ tiến trình quan trọng trong React state. Không WebSocket/SSE (polling đã ổn định).
+
+**Trạng thái thân thiện** (src/domain/friendly-status.ts): NHÁP · CẦN KIỂM TRA · SẴN SÀNG · ĐANG CHỜ · ĐANG TẠO ·
+ĐANG RENDER · HOÀN THÀNH · CẦN XỬ LÝ · BỊ CHẶN — suy ra từ `videoLifecycle` + INTERRUPTED + giọng hỏng; không lưu.
+Lỗi kỹ thuật → câu tiếng Việt + việc cần làm (src/domain/user-errors.ts), chi tiết gốc trong mục mở rộng.
+
+**Ba cửa chạy, không có nút "chạy" mơ hồ.**
+- CHẠY VIDEO $0 TRƯỚC: video không có POST nào (ảnh nhập / dùng lại / LOCAL / giọng có sẵn / render tại máy).
+  Lô DRAFT → duyệt với TRẦN $0 chỉ cho các video đó (`approveAndRun({ zeroCostOnly, maxBatch: 0 })`): một POST trả phí
+  không thể lọt cổng dù có lỗi. Lô đã duyệt → TIẾP TỤC các video $0 đã được phủ; video $0 chưa phủ → DUYỆT THÊM $0.
+- DUYỆT & CHẠY (lô DRAFT) / DUYỆT THÊM & CHẠY (lô đã duyệt, `extendApproval`): người gõ số tiền; cùng preflight
+  (mọi trần, xác nhận giá model, STRICT, LOW_AUTO riêng); trần lô tăng ĐÚNG số đã gõ; không bao giờ vượt phần còn lại
+  của hạn mức toàn cục, không tự nâng hạn mức. Video đã phủ giữ model đã chốt; video mới được chốt model của nó.
+- TIẾP TỤC / TIẾP TỤC TẤT CẢ: kế hoạch từng video (QĐ-110). Tổng kết "N video $0 · M cần thêm $X · K bị chặn";
+  nút "CHẠY N VIDEO $0 TRƯỚC" không hỏi xác nhận; phần trả phí hỏi đúng số tiền, xác nhận mang fingerprint.
+Duyệt theo "video đã chọn" / "$0" chạy ĐÚNG các video đó; video khác không bị đánh dấu (không còn BATCH_LIMIT giả),
+trừ video preflight đã BLOCKED — video đó được ghi needs_review ở mọi lượt chạy để lô tự kết thúc được.
+Nút thử lại tách hai nghĩa: THỬ LẠI BƯỚC MIỄN PHÍ / TẠO LẠI — CÓ THỂ PHÁT SINH CHI PHÍ (định giá lại, hỏi duyệt).
+
+**Thứ tự hàng đợi** (src/domain/queue-order.ts): FREE → LOCAL → PAID_LIGHT (ảnh/giọng) → PAID_VIDEO; hoà giữ thứ tự
+nhập; ghi `Project.queueOrder`. Trong một video vẫn ảnh → clip → giọng từng cảnh, render sau cùng. Routing không đổi.
+
+**Song song** (Settings): MAX CONCURRENT VIDEOS (1–4, mặc định 1 = như V1) — pool trong `runBatch`;
+MAX CONCURRENT LOCAL RENDERS (1–2) và MAX CONCURRENT PAID REQUESTS (1–2) — semaphore toàn tiến trình
+(src/lib/semaphore.ts) quanh render và quanh từng bước media có thể trả phí. Chỉ SẮP THỨ TỰ việc: khoá reservation,
+kiểm tra 4 trần tại POST, idempotency key, khoá từng video giữ nguyên. Khuyến nghị giữ 1 (SQLite một người ghi).
+
+**PARTIAL / STRICT** (`Batch.batchMode`, mặc định từ Settings): PARTIAL — video lỗi/bị chặn không chặn video khác;
+STRICT — có video BLOCKED trong lô thì không duyệt/không bắt đầu (STRICT_MODE_BLOCKED). Không đổi được khi lô đã được
+duyệt hoặc đang chạy. Lúc chạy cả hai chế độ đều cô lập lỗi từng video.
+**COMPLETED_WITH_ERRORS** (trạng thái lô mới, không terminal): có video xong và có video lỗi/bị chặn. Video chờ
+DUYỆT THÊM không giữ lô ở RUNNING (settle chỉ đợi video nằm trong phần đã duyệt) → NEEDS_REVIEW "N video chờ duyệt thêm".
+
+**Huỷ.** DỪNG LÔ (cancelBatch cũ): video chưa bắt đầu dừng sạch — `runBatch` kiểm quyền chi CANCELLED trước MỖI video
+và để nguyên video đó (không failed, không needs_review); yêu cầu đã gửi vẫn được theo dõi tới kết quả, không giả hoàn
+tiền; không xoá ProviderJob, không sửa sổ. Huỷ riêng một video đang gửi: không hỗ trợ (vendor không có cancel).
+
+**Khởi động lại** (src/services/restart-recovery.ts, gọi trong instrumentation): video media_generating/rendering mà
+không lần chạy nào giữ → failed + `INTERRUPTED: …` (CẦN XỬ LÝ, TIẾP TỤC dùng lại mọi thứ đã có); lô RUNNING không có
+lần chạy → settle. Không gửi gì; yêu cầu trả phí đang bay vẫn là NEEDS_RECOVERY (QĐ-110) và cần người KIỂM TRA.
+
+**Bấm đúp.** Khoá hành động đồng bộ trước mọi await (`tryLockAction`): DUYỆT & CHẠY / DUYỆT THÊM (`approve:<lô>`),
+TIẾP TỤC TẤT CẢ (`continue-all:<lô>`), XUẤT (`export:<lô>`); TIẾP TỤC / RENDER LẠI dùng khoá từng video (QĐ-110).
+Lần bấm thứ hai nhận ALREADY_RUNNING, không làm gì; nút bị vô hiệu khi đang chạy.
+
+**Bố cục output** (src/services/output-layout.ts, output-export.ts): `data/output/<batch-slug>/<video-slug>/` với
+final.mp4 · thumbnail.jpg · subtitles.srt (khi preset xuất SRT) · metadata.json (schemaVersion 2) · storyboard.json ·
+captions.txt · description.txt · `.export.json` (danh sách file đã hứa — `missingOutputFiles` đọc nó, nên đổi preset
+không làm resume đòi file preset không tạo). Slug (src/domain/output-naming.ts): không dấu, đ→d, bỏ emoji/ký tự
+cấm, không tên thiết bị Windows, ≤ 60 ký tự cắt ở ranh giới từ, trùng → "-2"; gán MỘT lần (`Batch.slug`,
+`Project.outputSlug`, `Project.outputDir`) — đổi tên video không dời thư mục. Video ngoài lô → `video-le/`.
+Tương thích: thư mục cũ `data/output/<title>-<id8>/` đã có final.mp4 được dùng tiếp đúng chỗ (gán vào outputDir),
+không di chuyển, không xoá. Ghi file qua tên tạm rồi rename; file đang bị khoá (mở trong trình phát) → lỗi nêu tên
+file, không ghi dở. Mọi truy vấn project đưa vào `missingOutputFiles`/`existingOutputFor` phải có `outputDir`
+(thiếu nó = tưởng output mất → RENDER_ONLY mãi; đã gặp và sửa ở video-resume, output-folder).
+
+**metadata.json**: title, description, tags, hashtags, duration, resolution, fps, language, aspectRatio, generatedAt,
+storyboardId, importFingerprint, projectId, batchId, preset, scenes, subtitleFile, thumbnailFile, totalActualCost
+(CostEntry thật của video — không phải số duyệt, không chia đều), reusedAssetCount (IMPORTED + REUSED), providers.
+Không bao giờ ghi key/token. Metadata đăng bài (src/domain/social-metadata.ts): người nhập thắng từng trường;
+trống → mẫu Settings (`{{title}}`, `{{summary}}`, `{{hashtags}}`, `{{tags}}`, `{{batch}}`, `{{date}}`).
+Không AI viết metadata ở Phase 6.
+
+**Preset** (src/domain/output-preset.ts): YouTube Shorts (mặc định, 1080x1920@30, H.264 CRF 20, AAC 192k, phụ đề
+BOTH, thumbnail, metadata, file text) · TikTok · Instagram Reels · YouTube ngang 1920x1080 · tuỳ chỉnh (rộng/cao chẵn,
+fps, chất lượng CRF 18/20/23, AAC kbps, phụ đề BOTH/BURN/SRT/NONE, thumbnail, metadata, file text). Chỉ ảnh hưởng
+render + xuất: ảnh/clip/giọng tạo theo khung của dự án, không bao giờ bị vô hiệu. Lô không chọn preset → preset
+mặc định chỉ áp khi cùng khung với video (khác khung giữ khung của video như V1) và công tắc "in phụ đề" của Settings
+vẫn áp. Encoder chỉ vào render recipe khi khác mặc định V1 → preset Shorts không làm render lại video nào. Đổi preset
+video đã xong → RENDER LẠI tại máy ($0). Intro/outro, watermark: KHÔNG làm ở Phase 6 (không có trường "lưu mà bỏ qua").
+
+**Thumbnail**: mặc định = khung từ MP4 (khoá Phase 5 giữ nguyên); chọn cảnh = ảnh keyframe của cảnh, cắt tâm tại máy;
+tải ảnh riêng = PNG/JPG/WEBP nhận diện theo header, lưu trong thư mục dự án, được tính là "đang được tham chiếu" khi
+dọn dẹp. Không Image API.
+
+**Vùng an toàn** (src/domain/safe-area.ts): vùng trên/dưới/phải gần đúng cho Shorts/TikTok/Reels; so với dải phụ đề
+renderer vẽ (đáy, lề dưới 20%, lề ngang 7,5%, cỡ chữ 7,8% chiều cao, cách xuống dòng của `wrapSubtitle`). Chỉ cảnh
+báo + lớp phủ xem trước; không sửa nội dung.
+
+**EXPORT READY** (src/services/export-ready.ts): MP4 có & > 0 byte, ffprobe đọc được, thời lượng > 0, có audio khi
+video có lời, không đoạn đen ở đầu / không quá nửa video đen (blackdetect d=0.5 pix_th=0.10 — đoạn tối khác chỉ cảnh
+báo, một cảnh đen có thể là chủ ý), SRT/thumbnail/metadata khi preset yêu cầu, thư mục trong data/ và đường dẫn
+≤ 250 ký tự. Lưu `Project.exportReadyJson`; READY TO PUBLISH hiện trên thẻ.
+
+**Báo cáo** (src/services/export-report.ts): `data/output/<batch-slug>/batch-report.csv|json`, cột batch · video ·
+title · status · duration · output_path · thumbnail · subtitle · cost · reuse_saved · image_posts · video_posts ·
+voice_posts · retries · provider · model · error_reason; CSV có BOM, chặn công thức Excel. POST = ProviderJob không
+phải mock đã hoàn thành hoặc có task id của vendor. Tổng kết lô: số video theo nhóm, tổng thời lượng, chi API thật,
+giá trị dùng lại, cảnh LOCAL, clip Video AI; MỞ THƯ MỤC LÔ, XUẤT BÁO CÁO, COPY DANH SÁCH VIDEO.
+
+**Giọng hỏng** (src/services/voice-validity.ts): dòng thoại completed có file < 1 KB hoặc bị thư viện đánh INVALID →
+video BLOCKED/CẦN XỬ LÝ, lý do `INVALID_VOICE_ASSET: … Cần tạo lại giọng — có thể phát sinh chi phí`; executor,
+kế hoạch resume và duyệt đều bỏ qua; RENDER LẠI từ chối (tránh video câm). Video đã HOÀN THÀNH vẫn giữ MP4, hiện
+CẦN XỬ LÝ. Không tự gọi TTS. File MISSING không thuộc trường hợp này (vẫn là "giọng cần tạo").
+
+**Nhiều lô cùng lúc**: không thêm cơ chế mới — cổng chi tại POST (QĐ-108) tính toàn cục cả tiền đang giữ chỗ, nên hai
+lô không cùng tiêu phần còn lại; semaphore trả phí toàn tiến trình giới hạn số bước trả phí cùng lúc.
+
+**Migration** `20260929000000_daily_workflow`: chỉ ADD COLUMN — Project.outputSlug, outputDir, socialMetaJson,
+thumbnailChoiceJson, exportReadyJson, runStartedAt, runFinishedAt, currentStep, queueOrder; Batch.slug,
+batchMode (mặc định 'PARTIAL'), outputPresetId (mặc định '').
+
+**Hoàn thiện (2026-10-01).** Ba lỗi test cuối được sửa: (1) video câm không còn xuất `subtitles.srt` rỗng —
+renderer luôn ghi SRT, nên xuất chỉ chép khi SRT có ít nhất một dòng (`captionsFromSrt`), metadata.json ghi
+`subtitleFile: null` và EXPORT READY không đòi SRT; (2) test 100 video trả journal về DELETE sau khi `$disconnect`
+(rời WAL cần là kết nối duy nhất; pool Prisma giữ nhiều kết nối → "database is locked"); (3) test resume 10 video:
+mock tính $0 thật, nên so tiền GIỮ CHỖ của request mới với dự toán tăng thêm — không vượt, có thể thấp hơn chút vì
+kế hoạch ước giọng theo số từ còn router định giá câu thật lúc gửi.
+**Test mới:** daily-domain, daily-workflow, zero-cost-batch, output-export-v2, batch-resume-10, large-batch
+(100 video/500 cảnh: preflight 5,7 s · workspace 5,4 s · JSON 65 KB · heap +17 MB · queue/history < 10 ms).
+Bộ đầy đủ 82/82 file · 1438/1438 test, một process (6117 s). Lint · tsc · build PASS. Migration
+`20260929000000_daily_workflow` ĐÃ ÁP production (sao lưu backups/app-before-daily-workflow-20260928-111850.db);
+sổ production 116 Asset · 156 ProviderJob · 193 CostEntry · 57 reservation · $8.413060 / $8.50 — không đổi.
