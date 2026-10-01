@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-01 (V1.2 Phase 6 — quy trình sản xuất hằng ngày, QĐ-114, $0; READY cho Phase 7 — chờ duyệt)
+**Cập nhật:** 2026-10-01 (V1.2 Final QA / Phase 7 — QĐ-115, $0; READY FOR V1.2 RELEASE: YES — chờ duyệt, không tag)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,17 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.2 FINAL QA / PHASE 7 — RELEASE CANDIDATE (2026-10-01, $0, không POST trả phí) — QĐ-115
+
+READY FOR V1.2 RELEASE: YES (chưa tag, chưa Release — chờ người dùng duyệt).
+QA UI trên bản sao cô lập `data/.qa-p7` (mock, key trống): nhập → dự toán → $0 trước → duyệt thêm → STRICT →
+tắt app giữa lúc render → khôi phục → TIẾP TỤC TẤT CẢ → output → mở thư mục. Sửa: P1 nhân vật thiếu tham chiếu
+làm hỏng dự toán cả lô; P2 trang làm việc ghi DB mỗi lần poll (Socket timeout); P2 ô kiểm tra duyệt "0 video ·
+Mọi điều kiện đạt"; P2 lỗi kiểu trong test large-batch; P3 thẻ video tràn ngang 390 px.
+Còn mở: P2 ~1 Socket timeout/lượt (đề xuất `socket_timeout=60` cho .env production + quyết định WAL riêng), các P3
+ghi trong NEXT_TASKS. Sổ production không đổi: 116 · 156 · 193 · 57 · 9 Project · 6 Batch · 49 Scene · 3 Character
+· $8.413060 / $8.50; Runway LIVE 431 credit. Bộ đầy đủ 83/83 file · 1441/1441.
 
 ## ✅ V1.2 PHASE 6 — QUY TRÌNH HẰNG NGÀY / XUẤT FILE SẴN ĐĂNG (2026-10-01, $0, không POST trả phí) — QĐ-114
 

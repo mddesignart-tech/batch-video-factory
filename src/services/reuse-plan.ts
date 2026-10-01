@@ -7,7 +7,7 @@ import { targetForAspect } from "@/media/render";
 import { fileSha256OrNull } from "./asset-content";
 import { imageReuseKey, videoReuseKey, voiceReuseKey } from "./asset-keys";
 import { reusableKeys } from "./asset-reuse";
-import { buildSceneImageRequest, voiceSettingsFor } from "./generation";
+import { buildSceneImageRequest, GenerationError, voiceSettingsFor } from "./generation";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
 
 /**
@@ -54,8 +54,17 @@ export async function sceneReuseFacts(
   const owned = new Map<string, string | null>();
   for (const scene of scenes) {
     owned.set(scene.id, opts.ownedKeyframe(scene) && scene.imagePath ? fileSha256OrNull(safeAbs(scene.imagePath)) : null);
-    if (!opts.ownedKeyframe(scene)) {
-      const shot = await buildSceneImageRequest(scene, project.stylePresetId);
+    // A scene whose image request cannot be composed (a character with neither
+    // reference nor description, QĐ-076) has nothing to reuse. Preflight reports
+    // it on THAT video (NEEDS_CHARACTER_REFERENCE); letting the refusal escape
+    // here failed the whole batch's estimate instead (found in V1.2 final QA).
+    const shot = opts.ownedKeyframe(scene)
+      ? null
+      : await buildSceneImageRequest(scene, project.stylePresetId).catch((err: unknown) => {
+          if (err instanceof GenerationError) return null;
+          throw err;
+        });
+    if (shot) {
       const seed = shot.characters.length === 1 ? (shot.characters[0]?.seed ?? undefined) : undefined;
       for (const m of imageModels) {
         const key = imageReuseKey({

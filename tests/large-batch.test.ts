@@ -57,8 +57,8 @@ afterAll(async () => {
   // so close them all first - the next query opens a single fresh one.
   await prisma.$disconnect();
   await prisma.$queryRawUnsafe("PRAGMA journal_mode=DELETE;");
-  const [{ journal_mode: mode }] = await prisma.$queryRawUnsafe<Array<{ journal_mode: string }>>("PRAGMA journal_mode;");
-  expect(mode.toLowerCase()).toBe("delete");
+  const rows = await prisma.$queryRawUnsafe<Array<{ journal_mode: string }>>("PRAGMA journal_mode;");
+  expect(rows[0]?.journal_mode.toLowerCase()).toBe("delete");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

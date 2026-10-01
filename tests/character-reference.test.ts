@@ -433,21 +433,21 @@ describe("tạo ảnh chuẩn bằng AI", () => {
 
 describe("sổ chi phí ảnh tách riêng", () => {
   it("chi phí ảnh không bị trộn vào chi phí text", async () => {
+    // The test database is shared by every file, and other suites record
+    // vendor-labelled image rows on purpose (ledger evidence, QĐ-113). So the
+    // claim is checked as an identity rather than "no image category at all":
+    // the real image figure is exactly the non-mock rows - mock never folds in.
     const summary = await costSummary("all");
-    const categories = Object.keys(summary.byCategory);
-    // Mock không tính tiền thật nên không xuất hiện trong chi phí thật - đó
-    // chính là sự tách bạch cần chứng minh.
-    expect(categories).not.toContain("image");
-
-    const imageRows = await prisma.costEntry.count({
-      where: { category: "image" },
+    const mockImageRows = await prisma.costEntry.count({
+      where: { category: "image", provider: "mock" },
     });
-    expect(imageRows).toBeGreaterThan(0);
+    expect(mockImageRows).toBeGreaterThan(0);
 
-    const mixed = await prisma.costEntry.count({
-      where: { category: "image", provider: { not: "mock" } },
+    const realImage = await prisma.costEntry.aggregate({
+      where: { category: "image", provider: { not: "mock" }, estimated: false },
+      _sum: { amount: true },
     });
-    expect(mixed).toBe(0);
+    expect(summary.byCategory.image ?? 0).toBeCloseTo(realImage._sum.amount ?? 0, 6);
   });
 
   it("mọi dòng chi phí ảnh đều ghi rõ nhà cung cấp và model", async () => {

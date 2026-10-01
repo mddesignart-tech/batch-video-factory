@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-01 — V1.2 Phase 6 (quy trình hằng ngày / xuất file sẵn đăng, QĐ-114) XONG; READY cho Phase 7, CHỜ DUYỆT
+**Cập nhật:** 2026-10-01 — V1.2 Final QA (QĐ-115) XONG; READY FOR V1.2 RELEASE: YES — chờ duyệt tag/Release
 
 ---
 
@@ -11,6 +11,18 @@
 3. Nút TIẾP TỤC / KIỂM TRA LẠI theo từng video COMPLETED (hiện có ở mức lô).
 4. ✅ REUSE clip giữa hai lần nhập cùng storyboard — XONG (Phase 4, QĐ-112; mock).
 5. Test E2E trình duyệt tự động (Playwright) cho luồng Nhập → DUYỆT & CHẠY → Output, chạy mock.
+
+## ✅ V1.2 Final QA COMPLETE (QĐ-115) — việc còn mở
+
+- [ ] P2 (vận hành): còn ~1 "Socket timeout" SQLite mỗi lượt chạy khi trang làm việc mở. Đề xuất: thêm
+      `?socket_timeout=60` vào DATABASE_URL production (sửa .env — cần đồng ý); WAL là quyết định riêng (sao lưu phải
+      chép -wal).
+- [ ] P3: trang `/` tràn ngang ở 390 px (bảng dự án gần đây / hàng đợi).
+- [ ] P3: "dùng lại tiết kiệm" trên thẻ (gồm ảnh nhập) ≠ "Giá trị dùng lại" ở tổng kết (chỉ REUSED) — thống nhất nhãn.
+- [ ] P3: `/queue` hiện APPROVED cho video chưa được phủ, COMPLETED cho video giọng hỏng (trang làm việc đúng).
+- [ ] P3: trang asset hiện kích thước đã ghi, không phải kích thước thật trên đĩa của file INVALID.
+- [ ] MANUAL QA: kéo thư mục, kéo ZIP, chọn nhiều JSON, COPY PATH (clipboard bị chặn khi tự động hoá), bấm
+      DUYỆT & CHẠY / TIẾP TỤC bằng chuột thật.
 
 ## ✅ V1.2 Phase 6 COMPLETE — quy trình hằng ngày / xuất file sẵn đăng (QĐ-114)
 

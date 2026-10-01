@@ -213,7 +213,8 @@ export async function buildWorkspace(batchId: string): Promise<Workspace | null>
   let preflightError: string | null = null;
   if (source === "STORYBOARD_IMPORTED") {
     try {
-      pre = await preflightImportedBatch(batchId);
+      // Read-only: this view is polled while videos run (see preflightImportedBatch).
+      pre = await preflightImportedBatch(batchId, { persist: false });
     } catch (err) {
       preflightError = err instanceof Error ? err.message : String(err);
     }

@@ -122,7 +122,19 @@ export function ApprovePanel({
   }
 
   const failing = check?.checks.filter((c) => !c.ok && c.blocking) ?? [];
-  const canApprove = check !== null && check.ready && agree && Number.isFinite(typed) && typed > 0 && targetIds.length > 0;
+  // A check where nothing fits the typed amount is not "all good": the server
+  // refuses that approval anyway (V1.2 final QA saw "0 video · Mọi điều kiện đạt").
+  if (check && check.runnableVideos === 0) {
+    failing.push({
+      label: "Không video nào vừa số tiền này",
+      ok: false,
+      blocking: true,
+      detail:
+        `cần số lớn hơn (không vượt hạn mức toàn cục còn ${formatUSD(check.globalRemaining, 4)}), ` +
+        `hoặc sửa / bỏ chọn video cần nhiều tiền hơn`,
+    });
+  }
+  const canApprove = check !== null && check.ready && check.runnableVideos > 0 && agree && Number.isFinite(typed) && typed > 0 && targetIds.length > 0;
 
   return (
     <Card>

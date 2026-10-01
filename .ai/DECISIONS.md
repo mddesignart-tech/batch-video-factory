@@ -3423,3 +3423,50 @@ kế hoạch ước giọng theo số từ còn router định giá câu thật 
 Bộ đầy đủ 82/82 file · 1438/1438 test, một process (6117 s). Lint · tsc · build PASS. Migration
 `20260929000000_daily_workflow` ĐÃ ÁP production (sao lưu backups/app-before-daily-workflow-20260928-111850.db);
 sổ production 116 Asset · 156 ProviderJob · 193 CostEntry · 57 reservation · $8.413060 / $8.50 — không đổi.
+
+## QĐ-115 — V1.2 Final QA / Phase 7: release candidate validation (2026-10-01, $0, không POST trả phí)
+
+**Cách làm.** Baseline production chỉ đọc; Runway số dư đọc LIVE bằng một `GET /organization` (miễn phí, không ghi
+vào DB) = 431 credit, khớp sổ; OpenAI không có API số dư miễn phí → chỉ có số khai báo. Mọi thao tác UI chạy trên
+BẢN SAO cô lập `data/.qa-p7` (DB + media, `DATA_DIR` riêng, `AI_MOCK_MODE=true`, worker tắt, mọi API key bị xoá
+trống trong môi trường tiến trình QA). Storyboard QA 6 video / 31 cảnh trong thư mục có dấu + khoảng trắng
+(`data/.qa-p7-src/Lô QA cuối – thư mục có dấu`): ảnh nhập, ảnh tạo mới, LOCAL, Video AI mock, giọng mock tiếng
+Việt, video vượt trần, nhân vật thiếu tham chiếu, tiêu đề emoji / trùng. Hạn mức toàn cục KHÔNG đổi (kể cả trong
+bản sao) → clip Video AI mock không chạy qua UI; đường đó đã có test tự động (batch-resume-10, batch-acceptance).
+
+**Lỗi tìm thấy và đã sửa.**
+- P1 — một video có nhân vật không ảnh tham chiếu + không mô tả làm hỏng dự toán CẢ LÔ: bước tính khoá reuse
+  (QĐ-112, `reuse-plan.ts`) gọi `buildSceneImageRequest`, lời từ chối danh tính (QĐ-076) thoát ra; mọi thẻ hiện
+  "0 cảnh · $0", không video nào chạy được, kể cả PARTIAL. Nay cảnh đó chỉ không có khoá reuse ảnh; preflight
+  đánh đúng video đó NEEDS_CHARACTER_REFERENCE (BỊ CHẶN), video khác chạy.
+- P2 — trang làm việc poll 3 s gọi preflight có GHI (plan lô, DRAFT, `estimatedCost` từng video, LogEntry) và
+  `scene.characters_repaired` ghi log mỗi cảnh mỗi lần poll → tranh khoá với lô đang chạy, log có "Socket timeout"
+  (5 lần trong một lượt). `preflightImportedBatch(id, { persist: false })` cho trang xem (không ghi gì); đường
+  duyệt/chạy giữ mặc định có ghi như cũ; cảnh báo sửa nhân vật chỉ ghi một lần mỗi tiến trình. Sau sửa: 1 lần.
+- P2 — ô KIỂM TRA VỚI SỐ NÀY khi không video nào vừa số tiền hiện "0 video · Mọi điều kiện đạt" và cho bấm
+  (server vẫn từ chối). Nay báo "Không video nào vừa số tiền này…" và khoá nút.
+- P2 — `tests/large-batch.test.ts` trong commit 0ff0c3a lỗi kiểu TypeScript (typecheck đỏ trên main).
+- P3 — thẻ video tràn ngang ở 390 px (thiếu `min-w-0` trong grid).
+
+**Còn mở (không chặn release).** P2: vẫn còn ~1 "Socket timeout" mỗi lượt chạy có trang mở — journal DELETE +
+timeout mặc định của Prisma; lô vẫn xong, TIẾP TỤC khắc phục. Đề xuất riêng: thêm `?socket_timeout=60` vào
+DATABASE_URL production (sửa .env, cần đồng ý) và cân nhắc WAL bằng migration/quy trình sao lưu riêng — không đổi
+trong Phase 7. P3: trang `/` tràn ngang ở 390 px; "dùng lại tiết kiệm" trên thẻ (gồm ảnh nhập) khác "Giá trị dùng
+lại" ở tổng kết (chỉ REUSED); `/queue` hiện APPROVED cho video chưa được phủ và COMPLETED cho video giọng hỏng;
+trang asset hiện kích thước đã ghi chứ không phải kích thước thật trên đĩa của file INVALID.
+
+**Kết quả QA (bản sao, mock).** Nhập 6 video → 4 SẴN SÀNG / 2 BỊ CHẶN (đúng lý do riêng); CHẠY VIDEO $0 TRƯỚC 2/2,
+$0; DUYỆT THÊM 1 video (bấm hai lần → một `authorization_extended`); nhập lại cùng storyboard → giọng REUSE, 0
+reservation mới; STRICT → STRICT_MODE_BLOCKED; tắt app giữa lúc render → khởi động lại: "1 video INTERRUPTED,
+1 lô xếp lại, không gửi yêu cầu nào", video bị chặn vẫn bị chặn; TIẾP TỤC TẤT CẢ chạy 3 video $0, 0 job mới.
+Output 6/6: H.264 1080x1920 30 fps, AAC, không đoạn đen, SRT chỉ ở video có lời, mốc thời gian tăng và ≤ thời
+lượng, UTF-8 tiếng Việt, thumbnail đọc được, metadata v2 đủ trường, không secret; READY TO PUBLISH 9/9. Sổ bản
+sao: không trùng idempotency key ProviderJob/CostReservation. Production: 116 Asset · 156 ProviderJob · 193
+CostEntry · 57 reservation · 9 Project · 6 Batch · 49 Scene · 3 Character · $8.413060 / $8.50 — trước = sau.
+
+**Test.** Mới: `tests/final-qa.test.ts` (3 test; không có bản sửa → cả 3 đỏ). Hai test sổ chi đếm toàn cục
+(`database`, `character-reference`) đỏ khi thứ tự file đổi (file test Phase 5 để lại dòng mang nhãn vendor) —
+sửa thành đo chênh lệch trước/sau. Lần chạy đầy đủ đầu bị Claude Code dừng vì thiếu RAM (Illustrator ~10 GB);
+chạy lại sau khi đóng Illustrator: 83/83 file · 1441/1441 test, một process (6381 s). 100 video/500 cảnh:
+preflight 6,2 s · dựng trang làm việc 2,0 s (trước 5,4 s, nhờ preflight chỉ đọc) · heap +29 MB · queue/history
+< 10 ms. Lint · tsc · build · quét secret PASS. Paid POST = 0, chi API thật $0.

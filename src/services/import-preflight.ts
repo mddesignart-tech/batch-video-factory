@@ -583,7 +583,19 @@ async function ownAssetProblems(scene: {
   return { image: await problem("image", scene.imagePath), video: await problem("video", scene.videoPath) };
 }
 
-export async function preflightImportedBatch(batchId: string): Promise<ImportPreflight> {
+/**
+ * `persist: false` = read-only: the same answer, but nothing is written - no
+ * plan, no DRAFT figures, no per-video estimate, no log line. For views that
+ * poll (the workspace re-reads every 3 s while videos run); a write there per
+ * poll and per video contended with the running batch for SQLite's single
+ * writer and timed queries out (V1.2 final QA). Approval and run paths keep the
+ * default and persist exactly as before.
+ */
+export async function preflightImportedBatch(
+  batchId: string,
+  opts: { persist?: boolean } = {},
+): Promise<ImportPreflight> {
+  const persist = opts.persist ?? true;
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
     include: {
@@ -1067,41 +1079,7 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     suggestedAuthorizedMaxSpend: recommendation.recommended,
   };
 
-  await prisma.batch.update({
-    where: { id: batchId },
-    data: { planJson: JSON.stringify(plan), estimatedCost: estimatedTotal },
-  });
-  // The draft carries the figures the operator is about to approve - including
-  // the per-video ceiling the gateway enforces. It used to receive only the
-  // estimate, so an imported batch reached approval with the schema default
-  // ($2.50/video) and an empty provider scope, while the page and the batch
-  // row both said $0.70. Found by the V1 final QA.
-  await prisma.batchAuthorization.updateMany({
-    where: { batchId, status: "DRAFT" },
-    data: {
-      estimatedCost: estimatedTotal,
-      maxCostPerVideo: batch.maxCostPerVideo,
-      providerScopeJson: JSON.stringify(providerScope),
-      videoCount: planned.length,
-    },
-  });
-  // Each video's own forecast, so the batch table has an estimate beside its
-  // actual cost instead of $0.
-  for (const video of planned) {
-    if (!video.projectId) continue;
-    await prisma.project.update({
-      where: { id: video.projectId },
-      data: { estimatedCost: video.estimatedCost },
-    });
-  }
-
-  await logger.info({
-    event: "import.preflight",
-    message:
-      `Dự toán lô nhập ${batchId}: ${planned.length} video, ` +
-      `$${estimatedTotal.toFixed(6)}. Chưa cấp phép chi gì.`,
-  });
-
+  if (persist) await persistPreflight(batchId, plan, estimatedTotal, batch.maxCostPerVideo, providerScope, planned);
   const runnableIds = new Set(runnable.map((v) => v.projectId));
   const runnableVideos = videos.filter((v) => runnableIds.has(v.projectId));
   const savingsOf = (k: "image" | "video" | "voice") => round(runnableVideos.reduce((n, v) => n + v.savings[k], 0), 6);
@@ -1205,4 +1183,49 @@ export async function preflightImportedBatch(batchId: string): Promise<ImportPre
     costBasis: costing.costBasis,
     warnings,
   };
+}
+
+/** The writes a persisting preflight makes - see `preflightImportedBatch`. */
+async function persistPreflight(
+  batchId: string,
+  plan: BatchPlan,
+  estimatedTotal: number,
+  maxCostPerVideo: number,
+  providerScope: string[],
+  planned: PlannedVideo[],
+): Promise<void> {
+  await prisma.batch.update({
+    where: { id: batchId },
+    data: { planJson: JSON.stringify(plan), estimatedCost: estimatedTotal },
+  });
+  // The draft carries the figures the operator is about to approve - including
+  // the per-video ceiling the gateway enforces. It used to receive only the
+  // estimate, so an imported batch reached approval with the schema default
+  // ($2.50/video) and an empty provider scope, while the page and the batch
+  // row both said $0.70. Found by the V1 final QA.
+  await prisma.batchAuthorization.updateMany({
+    where: { batchId, status: "DRAFT" },
+    data: {
+      estimatedCost: estimatedTotal,
+      maxCostPerVideo,
+      providerScopeJson: JSON.stringify(providerScope),
+      videoCount: planned.length,
+    },
+  });
+  // Each video's own forecast, so the batch table has an estimate beside its
+  // actual cost instead of $0.
+  for (const video of planned) {
+    if (!video.projectId) continue;
+    await prisma.project.update({
+      where: { id: video.projectId },
+      data: { estimatedCost: video.estimatedCost },
+    });
+  }
+
+  await logger.info({
+    event: "import.preflight",
+    message:
+      `Dự toán lô nhập ${batchId}: ${planned.length} video, ` +
+      `$${estimatedTotal.toFixed(6)}. Chưa cấp phép chi gì.`,
+  });
 }

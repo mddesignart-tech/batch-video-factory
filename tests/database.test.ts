@@ -328,7 +328,9 @@ describe("cost tracking", () => {
   });
 
   it("tách bạch chi phí thật, ước tính và mock", async () => {
-    // Ba khoản trên cùng một dự án, mỗi khoản một loại.
+    // Ba khoản trên cùng một dự án, mỗi khoản một loại. Measured as a change:
+    // the test database is shared, and other suites leave real-labelled rows.
+    const before = await costSummary("all");
     await recordCost({
       projectId,
       category: "video",
@@ -340,19 +342,22 @@ describe("cost tracking", () => {
     const summary = await costSummary("all");
 
     // byCategory và actualApiCost chỉ đếm tiền THẬT.
-    expect(summary.byCategory.video).toBeCloseTo(0.5, 6);
-    expect(summary.actualApiCost).toBeCloseTo(0.5, 6);
+    const videoDelta = (summary.byCategory.video ?? 0) - (before.byCategory.video ?? 0);
+    const actualDelta = summary.actualApiCost - before.actualApiCost;
+    expect(videoDelta).toBeCloseTo(0.5, 6);
+    expect(actualDelta).toBeCloseTo(0.5, 6);
 
     // Mock được báo TÁCH RIÊNG: dù dòng mock có mang số tiền nào đi nữa (ở đây
     // fixture cố tình đặt 0.25), nó KHÔNG được cộng vào tiền thật.
     expect(summary.mockCalls).toBeGreaterThan(0);
     expect(summary.mockCost).toBeGreaterThan(0);
-    expect(summary.actualApiCost).toBeCloseTo(0.5, 6);
-    expect(summary.byCategory.video).toBeCloseTo(0.5, 6);
+    expect(summary.mockCost - before.mockCost).toBeCloseTo(0, 6);
+    expect(actualDelta).toBeCloseTo(0.5, 6);
 
     // Ước tính không bao giờ bị cộng vào tiền thật.
     expect(summary.estimatedCost).toBeGreaterThan(0);
-    expect(summary.actualApiCost).toBeLessThan(summary.estimatedCost);
+    // ...and a real charge is not counted as an estimate either.
+    expect(summary.estimatedCost - before.estimatedCost).toBeCloseTo(0, 6);
   });
 
   it("giữ được khoản chi nhỏ hơn một xu", async () => {

@@ -1551,6 +1551,8 @@ export async function buildSceneImageRequest(
  * exists to stop. Repairing beats refusing: the scene is otherwise fine, and
  * the correction is reported rather than done silently.
  */
+const reportedRepairs = new Set<string>();
+
 export async function repairSceneCharacters(
   lists: SceneCharacterLists,
   sceneText: string,
@@ -1570,7 +1572,12 @@ export async function repairSceneCharacters(
     repaired.push(name);
   }
 
-  if (repaired.length > 0) {
+  // Once per scene text and repair, per process: preflight rebuilds image
+  // requests on every poll of a running batch, and the same note written each
+  // time was a log row per scene per poll (V1.2 final QA).
+  const noteKey = `${repaired.join("|")}::${sceneText}`;
+  if (repaired.length > 0 && !reportedRepairs.has(noteKey)) {
+    reportedRepairs.add(noteKey);
     await logger.warn({
       event: "scene.characters_repaired",
       message:

@@ -101,7 +101,7 @@ export function VideoCard({
   const selectable = v.lifecycle !== "BLOCKED";
   return (
     <div
-      className={`flex flex-col gap-2 rounded-xl border p-3 ${selected ? "border-brand-500 bg-brand-500/5" : "border-ink-800 bg-ink-900"}`}
+      className={`flex min-w-0 flex-col gap-2 rounded-xl border p-3 ${selected ? "border-brand-500 bg-brand-500/5" : "border-ink-800 bg-ink-900"}`}
       data-video-card={v.projectId}
     >
       <div className="flex gap-3">
