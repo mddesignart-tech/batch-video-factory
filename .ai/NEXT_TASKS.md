@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-01 — V1.2 Final QA (QĐ-115) XONG; READY FOR V1.2 RELEASE: YES — chờ duyệt tag/Release
+**Cập nhật:** 2026-10-01 — **V1.2.0 RELEASED** (tag `batch-video-factory-v1.2.0`, QĐ-116). Không bắt đầu V1.3 khi chưa được yêu cầu.
 
 ---
 
@@ -21,8 +21,8 @@
 - [ ] P3: "dùng lại tiết kiệm" trên thẻ (gồm ảnh nhập) ≠ "Giá trị dùng lại" ở tổng kết (chỉ REUSED) — thống nhất nhãn.
 - [ ] P3: `/queue` hiện APPROVED cho video chưa được phủ, COMPLETED cho video giọng hỏng (trang làm việc đúng).
 - [ ] P3: trang asset hiện kích thước đã ghi, không phải kích thước thật trên đĩa của file INVALID.
-- [ ] MANUAL QA: kéo thư mục, kéo ZIP, chọn nhiều JSON, COPY PATH (clipboard bị chặn khi tự động hoá), bấm
-      DUYỆT & CHẠY / TIẾP TỤC bằng chuột thật.
+- [ ] MANUAL QA (người dùng): làm theo `docs/MANUAL_QA_V1.2.md` — kéo thư mục, kéo ZIP, chọn nhiều JSON,
+      COPY PATH, bấm DUYỆT & CHẠY / TIẾP TỤC bằng chuột thật, xem video bằng mắt.
 
 ## ✅ V1.2 Phase 6 COMPLETE — quy trình hằng ngày / xuất file sẵn đăng (QĐ-114)
 

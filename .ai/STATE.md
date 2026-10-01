@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-01 (V1.2 Final QA / Phase 7 — QĐ-115, $0; READY FOR V1.2 RELEASE: YES — chờ duyệt, không tag)
+**Cập nhật:** 2026-10-01 (**V1.2.0 RELEASED** — tag `batch-video-factory-v1.2.0`, QĐ-116, $0; không bắt đầu V1.3)
 **Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
 
 ```
@@ -10,6 +10,14 @@ Image API POST 0 · Video API POST 1 · Voice POST 5
 Retries 0 · Duplicate jobs 0 · Final MP4 PASS (22,000s · 1080x1920 · 30fps · h264+aac)
 Release: batch-video-factory-v1.1.0
 ```
+
+## ✅ V1.2.0 RELEASED — Daily Production Release (2026-10-01) — QĐ-116
+
+Baseline: tag `batch-video-factory-v1.2.0` → commit "docs: complete v1.2 user guide and release
+documentation". GitHub Release "Batch Video Factory V1.2.0 — Daily Production Release". Tài liệu người
+dùng: `docs/QUICK_START.md`, `docs/HUONG_DAN_SU_DUNG.md`, `docs/MANUAL_QA_V1.2.md`,
+`examples/DAILY_WORKFLOW_EXAMPLE.md`, `RELEASE_NOTES_V1.2.md`. Giới hạn đã biết: xem release notes.
+Sổ production không đổi: $8.413060 / $8.50. Phát hành V1.2: 0 POST trả phí.
 
 ## ✅ V1.2 FINAL QA / PHASE 7 — RELEASE CANDIDATE (2026-10-01, $0, không POST trả phí) — QĐ-115
 

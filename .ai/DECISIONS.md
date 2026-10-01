@@ -3470,3 +3470,21 @@ sửa thành đo chênh lệch trước/sau. Lần chạy đầy đủ đầu b�
 chạy lại sau khi đóng Illustrator: 83/83 file · 1441/1441 test, một process (6381 s). 100 video/500 cảnh:
 preflight 6,2 s · dựng trang làm việc 2,0 s (trước 5,4 s, nhờ preflight chỉ đọc) · heap +29 MB · queue/history
 < 10 ms. Lint · tsc · build · quét secret PASS. Paid POST = 0, chi API thật $0.
+
+## QĐ-116 — Đóng V1.2: tài liệu người dùng và phát hành v1.2.0 (2026-10-01, $0)
+
+Không thêm tính năng. Tài liệu viết theo nhãn UI và hành vi đã kiểm trong Final QA (QĐ-115):
+`docs/HUONG_DAN_SU_DUNG.md` (54 mục, cho người không lập trình), `docs/QUICK_START.md` (10 bước + "đã có
+ảnh từng cảnh"), `docs/MANUAL_QA_V1.2.md` (16 bước, cột "Tự động" ghi ĐÃ KIỂM / CHƯA — không đánh PASS
+thay người dùng cho kéo thả, ZIP, nhiều JSON, COPY PATH, bấm chuột thật, xem video bằng mắt),
+`examples/DAILY_WORKFLOW_EXAMPLE.md` (quảng cáo 12 cảnh: 9 LOCAL + 3 VIDEO_AI, ảnh nhập, một nhân vật),
+`RELEASE_NOTES_V1.2.md` (giới hạn đã biết ghi đủ P2/P3), README (trạng thái V1.2, khởi động, liên kết,
+output, an toàn chi phí), TROUBLESHOOTING (Socket timeout).
+
+**Socket timeout:** chỉ ghi khuyến nghị `?socket_timeout=60` cho `DATABASE_URL` trong tài liệu; `.env`
+không bị sửa, không commit. WAL vẫn là quyết định riêng.
+
+**Phát hành:** tag có chú thích `batch-video-factory-v1.2.0` trỏ vào commit
+"docs: complete v1.2 user guide and release documentation"; GitHub Release "Batch Video Factory V1.2.0 —
+Daily Production Release" tạo qua giao diện web (máy không có `gh`, như QĐ-092), nội dung từ
+`RELEASE_NOTES_V1.2.md`. Đây là baseline V1.2. Không bắt đầu V1.3.

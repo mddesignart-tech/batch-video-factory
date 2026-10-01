@@ -12,6 +12,39 @@ Mỗi video lấy một thành ngữ, hiểu nó theo nghĩa đen thành một t
 
 ---
 
+## V1.2 — Daily Production Release (2026-10-01)
+
+**Trạng thái: phát hành** (`batch-video-factory-v1.2.0`). Nhập storyboard (thường kèm ảnh vẽ sẵn) →
+dự toán → duyệt chi → chạy nhiều video → MP4 9:16 sẵn đăng. Ghi chú phát hành:
+[RELEASE_NOTES_V1.2.md](RELEASE_NOTES_V1.2.md).
+
+| Bắt đầu từ đây | |
+|---|---|
+| [docs/QUICK_START.md](docs/QUICK_START.md) | 10 bước, kể cả "đã có ảnh từng cảnh" |
+| [docs/HUONG_DAN_SU_DUNG.md](docs/HUONG_DAN_SU_DUNG.md) | Hướng dẫn đầy đủ cho người không lập trình |
+| [docs/MANUAL_QA_V1.2.md](docs/MANUAL_QA_V1.2.md) | Checklist kiểm tra tay trên Chrome |
+| [examples/DAILY_WORKFLOW_EXAMPLE.md](examples/DAILY_WORKFLOW_EXAMPLE.md) | Ví dụ quảng cáo 12 cảnh |
+
+**Khởi động:** `npm run build` (lần đầu / sau cập nhật) → `npm start` → http://localhost:3000/workspace
+
+**Output** mỗi video:
+
+```
+data/output/<lô>/<video>/
+  final.mp4  thumbnail.jpg  subtitles.srt (khi có lời)  metadata.json
+  storyboard.json  captions.txt  description.txt
+```
+
+**An toàn chi phí:**
+
+- `AI_MOCK_MODE=true` → không request trả phí nào rời máy; số tiền hiển thị là giá giả lập.
+- Không nút nào tự tiêu tiền. Tiền chỉ đi ra sau DUYỆT & CHẠY, tối đa bằng số bạn gõ.
+- Bốn lớp trần: cảnh → video → lô → **hạn mức toàn cục** (chỉ bạn đổi, ở Cài đặt).
+- Ảnh nhập sẵn = $0 Image API; LOCAL_MOTION = $0; asset hợp lệ đã có được dùng lại, không mua lại.
+- Khởi động lại giữa chừng không tự gửi gì; TIẾP TỤC chỉ làm phần còn thiếu.
+
+---
+
 ## Nguyên tắc sản phẩm
 
 Tối ưu **chất lượng trên mỗi đô la**, không phải "mô hình rẻ nhất" và cũng không
@@ -191,6 +224,10 @@ Không có Redis, Docker, hay dịch vụ ngoài nào. Xem
 
 | Tệp | Nội dung |
 |---|---|
+| [docs/QUICK_START.md](docs/QUICK_START.md) | Bắt đầu nhanh V1.2 |
+| [docs/HUONG_DAN_SU_DUNG.md](docs/HUONG_DAN_SU_DUNG.md) | Hướng dẫn sử dụng đầy đủ V1.2 |
+| [docs/MANUAL_QA_V1.2.md](docs/MANUAL_QA_V1.2.md) | Kiểm tra tay V1.2 |
+| [docs/IMPORT_STORYBOARD.md](docs/IMPORT_STORYBOARD.md) | Định dạng storyboard JSON/CSV, nhập ảnh |
 | [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md) | Cài đặt từ đầu trên Windows |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Cấu trúc và quyết định thiết kế |
 | [docs/DATABASE.md](docs/DATABASE.md) | Lược đồ SQLite, đường di cư sang Postgres |
@@ -207,23 +244,13 @@ Không có Redis, Docker, hay dịch vụ ngoài nào. Xem
 
 ## Tình trạng
 
-**Cập nhật: 2026-09-15.**
+**Cập nhật: 2026-10-01 — V1.2.0 phát hành.**
 
-**Milestone 1 hoàn tất và đã kiểm chứng.** Toàn bộ quy trình chạy được ở chế độ
-mock, xuất ra MP4 1080x1920 thật.
+V1.2 (Final QA QĐ-115): 83/83 file · 1441/1441 test, lint · typecheck · build · quét secret PASS,
+0 POST trả phí trong toàn bộ quá trình phát hành. Giới hạn đã biết (P2/P3) ghi trong
+[RELEASE_NOTES_V1.2.md](RELEASE_NOTES_V1.2.md).
 
-**Milestone 2 hoàn tất.** Text AI (Groq), Image AI (OpenAI `gpt-image-2`),
-Video AI (Runway `gen4_turbo`/`gen4.5`, OpenAI `sora-2`) và Voice AI (OpenAI
-`gpt-4o-mini-tts`) đều đã chạy thật và đã ghi chi phí vào sổ. Chỉ còn Upscale là
-mock.
-
-**Batch Video Factory V1: xây xong, mới chỉ chạy ở chế độ mock.** Kế hoạch, duyệt
-chi, giữ chỗ tiền, hàng đợi, retry/resume, cancel và LOCAL_MOTION đều đã có test.
-Chưa lô nào được duyệt chi thật.
-
-**Tổng chi phí API thật tính đến giờ: $3,712760 trên hạn mức $8,00.**
-
-Con số trên sẽ cũ đi. Kiểm tra lại bằng `spendStatus()` và
-`providerSpendBreakdown()` — sổ chi phí mới là nguồn đúng, không phải tài liệu.
+Chi phí API thật tính đến 2026-10-01: **$8,413060 trên hạn mức $8,50**. Con số này sẽ cũ đi — sổ chi
+phí (trang **Chi phí**) mới là nguồn đúng, không phải tài liệu.
 
 Chi tiết trong [.ai/STATE.md](.ai/STATE.md).

@@ -75,6 +75,19 @@ npm run db:push
 Kiểm tra `DATABASE_URL` trong `.env`. Mặc định là `file:../data/app.db`, tính từ
 thư mục `prisma/`.
 
+### Log báo `Socket timeout (the database failed to respond …)`
+
+SQLite chỉ có một người ghi tại một thời điểm. Khi lô đang chạy và trang lô mở, một truy vấn có thể
+phải chờ quá thời gian mặc định của Prisma. Lô vẫn chạy tiếp; video nào lỗi thì bấm **TIẾP TỤC**
+(không mua lại gì). Từ V1.2 Final QA trang lô không còn ghi vào DB mỗi lần tự làm mới, nên lỗi này
+hiếm (~1 lần mỗi lượt chạy trong QA).
+
+Nếu vẫn gặp thường xuyên trên Windows, cho truy vấn chờ lâu hơn: thêm `?socket_timeout=60` vào cuối
+`DATABASE_URL` trong `.env`, ví dụ `DATABASE_URL="file:../data/app.db?socket_timeout=60"`, rồi khởi
+động lại app. Tuỳ chọn, tự sửa tay; `.env` chứa API key — không commit, không gửi đi. Bộ test của dự
+án đã chạy với đúng tham số này. Chuyển sang chế độ WAL là quyết định riêng (sao lưu phải chép cả
+file `app.db-wal`), V1.2 chưa làm.
+
 ### Thư viện thành ngữ trống
 
 ```powershell
