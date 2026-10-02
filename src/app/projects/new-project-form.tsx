@@ -15,6 +15,7 @@ import {
   Select,
 } from "@/components/ui";
 import { createProject } from "@/app/actions/projects";
+import { PlatformPicker } from "@/components/platform-picker";
 import {
   QUALITY_MODES,
   ROUTER_STRATEGIES,
@@ -80,6 +81,10 @@ export function NewProjectForm({
             });
           }}
         >
+          <div className="mb-4 space-y-2">
+            <p className="text-sm font-semibold text-ink-100">Bạn muốn đăng video ở đâu?</p>
+            <PlatformPicker />
+          </div>
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <Field

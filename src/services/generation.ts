@@ -219,6 +219,8 @@ function routeFor(
     // watches full-screen. Requiring it unconditionally silently excluded every
     // affordable video model.
     needs1080p: type === "video" && project.qualityMode === "QUALITY",
+    // The frame clips are MADE for (QĐ-121): a model of the other orientation is not capable.
+    frameAspect: type === "video" ? project.aspectRatio : undefined,
     needsReferenceImage:
       type === "video" &&
       shouldGenerateKeyframe(
@@ -2226,7 +2228,10 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
       // is gone): a choice for a person, not a failure (QĐ-120). The policy that
       // refused is untouched; nothing is sent, nothing is swapped in.
       const noAuto = err instanceof RoutingError && (err.code === "needs_explicit_pin" || err.code === "no_capable_models") && !videoPinned;
-      const pinGone = err instanceof RoutingError && err.code === "manual_not_found" && videoPinned;
+      // A pinned model the router cannot use - gone, or the wrong frame shape
+      // (QĐ-121) - whether it says so for the pin or for the whole pool.
+      const pinGone =
+        err instanceof RoutingError && (err.code === "manual_not_found" || err.code === "no_capable_models") && videoPinned;
       if (!noAuto && !pinGone) throw err;
       const message = needsSelectionMessage({
         sceneNumber: scene.sceneNumber,

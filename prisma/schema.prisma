@@ -445,6 +445,12 @@ model Project {
   thumbnailChoiceJson String?
   /// Last EXPORT READY check (ffprobe, files, paths). JSON.
   exportReadyJson   String?
+  /// QĐ-121: the video's OUTPUT PROFILE - platform, frame size, fps, fit mode,
+  /// subtitle position. JSON. Null = a project from before it existed; its
+  /// profile is inferred from `aspectRatio` (and the batch preset), never written
+  /// back behind the person's back. `aspectRatio` stays the shape the pictures
+  /// and clips are MADE in; this is the shape the video is RENDERED in.
+  outputProfileJson String?
   /// When the executor last started / finished this video (queue view).
   runStartedAt      DateTime?
   runFinishedAt     DateTime?

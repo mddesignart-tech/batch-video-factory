@@ -7,6 +7,7 @@ import { SceneImagePanel } from "./scene-image-panel";
 import { SceneVoicePanel } from "./scene-voice-panel";
 import { VideoSelectionPanel } from "./video-selection-panel";
 import { isNeedsSelection, needsSelectionMessage } from "@/domain/video-selection";
+import { aspectOf, effectiveFit, type FitMode } from "@/domain/platform-profile";
 import { budgetProblem } from "@/domain/budget-message";
 import { BudgetProblemBox } from "@/components/video-budget";
 import {
@@ -129,6 +130,8 @@ const PRIORITY_LABEL: Record<string, string> = {
 export function Storyboard({
   projectId,
   videoLimit,
+  frame,
+  frameFit,
   idiomPhrase,
   scenes,
   routingByScene,
@@ -140,6 +143,10 @@ export function Storyboard({
   projectId: string;
   /** The video's own budget (NGÂN SÁCH VIDEO), for the "Tăng ngân sách video" button. */
   videoLimit: number | null;
+  /** The output frame (QĐ-121): the preview is drawn in this shape. */
+  frame?: { width: number; height: number };
+  /** The profile's fit mode, so the preview frames pictures like the render. */
+  frameFit?: FitMode;
   idiomPhrase: string;
   scenes: SceneView[];
   routingByScene: Record<number, RoutingView>;
@@ -156,6 +163,8 @@ export function Storyboard({
   if (!selected) return null;
 
   const routing = routingByScene[selected.sceneNumber];
+  // The preview is the final video's shape: vertical, landscape or square.
+  const frameCss = `${frame?.width ?? 1080} / ${frame?.height ?? 1920}`;
   // A scene no video model may run automatically: a choice, shown as one (QĐ-120).
   const selectionMessage = isNeedsSelection(selected.errorMessage)
     ? selected.errorMessage
@@ -264,19 +273,20 @@ export function Storyboard({
                     src={`/api/media/${selected.videoPath}`}
                     controls
                     playsInline
-                    className="aspect-[9/16] w-full object-cover"
+                    style={{ aspectRatio: frameCss }}
+                    className="w-full object-cover"
                   />
                 ) : selected.imagePath ? (
-                  <div className="relative">
-                    <img
-                      src={`/api/media/${selected.imagePath}`}
-                      alt={`Cảnh ${selected.sceneNumber}`}
-                      className="aspect-[2/3] w-full object-contain"
-                    />
-                    <CropOverlay />
-                  </div>
+                  <FramedImage
+                    key={selected.imagePath}
+                    src={`/api/media/${selected.imagePath}`}
+                    alt={`Cảnh ${selected.sceneNumber}`}
+                    frame={frame ?? { width: 1080, height: 1920 }}
+                    fit={frameFit ?? "AUTO"}
+                  />
                 ) : (
-                  <div className="flex aspect-[9/16] w-full flex-col items-center justify-center gap-2 text-center text-xs text-ink-600">
+                  <div style={{ aspectRatio: frameCss }}
+                    className="flex w-full flex-col items-center justify-center gap-2 text-center text-xs text-ink-600">
                     <Video className="h-8 w-8" />
                     <span>Chưa có media cho cảnh này</span>
                     <span className="text-[10px]">
@@ -652,31 +662,67 @@ export function Storyboard({
 }
 
 /**
- * Shows what the 9:16 crop will remove.
- *
- * The image is 2:3, which is wider than the video, so the renderer trims about
- * 8% off each side. Seeing that before approving an image is cheaper than
- * discovering a sliced-off hand after the video is rendered.
+ * The picture as the final video will frame it (QĐ-121), decided by the same
+ * rule as the renderer (effectiveFit):
+ *   fill  - the whole picture, with the part the crop removes shaded, so a
+ *           sliced-off hand is seen before the video is rendered
+ *   show-all - the whole picture inside the frame, the rest filled
  */
-function CropOverlay() {
-  const side = `${((1 - 1080 / 1280) / 2) * 100}%`;
+function FramedImage({
+  src,
+  alt,
+  frame,
+  fit,
+}: {
+  src: string;
+  alt: string;
+  frame: { width: number; height: number };
+  fit: FitMode;
+}) {
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const mode = effectiveFit(fit, natural, frame);
+  if (mode === "CONTAIN") {
+    return (
+      <div className="relative flex w-full items-center justify-center bg-ink-900" style={{ aspectRatio: `${frame.width} / ${frame.height}` }}>
+        <img src={src} alt={alt} className="max-h-full max-w-full object-contain" onLoad={(e) => setNatural({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })} />
+        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-black/70 px-1.5 py-0.5 text-[9px] text-ink-300">
+          hiện toàn bộ ảnh trong khung {aspectOf(frame.width, frame.height)}
+        </span>
+      </div>
+    );
+  }
+  const imgRatio = natural ? natural.width / natural.height : 2 / 3;
+  const frameRatio = frame.width / frame.height;
+  // The share of the picture the crop removes, on each side.
+  const wider = imgRatio > frameRatio;
+  const cut = `${((1 - (wider ? frameRatio / imgRatio : imgRatio / frameRatio)) / 2) * 100}%`;
   return (
-    <div className="pointer-events-none absolute inset-0">
-      <div
-        className="absolute inset-y-0 left-0 bg-black/55"
-        style={{ width: side }}
+    <div className="relative">
+      <img
+        src={src}
+        alt={alt}
+        className="w-full object-contain"
+        style={{ aspectRatio: natural ? `${natural.width} / ${natural.height}` : "2 / 3" }}
+        onLoad={(e) => setNatural({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
       />
-      <div
-        className="absolute inset-y-0 right-0 bg-black/55"
-        style={{ width: side }}
-      />
-      <div
-        className="absolute inset-y-0 border-x border-dashed border-brand-400/70"
-        style={{ left: side, right: side }}
-      />
-      <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-black/70 px-1.5 py-0.5 text-[9px] text-ink-300">
-        vùng giữ lại khi cắt 9:16
-      </span>
+      <div className="pointer-events-none absolute inset-0">
+        {wider ? (
+          <>
+            <div className="absolute inset-y-0 left-0 bg-black/55" style={{ width: cut }} />
+            <div className="absolute inset-y-0 right-0 bg-black/55" style={{ width: cut }} />
+            <div className="absolute inset-y-0 border-x border-dashed border-brand-400/70" style={{ left: cut, right: cut }} />
+          </>
+        ) : (
+          <>
+            <div className="absolute inset-x-0 top-0 bg-black/55" style={{ height: cut }} />
+            <div className="absolute inset-x-0 bottom-0 bg-black/55" style={{ height: cut }} />
+            <div className="absolute inset-x-0 border-y border-dashed border-brand-400/70" style={{ top: cut, bottom: cut }} />
+          </>
+        )}
+        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-black/70 px-1.5 py-0.5 text-[9px] text-ink-300">
+          vùng giữ lại trong khung {aspectOf(frame.width, frame.height)}
+        </span>
+      </div>
     </div>
   );
 }

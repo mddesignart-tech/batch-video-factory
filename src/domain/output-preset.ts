@@ -112,6 +112,45 @@ export const BUILT_IN_PRESETS: readonly OutputPreset[] = [
   },
   {
     ...base,
+    id: "facebook-reels",
+    name: "Facebook Reels",
+    platform: "REELS",
+    width: 1080,
+    height: 1920,
+    subtitleMode: "BURN",
+    thumbnail: true,
+    metadata: true,
+    textFiles: false,
+    builtIn: true,
+  },
+  {
+    ...base,
+    id: "square",
+    name: "Bài đăng vuông 1:1",
+    platform: "CUSTOM",
+    width: 1080,
+    height: 1080,
+    subtitleMode: "BURN",
+    thumbnail: true,
+    metadata: true,
+    textFiles: false,
+    builtIn: true,
+  },
+  {
+    ...base,
+    id: "instagram-feed",
+    name: "Instagram Feed dọc 4:5",
+    platform: "CUSTOM",
+    width: 1080,
+    height: 1350,
+    subtitleMode: "BURN",
+    thumbnail: true,
+    metadata: true,
+    textFiles: false,
+    builtIn: true,
+  },
+  {
+    ...base,
     id: "youtube-landscape",
     name: "YouTube ngang 16:9",
     platform: "YOUTUBE",
@@ -171,6 +210,9 @@ export interface PresetRender {
    * and nothing is rendered again.
    */
   encode?: { crf: number; audioBitrateKbps: number };
+  /** From a project output profile (QĐ-121), only when not the defaults. */
+  fit?: "COVER" | "CONTAIN";
+  subtitleBottomPct?: number;
 }
 
 export function presetRender(preset: OutputPreset): PresetRender {

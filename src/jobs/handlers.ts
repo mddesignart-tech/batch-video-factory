@@ -181,6 +181,8 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
     target: output.render.target,
     burnSubtitles: output.render.burnSubtitles,
     ...(output.render.encode ? { encode: output.render.encode } : {}),
+    ...(output.render.fit ? { fit: output.render.fit } : {}),
+    ...(output.render.subtitleBottomPct !== undefined ? { subtitleBottomPct: output.render.subtitleBottomPct } : {}),
     highlightPhrase: project.idiom.phrase,
     mixSettings: settings.audioMix,
     scenes: active.map((s) => ({

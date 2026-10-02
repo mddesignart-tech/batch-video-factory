@@ -1,3 +1,4 @@
+import { generationAspectFor, type OutputProfile } from "@/domain/platform-profile";
 import type { Project } from "@prisma/client";
 import type { QualityMode, RouterStrategy } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
@@ -51,6 +52,12 @@ export interface CreateProjectInput {
   autoGenerateScript?: boolean;
   /** Batch mode only. Single projects always wait for explicit approval. */
   autoStartMedia?: boolean;
+  /**
+   * Where the video will be posted (QĐ-121). Sets the output profile AND the
+   * shape pictures/clips are made in. Absent = the style preset's ratio, as
+   * before (no profile stored; it is inferred).
+   */
+  outputProfile?: OutputProfile;
 }
 
 export async function createProjectForIdiom(
@@ -74,7 +81,10 @@ export async function createProjectForIdiom(
       routerStrategy: input.routerStrategy ?? settings.defaultRouterStrategy,
       stylePresetId: preset?.id ?? null,
       targetDuration: input.targetDuration ?? settings.defaultTargetDuration,
-      aspectRatio: preset?.aspectRatio ?? "9:16",
+      aspectRatio: input.outputProfile
+        ? generationAspectFor(input.outputProfile.width, input.outputProfile.height)
+        : (preset?.aspectRatio ?? "9:16"),
+      outputProfileJson: input.outputProfile ? JSON.stringify(input.outputProfile) : null,
       maxBudget: round(input.maxBudget ?? settings.defaultMaxBudget),
     },
   });
@@ -393,6 +403,7 @@ export async function previewProjectCost(
     // same reasoning is already written out in `routeFor`; this call site was
     // simply left behind when that was fixed.
     needs1080p: project.qualityMode === "QUALITY",
+    frameAspect: project.aspectRatio,
     // The environment half of the LOW_AUTO gate. Real wallets, so the preview
     // cannot promise a clip this account has no money for.
     providerBudgets: Object.fromEntries(wallets.map((w) => [w.provider, w.remainingUsd])),

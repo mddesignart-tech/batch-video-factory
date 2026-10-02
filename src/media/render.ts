@@ -1,3 +1,4 @@
+import { effectiveFit, type FitMode } from "@/domain/platform-profile";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -6,6 +7,7 @@ import {
   ffmpegAvailable,
   FFMPEG_MISSING_MESSAGE,
   FfmpegError,
+  probeDimensions,
   probeDuration,
   supportsSubtitleBurn,
 } from "./ffmpeg";
@@ -135,6 +137,14 @@ export interface RenderRequest {
    * V1's CRF 20 / AAC 192k, and then it is left out of the render recipe too.
    */
   encode?: FinalEncode;
+  /**
+   * How a picture/clip of another shape goes into the frame (QĐ-121). Never a
+   * stretch. Missing = AUTO, which is V1's fill-and-crop whenever the shapes are
+   * close - and then it is left out of the recipe too.
+   */
+  fit?: FitMode;
+  /** Subtitle distance from the bottom, % of height. Missing/null = automatic. */
+  subtitleBottomPct?: number | null;
 }
 
 export interface FinalEncode {
@@ -181,6 +191,8 @@ export function buildSceneNormalizeArgs(opts: {
   duration: number;
   target: RenderTarget;
   output: string;
+  /** COVER (default, V1's exact chain) or CONTAIN (whole picture over a blurred fill). */
+  fit?: "COVER" | "CONTAIN";
 }): string[] {
   const { videoInput, audioInput, duration, target, output } = opts;
   const { width, height, fps } = target;
@@ -204,10 +216,18 @@ export function buildSceneNormalizeArgs(opts: {
     ? `,zoompan=z='min(zoom+${step},1.10)':d=${frames}:s=${width}x${height}:fps=${fps}`
     : "";
 
+  // Never stretched. COVER fills and crops the centre (V1's chain, unchanged);
+  // CONTAIN shows the whole source over a blurred, filled copy of itself.
   const videoChain =
-    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
-    `crop=${width}:${height}${zoom},fps=${fps},` +
-    `tpad=stop_mode=clone:stop_duration=10,setsar=1,format=yuv420p[v]`;
+    opts.fit === "CONTAIN"
+      ? `[0:v]split=2[bgs][fgs];` +
+        `[bgs]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=20:2[bg];` +
+        `[fgs]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg];` +
+        `[bg][fg]overlay=(W-w)/2:(H-h)/2${zoom},fps=${fps},` +
+        `tpad=stop_mode=clone:stop_duration=10,setsar=1,format=yuv420p[v]`
+      : `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
+        `crop=${width}:${height}${zoom},fps=${fps},` +
+        `tpad=stop_mode=clone:stop_duration=10,setsar=1,format=yuv420p[v]`;
   // apad keeps the audio stream alive to the trim point when the voice clip is
   // shorter than the scene, which is the normal case.
   const audioChain = `[1:a]aresample=48000,apad[a]`;
@@ -593,6 +613,9 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     // only when it has no lines at all.
     const audioInput = audio ? audio.audioPath : scene.audioPath;
     const output = path.join(tempDir, name);
+    // AUTO decides per source: fill when the shapes are close, show-all when a
+    // crop would cut most of it (QĐ-121). Probed locally, $0.
+    const fit = effectiveFit(req.fit ?? "AUTO", req.fit === "COVER" || req.fit === "CONTAIN" ? null : await probeDimensions(source), req.target);
     // Identical segment work done before (same picture/clip, audio, length,
     // motion, codec) is copied from the local cache - compute saved, $0 either
     // way (QĐ-112).
@@ -603,6 +626,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         duration: sceneDurations[i] ?? scene.duration,
         target: req.target,
         output,
+        fit,
       }),
       inputs: [source, ...(audioInput ? [audioInput] : [])],
       output,
@@ -659,6 +683,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     width: req.target.width,
     height: req.target.height,
     highlightPhrase: req.highlightPhrase,
+    bottomPct: req.subtitleBottomPct ?? null,
   });
   const srtPath = path.join(subsDir, "subtitles.srt");
   const assPath = path.join(subsDir, "subtitles.ass");

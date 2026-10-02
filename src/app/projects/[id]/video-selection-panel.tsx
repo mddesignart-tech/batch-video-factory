@@ -60,7 +60,8 @@ export function VideoSelectionPanel({
   }, [sceneId, pinned]);
 
   const split = rawMessage ? splitNeedsSelection(rawMessage) : null;
-  const pinGone = Boolean(split?.summary.includes("không còn khả dụng"));
+  const pinGone = Boolean(split?.summary.includes("không còn khả dụng") || split?.summary.includes("chưa hỗ trợ"));
+  const shapeProblem = split?.summary.match(/Model video này chưa hỗ trợ [^.]+/)?.[0] ?? null;
   const money = (n: number) => `~$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)}`;
   const pinnedChoice = pinned && choices ? (choices.find((c) => `${c.provider}/${c.model}` === pinned) ?? null) : null;
 
@@ -124,7 +125,9 @@ export function VideoSelectionPanel({
     <div className="mt-3 space-y-2 rounded-lg border border-warn-500/40 bg-warn-500/10 p-3 text-[11px] text-ink-200">
       <p className="flex items-center gap-1.5 font-semibold text-warn-500">
         <Clapperboard className="h-3.5 w-3.5" />
-        {pinGone
+        {shapeProblem
+          ? `${shapeProblem}.`
+          : pinGone
           ? "Model cũ không còn khả dụng. Chọn model thay thế."
           : rawMessage
             ? "Không có model Video AI nào hiện đủ điều kiện chạy tự động cho cảnh này."
@@ -174,6 +177,11 @@ export function VideoSelectionPanel({
         <Button size="sm" variant="outline" disabled={busy} onClick={() => void local(true)}>
           BỎ QUA VIDEO AI · $0
         </Button>
+        {shapeProblem ? (
+          <a href="#dinh-dang-video" className="inline-flex h-8 items-center rounded-md border border-ink-600 px-3 text-xs text-ink-100 hover:bg-ink-800">
+            ĐỔI ĐỊNH DẠNG VIDEO
+          </a>
+        ) : null}
       </div>
 
       {open ? (

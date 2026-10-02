@@ -3601,3 +3601,38 @@ vẫn chỉ chạy khi ghim, DEPRECATED/DISABLED/đã tắt không tự chọn, 
 - vitest: `esbuild.jsx = "automatic"` để test render component.
 
 Test: `tests/video-selection.test.ts` (6 test).
+
+## QĐ-121 — Chọn nền tảng / định dạng video cho người không rành kỹ thuật (2026-10-02, $0, không POST trả phí)
+
+**Trước:** project có `aspectRatio` (9:16 / 16:9 / 1:1 / 4:5 qua `targetForAspect`) — dùng cho ảnh, clip, local motion,
+render; preset xuất (QĐ-114) gắn theo LÔ (Shorts / TikTok / Reels / YouTube ngang). Form tạo dự án không hỏi nền tảng;
+trang dự án ghi cứng "(1080x1920, 30fps)"; preview Storyboard cứng 9:16; render luôn "lấp đầy + cắt giữa" (không kéo
+méo); phụ đề cách đáy 20% cho mọi khung; router video không xét hướng khung.
+
+**Hai khung, cố ý tách:** `Project.aspectRatio` = khung TẠO ảnh/clip (nằm trong khoá reuse ảnh/clip — đổi là mua lại);
+`Project.outputProfileJson` (cột mới, migration chỉ thêm cột, NULL = suy ra) = khung XUẤT (render tại máy, $0).
+
+- `domain/platform-profile.ts`: 8 lựa chọn (TikTok, YouTube Shorts, Instagram Reels, Facebook Reels → cùng
+  VERTICAL_SHORT_9_16 1080x1920; YouTube ngang 1920x1080; vuông 1080x1080; Instagram Feed 1080x1350; Tùy chỉnh), 30fps,
+  mặc định TikTok/"Video ngắn dọc". Profile = platform, width, height, fps, fit (AUTO/COVER/CONTAIN = "Tự động – Khuyên
+  dùng" / "Lấp đầy khung" / "Hiện toàn bộ"), vị trí phụ đề (null = tự động). Dự án cũ: suy ra từ aspectRatio / preset lô,
+  không ghi lại. Thêm preset xuất dựng sẵn: facebook-reels, square, instagram-feed.
+- Tạo dự án: "Bạn muốn đăng video ở đâu?" (ô lớn + khung minh hoạ); nâng cao = rộng/cao/FPS. Đặt cả profile và khung tạo.
+- Trang dự án: thẻ "Định dạng video" (Nền tảng / Khung hình / Đầu ra / Đổi định dạng; nâng cao: FPS, khớp khung, vị trí
+  phụ đề). Đổi định dạng khi ĐÃ có ảnh/clip: hộp "Bạn đang đổi tỷ lệ video… Không phát sinh phí API" [ĐỔI TỶ LỆ][HỦY];
+  giữ khung tạo, chỉ đổi khung xuất; video đã xong → `media_ready` để TIẾP TỤC render lại tại máy ($0). Chưa có ảnh/clip →
+  khung tạo đổi theo. "Tạo lại asset theo tỷ lệ mới…" hiện "Tạo lại ảnh: ~$X / Tạo lại Video AI: ~$Y", xác nhận chỉ đổi
+  khung tạo cho lần chạy sau (preflight + duyệt như thường), không gửi request.
+- Render: profile thắng preset lô/Settings. COVER = chuỗi lệnh V1 y hệt (cache đoạn + công thức render cũ còn nguyên);
+  CONTAIN = ảnh nguyên trên nền mờ; AUTO = COVER khi lệch khung ≤ 1,35 lần (2:3 trong 9:16), CONTAIN khi lệch nhiều
+  (16:9 trong 9:16) — đo kích thước nguồn bằng ffprobe, tại máy. Không bao giờ scale không giữ tỷ lệ. Fit / vị trí phụ đề
+  vào công thức render chỉ khi khác mặc định. Local motion vẽ trực tiếp ở canvas xuất (như trước).
+- Phụ đề: vùng an toàn theo khung (9:16 giữ đúng 20% đáy / 7,5% hai bên của V1; 4:5 12%; 1:1 10%; 16:9 8%); chỉnh % ở
+  Nâng cao. Chưa nới lề phải riêng cho cột nút TikTok (sẽ lệch chữ căn giữa).
+- Router video: `frameAspect` (khung tạo) — model có kích thước cố định khác hướng (dọc vs ngang) không "capable", lý do
+  "Model video này chưa hỗ trợ video ngang 16:9 (model tạo video dọc 9:16)." Cảnh ghim model sai hướng → NEEDS_SELECTION
+  (QĐ-120) với đúng câu đó + nút ĐỔI ĐỊNH DẠNG VIDEO. Ước tính/preflight dùng cùng tham số.
+- Preview Storyboard: khung đúng tỷ lệ xuất; ảnh hiện vùng giữ lại (lấp đầy) hoặc hiện toàn bộ theo cùng quy tắc render.
+- Ảnh AI: đã có — kích thước theo khung tạo, provider chọn cỡ gần nhất (gpt-image-1: 1024x1536 / 1536x1024 / 1024x1024).
+
+Không có tích hợp đăng bài. Test: `tests/platform-profile.test.ts` (10 test).

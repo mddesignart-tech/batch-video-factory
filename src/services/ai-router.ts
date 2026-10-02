@@ -1,3 +1,4 @@
+import { orientationOf, viShape } from "@/domain/platform-profile";
 import type { ModelRegistry } from "@prisma/client";
 import type {
   Complexity,
@@ -40,6 +41,12 @@ export interface RouteContext {
   characterCount: number;
   /** Character identity must hold across scenes - weights consistency. */
   consistencyRequired: boolean;
+  /**
+   * The frame the clip is made for ("9:16", "16:9"...), QĐ-121. A video model
+   * whose fixed size has the other orientation is not capable: its clip would
+   * have to be stretched or cut down to a sliver. Undefined = not checked.
+   */
+  frameAspect?: string;
   needs1080p: boolean;
   needsReferenceImage: boolean;
   /**
@@ -216,6 +223,8 @@ export function explainIncapable(model: ModelRegistry, ctx: RouteContext): strin
     return `nhà cung cấp "${model.provider}" chưa sẵn sàng (thiếu key, đang tắt, hoặc bị giới hạn tần suất)`;
   }
   if (ctx.type === "video") {
+    const shape = videoShapeMismatch(model, ctx);
+    if (shape) return shape;
     if (model.maxDuration > 0 && ctx.durationSeconds > model.maxDuration) {
       return `cảnh dài ${ctx.durationSeconds}s nhưng model chỉ hỗ trợ tối đa ${model.maxDuration}s`;
     }
@@ -245,12 +254,29 @@ export function explainIncapable(model: ModelRegistry, ctx: RouteContext): strin
   return "không đáp ứng yêu cầu của cảnh";
 }
 
+/**
+ * "Model video này chưa hỗ trợ video dọc 9:16." - when a model's fixed output
+ * size ("…:720x1280") has the other orientation than the frame (QĐ-121). A
+ * square frame takes either; a model without a size in its id is not judged.
+ */
+export function videoShapeMismatch(model: Pick<ModelRegistry, "modelId">, ctx: Pick<RouteContext, "frameAspect">): string | null {
+  if (!ctx.frameAspect) return null;
+  const size = /:(\d+)x(\d+)$/.exec(model.modelId);
+  const [fw, fh] = ctx.frameAspect.split(":").map(Number);
+  if (!size || !fw || !fh) return null;
+  const frame = orientationOf(fw, fh);
+  const made = orientationOf(Number(size[1]), Number(size[2]));
+  if (frame === "SQUARE" || made === "SQUARE" || frame === made) return null;
+  return `Model video này chưa hỗ trợ ${viShape(fw, fh)} (model tạo ${viShape(Number(size[1]), Number(size[2]))}).`;
+}
+
 export function isCapable(model: ModelRegistry, ctx: RouteContext): boolean {
   if (!model.enabled) return false;
   if (model.type !== ctx.type) return false;
   if (!ctx.availableProviders.includes(model.provider)) return false;
 
   if (ctx.type === "video") {
+    if (videoShapeMismatch(model, ctx)) return false;
     if (model.maxDuration > 0 && ctx.durationSeconds > model.maxDuration) {
       return false;
     }

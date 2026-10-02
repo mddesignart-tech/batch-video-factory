@@ -41,6 +41,10 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
     // Output preset encoder settings (Phase 6). Undefined for V1's defaults and
     // then dropped by canonical(), so an unchanged video keeps its recipe.
     encode: req.encode,
+    // Output profile (QĐ-121): only when a person chose something other than
+    // the defaults, so a video nobody touched keeps its recipe.
+    fit: req.fit && req.fit !== "AUTO" ? req.fit : undefined,
+    subtitleBottomPct: req.subtitleBottomPct ?? undefined,
     highlightPhrase: req.highlightPhrase ?? "",
     music: content(req.musicPath ?? null),
     sfx: (req.sfx ?? []).map((e) => ({ sha: content(e.path), atSec: e.atSec })),

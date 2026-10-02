@@ -32,6 +32,8 @@ import { videoBudget } from "@/services/video-budget";
 import { budgetProblem } from "@/domain/budget-message";
 import { isNeedsSelection, splitNeedsSelection } from "@/domain/video-selection";
 import { BudgetProblemBox, VideoBudgetCard } from "@/components/video-budget";
+import { projectFormat } from "@/services/output-profile";
+import { VideoFormatCard } from "./video-format-card";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +99,7 @@ export default async function ProjectDetailPage({
 
   const score = parseJson<ScriptScore | null>(project.scriptScoreJson, null);
   const budget = await videoBudget(id);
+  const format = await projectFormat(id);
   const projectBudgetProblem = budgetProblem(project.errorMessage);
 
   return (
@@ -213,6 +216,8 @@ export default async function ProjectDetailPage({
             <Storyboard
               projectId={project.id}
               videoLimit={budget.videoLimit}
+              frame={{ width: format.profile.width, height: format.profile.height }}
+              frameFit={format.profile.fit}
               idiomPhrase={project.idiom.phrase}
               scenes={project.scenes.map((scene) => ({
                 id: scene.id,
@@ -301,6 +306,8 @@ export default async function ProjectDetailPage({
         </div>
 
         <div className="space-y-4">
+          <VideoFormatCard format={format} />
+
           <VideoBudgetCard budget={budget} />
 
           {previewError ? (
@@ -378,7 +385,7 @@ export default async function ProjectDetailPage({
               />
               <InfoRow
                 label="Tỉ lệ khung hình"
-                value={`${project.aspectRatio} (1080x1920, 30fps)`}
+                value={`${format.outputAspect} (${format.profile.width}x${format.profile.height}, ${format.profile.fps}fps)`}
               />
               <InfoRow
                 label="Ngân sách tối đa"

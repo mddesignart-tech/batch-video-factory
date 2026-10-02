@@ -23,7 +23,11 @@ export function needsSelectionMessage(opts: {
   unavailablePin?: string | null;
   diagnostics: string;
 }): string {
-  const head = opts.unavailablePin
+  // A pinned model of the wrong frame orientation (QĐ-121) says exactly that.
+  const shape = /Model video này chưa hỗ trợ [^.(]+/.exec(opts.diagnostics)?.[0];
+  const head = opts.unavailablePin && shape
+    ? `${NEEDS_SELECTION_CODE}: cảnh ${opts.sceneNumber} — ${shape.trim()}.`
+    : opts.unavailablePin
     ? `${NEEDS_SELECTION_CODE}: cảnh ${opts.sceneNumber} — model cũ ${opts.unavailablePin} không còn khả dụng. Chọn model thay thế.`
     : `${NEEDS_SELECTION_CODE}: cảnh ${opts.sceneNumber} — không có model Video AI nào hiện đủ điều kiện chạy tự động ` +
       `(độ phức tạp ${opts.complexity}). Cần chọn thủ công.`;

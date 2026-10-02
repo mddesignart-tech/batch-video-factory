@@ -15,6 +15,7 @@ import {
   startMediaGeneration,
 } from "@/services/project-service";
 import type { ActionResult } from "./idioms";
+import { DEFAULT_PLATFORM, PLATFORM_IDS, profileFromPlatform, validateProfile, type OutputProfile } from "@/domain/platform-profile";
 import { makeSceneVoice, sceneVoiceStatus, type SceneVoiceResult } from "@/services/scene-voice";
 import type { SceneVoicePlan } from "@/services/generation";
 import { setVideoBudget, videoBudget, type VideoBudget } from "@/services/video-budget";
@@ -35,6 +36,11 @@ const CreateInput = z.object({
   targetDuration: z.coerce.number().min(15).max(60).default(25),
   maxBudget: z.coerce.number().positive("Ngân sách video phải lớn hơn $0.").max(1000).default(10),
   generateScript: z.coerce.boolean().default(true),
+  /** "Bạn muốn đăng video ở đâu?" (QĐ-121). Default: short vertical video. */
+  platform: z.enum(PLATFORM_IDS).default(DEFAULT_PLATFORM),
+  customWidth: z.coerce.number().optional(),
+  customHeight: z.coerce.number().optional(),
+  customFps: z.coerce.number().optional(),
 });
 
 export async function createProject(
@@ -48,8 +54,18 @@ export async function createProject(
     };
   }
 
+  const blank = (n: number | undefined) => (n === undefined || Number.isNaN(n) || n === 0 ? undefined : n);
+  const profileInput = profileFromPlatform(parsed.data.platform, {
+    width: blank(parsed.data.customWidth),
+    height: blank(parsed.data.customHeight),
+    fps: blank(parsed.data.customFps),
+  });
+  const checkedProfile = validateProfile(profileInput);
+  if (!checkedProfile.ok) return { ok: false, message: checkedProfile.message };
+
   try {
     const project = await createProjectForIdiom({
+      outputProfile: checkedProfile.profile,
       idiomId: parsed.data.idiomId,
       qualityMode: parsed.data.qualityMode,
       routerStrategy: parsed.data.routerStrategy,
@@ -435,5 +451,50 @@ export async function makeSceneVideoAction(sceneId: string, opts: { confirmPaid?
     return r;
   } catch (err) {
     return { status: "FAILED" as const, message: errorMessage(err), choice: null, postsMade: 0 };
+  }
+}
+
+// ------------------------------------------------------------ video format ---
+// QĐ-121: "Bạn muốn đăng video ở đâu?" - changing it never buys anything.
+
+export async function getProjectFormat(projectId: string) {
+  try {
+    const { projectFormat } = await import("@/services/output-profile");
+    return { ok: true as const, message: "", format: await projectFormat(projectId) };
+  } catch (err) {
+    return { ok: false as const, message: errorMessage(err), format: null };
+  }
+}
+
+export async function changeProjectFormat(projectId: string, input: Partial<OutputProfile>) {
+  try {
+    const { setOutputProfile } = await import("@/services/output-profile");
+    const r = await setOutputProfile(projectId, input);
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true as const, message: r.message, format: r.format };
+  } catch (err) {
+    return { ok: false as const, message: errorMessage(err), format: null };
+  }
+}
+
+/** Price of re-making pictures + AI clips in the new shape. Read-only. */
+export async function getReshapeEstimate(projectId: string) {
+  try {
+    const { reshapeEstimate } = await import("@/services/output-profile");
+    return { ok: true as const, message: "", estimate: await reshapeEstimate(projectId) };
+  } catch (err) {
+    return { ok: false as const, message: errorMessage(err), estimate: null };
+  }
+}
+
+/** "Tạo lại asset theo tỷ lệ mới": changes what the NEXT run would make. Sends nothing. */
+export async function adoptNewAssetShape(projectId: string): Promise<ActionResult> {
+  try {
+    const { adoptShapeForNewAssets } = await import("@/services/output-profile");
+    const r = await adoptShapeForNewAssets(projectId);
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, message: r.message };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
   }
 }

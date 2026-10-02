@@ -1,3 +1,4 @@
+import { aspectOf, parseProfile, platformForSize, platformPreset, VI_FIT_MODE, type OutputProfile } from "@/domain/platform-profile";
 import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "@/lib/prisma";
@@ -5,7 +6,7 @@ import { DATA_ROOT, toAbsolute, toRelative } from "@/lib/paths";
 import { getSettings, type AppSettings } from "@/lib/settings";
 import { withSemaphore } from "@/lib/semaphore";
 import { safeSlug, uniqueSlug } from "@/domain/output-naming";
-import { presetAspect, presetRender, resolvePreset, type OutputPreset, type PresetRender } from "@/domain/output-preset";
+import { findPreset, presetAspect, presetRender, resolvePreset, type OutputPreset, type PresetRender } from "@/domain/output-preset";
 import { targetForAspect } from "@/media/render";
 
 /**
@@ -122,6 +123,8 @@ export async function ensureOutputDir(projectId: string): Promise<string> {
 
 export interface ProjectRenderSettings {
   preset: OutputPreset;
+  /** The project's output profile (QĐ-121): stored, or inferred for an older project. */
+  profile: OutputProfile & { inferred: boolean };
   /** True when the batch named a preset; false = Settings default. */
   explicit: boolean;
   render: PresetRender;
@@ -142,10 +145,39 @@ export interface ProjectRenderSettings {
  * V1 render, so no existing recipe changes and nothing is rendered again.
  */
 export function renderSettingsFrom(
-  project: { aspectRatio: string },
+  project: { aspectRatio: string; outputProfileJson?: string | null },
   batchPresetId: string | null | undefined,
   settings: Pick<AppSettings, "defaultOutputPresetId" | "customPresets" | "burnSubtitles">,
 ): ProjectRenderSettings {
+  // A profile the person chose for THIS video wins over the batch / Settings
+  // preset (QĐ-121): frame size and fps from the profile, subtitles / thumbnail
+  // / text files from the platform's export preset. Fit and subtitle position
+  // go to the renderer; never a re-purchase - assets of another shape are
+  // cropped or fitted locally.
+  const chosen = parseProfile(project.outputProfileJson);
+  if (chosen) {
+    const preset =
+      findPreset(platformPreset(chosen.platform)?.exportPresetId, settings.customPresets) ??
+      resolvePreset(null, settings.defaultOutputPresetId, settings.customPresets);
+    const fromPreset = presetRender(preset);
+    const outAspect = aspectOf(chosen.width, chosen.height);
+    return {
+      preset,
+      profile: { ...chosen, inferred: false },
+      explicit: true,
+      render: {
+        target: { width: chosen.width, height: chosen.height, fps: chosen.fps },
+        burnSubtitles: fromPreset.burnSubtitles && settings.burnSubtitles,
+        ...(fromPreset.encode ? { encode: fromPreset.encode } : {}),
+        ...(chosen.fit !== "AUTO" ? { fit: chosen.fit } : {}),
+        ...(chosen.subtitleBottomPct !== null ? { subtitleBottomPct: chosen.subtitleBottomPct } : {}),
+      },
+      aspectNote:
+        outAspect === project.aspectRatio
+          ? null
+          : `Ảnh/clip được tạo cho khung ${project.aspectRatio}, video xuất ${outAspect}: khớp khung tại máy (${VI_FIT_MODE[chosen.fit]}), không tạo lại ảnh/clip, $0.`,
+    };
+  }
   const explicit = Boolean(batchPresetId) && resolvePreset(batchPresetId, null, settings.customPresets).id === batchPresetId;
   const preset = resolvePreset(explicit ? batchPresetId : null, settings.defaultOutputPresetId, settings.customPresets);
   const fromPreset = presetRender(preset);
@@ -153,6 +185,7 @@ export function renderSettingsFrom(
     const shape = presetAspect(preset);
     return {
       preset,
+      profile: { ...profileOf(fromPreset.target), inferred: true },
       explicit,
       render: fromPreset,
       aspectNote:
@@ -162,11 +195,13 @@ export function renderSettingsFrom(
     };
   }
   const sameShape = presetAspect(preset) === project.aspectRatio;
+  const target = sameShape ? fromPreset.target : targetForAspect(project.aspectRatio);
   return {
     preset,
+    profile: { ...profileOf(target), inferred: true },
     explicit,
     render: {
-      target: sameShape ? fromPreset.target : targetForAspect(project.aspectRatio),
+      target,
       burnSubtitles: fromPreset.burnSubtitles && settings.burnSubtitles,
       ...(fromPreset.encode ? { encode: fromPreset.encode } : {}),
     },
@@ -177,7 +212,12 @@ export function renderSettingsFrom(
 export async function renderSettingsFor(projectId: string): Promise<ProjectRenderSettings> {
   const project = await prisma.project.findUniqueOrThrow({
     where: { id: projectId },
-    select: { aspectRatio: true, batch: { select: { outputPresetId: true } } },
+    select: { aspectRatio: true, outputProfileJson: true, batch: { select: { outputPresetId: true } } },
   });
   return renderSettingsFrom(project, project.batch?.outputPresetId ?? null, await getSettings());
+}
+
+/** The inferred profile of a render target (an older project's frame). */
+function profileOf(target: { width: number; height: number; fps: number }): OutputProfile {
+  return { platform: platformForSize(target.width, target.height), width: target.width, height: target.height, fps: target.fps, fit: "AUTO", subtitleBottomPct: null };
 }

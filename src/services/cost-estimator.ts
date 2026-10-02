@@ -275,6 +275,8 @@ export interface EstimateInput {
   maxBudget: number;
   availableProviders: string[];
   needs1080p?: boolean;
+  /** Frame clips are made for (QĐ-121); a model of the other orientation is not capable. */
+  frameAspect?: string;
   aspectWidth?: number;
   /**
    * Each vendor's own wallet, in dollars. The environment half of the gate.
@@ -386,6 +388,7 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
       availableProviders,
       budgetRemaining: remaining,
       needs1080p: input.needs1080p ?? false,
+      frameAspect: input.frameAspect,
       providerBudgets: input.providerBudgets,
       perVideoCapRemaining: input.perVideoCapRemaining,
       paidQa: input.paidQa === true,
@@ -474,6 +477,7 @@ export function planScene(opts: {
   availableProviders: string[];
   budgetRemaining: number;
   needs1080p: boolean;
+  frameAspect?: string;
   providerBudgets?: Record<string, number | null>;
   perVideoCapRemaining?: number | null;
   /** Paid AI QA switched on (QĐ-113). Off: scoring is priced as optional only. */
@@ -486,6 +490,7 @@ export function planScene(opts: {
     strategy,
     availableProviders,
     needs1080p,
+    frameAspect,
   } = opts;
 
   // Decide where the movement comes from FIRST. Everything below depends on it:
@@ -593,6 +598,7 @@ export function planScene(opts: {
           characterCount: scene.characterCount,
           consistencyRequired: type === "image" || type === "video",
           needs1080p: type === "video" ? needs1080p : false,
+          frameAspect: type === "video" ? frameAspect : undefined,
           needsReferenceImage: false,
           budgetRemaining: Number.MAX_SAFE_INTEGER,
           usage,
@@ -623,6 +629,7 @@ export function planScene(opts: {
         // image and video stages always demand reference support.
         consistencyRequired: type === "image" || type === "video",
         needs1080p: type === "video" ? needs1080p : false,
+        frameAspect: type === "video" ? frameAspect : undefined,
         needsReferenceImage: type === "video" ? wantsKeyframe : false,
         budgetRemaining: remaining,
         usage,

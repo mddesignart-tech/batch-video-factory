@@ -213,6 +213,27 @@ export async function probeDuration(file: string): Promise<number> {
   return Number.isFinite(value) ? value : 0;
 }
 
+/** Width and height of the first video stream (or image), null when unreadable. */
+export async function probeDimensions(file: string): Promise<{ width: number; height: number } | null> {
+  try {
+    const { stdout } = await ffprobe([
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height",
+      "-of",
+      "csv=s=x:p=0",
+      file,
+    ]);
+    const [w, h] = stdout.trim().split("x").map(Number);
+    return w && h ? { width: w, height: h } : null;
+  } catch {
+    return null;
+  }
+}
+
 let filterCache: Set<string> | null = null;
 
 /** Which optional filters this build has (libass for subtitle burn-in, etc). */

@@ -8,6 +8,8 @@
  * overlay at the bottom of the screen.
  */
 
+import { subtitleSafeArea } from "@/domain/platform-profile";
+
 export interface SubtitleCue {
   startSeconds: number;
   endSeconds: number;
@@ -19,6 +21,8 @@ export interface SubtitleOptions {
   height: number;
   /** Highlighted in a contrasting colour wherever it appears. */
   highlightPhrase?: string;
+  /** Subtitle distance from the bottom, % of height (QĐ-121). Null/absent = automatic for the shape. */
+  bottomPct?: number | null;
 }
 
 const MAX_CHARS_PER_LINE = 26;
@@ -263,8 +267,10 @@ export function buildASS(
   const fontSize = Math.round(height * 0.078);
   const outline = Math.max(3, Math.round(fontSize * 0.09));
   const shadow = Math.max(2, Math.round(fontSize * 0.05));
-  const marginV = Math.round(height * 0.2);
-  const marginH = Math.round(width * 0.075);
+  // Safe area per frame shape (QĐ-121); 9:16 is exactly V1's 20% / 7.5%.
+  const safe = subtitleSafeArea(width, height, options.bottomPct ?? null);
+  const marginV = safe.marginV;
+  const marginH = safe.marginL;
 
   const header = [
     "[Script Info]",
