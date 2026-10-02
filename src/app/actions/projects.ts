@@ -381,3 +381,59 @@ export async function updateVideoBudget(
     return { ok: false, message: errorMessage(err) };
   }
 }
+
+// ------------------------------------------------- video model selection ---
+// QĐ-120: a scene no model may run automatically waits for a person's choice.
+
+export async function getVideoModelChoices(sceneId: string) {
+  try {
+    const { videoModelChoices } = await import("@/services/generation");
+    return { ok: true as const, message: "", data: await videoModelChoices(sceneId) };
+  } catch (err) {
+    return { ok: false as const, message: errorMessage(err), data: null };
+  }
+}
+
+async function refreshScene(sceneId: string): Promise<void> {
+  const scene = await prisma.scene.findUnique({ where: { id: sceneId }, select: { projectId: true } });
+  if (scene) revalidatePath(`/projects/${scene.projectId}`);
+}
+
+/** Pin a model for this scene. Free: nothing is sent until makeSceneVideoAction is confirmed. */
+export async function chooseVideoModelAction(sceneId: string, provider: string, model: string): Promise<ActionResult> {
+  try {
+    const { chooseVideoModel } = await import("@/services/scene-video");
+    const c = await chooseVideoModel(sceneId, provider, model);
+    await refreshScene(sceneId);
+    return { ok: true, message: `Đã chọn ${c.provider}/${c.model}. Chưa gửi request — bấm TẠO VIDEO để xem giá và xác nhận.` };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+export async function useLocalMotionAction(sceneId: string, skipAi = false): Promise<ActionResult> {
+  try {
+    const { skipVideoAi, useLocalMotion } = await import("@/services/scene-video");
+    await (skipAi ? skipVideoAi(sceneId) : useLocalMotion(sceneId));
+    await refreshScene(sceneId);
+    return {
+      ok: true,
+      message: skipAi
+        ? "Đã bỏ qua Video AI cho cảnh này: dùng ảnh tĩnh + chuyển động tại máy, $0."
+        : "Cảnh dùng LOCAL MOTION: chuyển động tại máy, $0, không gọi Video AI.",
+    };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+export async function makeSceneVideoAction(sceneId: string, opts: { confirmPaid?: boolean; expectedCost?: number } = {}) {
+  try {
+    const { makeSceneVideo } = await import("@/services/scene-video");
+    const r = await makeSceneVideo(sceneId, opts);
+    await refreshScene(sceneId);
+    return r;
+  } catch (err) {
+    return { status: "FAILED" as const, message: errorMessage(err), choice: null, postsMade: 0 };
+  }
+}

@@ -23,6 +23,7 @@ import { evaluateSpendLimits, usd, type SpendVerdict } from "@/domain/spend-limi
 import { sceneSpendLimit, videoSpendLimit } from "./batch-authorization";
 import { getSettings } from "@/lib/settings";
 import { existingVoiceLines } from "./generation";
+import { needsSelectionMessage } from "@/domain/video-selection";
 import { invalidVoiceLines, invalidVoiceMessage } from "./voice-validity";
 import {
   estimateVoiceDuration,
@@ -929,7 +930,7 @@ export async function preflightImportedBatch(
               (Math.abs(uncappedCost - total) > 1e-6
                 ? ` (Con số $${total.toFixed(6)} bên trên chỉ là phần LỌT vào trần.)`
                 : "")
-            : (estimate.needsProvider[0] ??
+            : (selectionReason(estimate.needsProvider[0], project.scenes) ??
               estimate.errors[0] ??
               "Có cảnh chưa định tuyến được model.");
     } else if (moneyApproved) {
@@ -1228,5 +1229,30 @@ async function persistPreflight(
     message:
       `Dự toán lô nhập ${batchId}: ${planned.length} video, ` +
       `$${estimatedTotal.toFixed(6)}. Chưa cấp phép chi gì.`,
+  });
+}
+
+/**
+ * "Cảnh N: <router refusal>" for a scene no video model may run automatically,
+ * as a VIDEO_MODEL_NEEDS_SELECTION stop (QĐ-120): one sentence for the screen,
+ * the router's full text kept as its technical detail. Other reasons pass.
+ */
+function selectionReason(
+  reason: string | undefined,
+  scenes: { sceneNumber: number; complexity: string }[],
+): string | undefined {
+  if (!reason) return reason;
+  const m = /^Cảnh (\d+): ([\s\S]*)$/.exec(reason);
+  if (!m || reason.includes("APPROVED_")) return reason;
+  const body = m[2]!;
+  const noAuto = body.includes("được phép tự định tuyến") || body.includes("không có mô hình") || body.includes("Không có mô hình");
+  const pinGone = body.includes("Mô hình được chọn thủ công");
+  if (!noAuto && !pinGone) return reason;
+  const sceneNumber = Number(m[1]);
+  return needsSelectionMessage({
+    sceneNumber,
+    complexity: scenes.find((s) => s.sceneNumber === sceneNumber)?.complexity ?? "?",
+    unavailablePin: pinGone ? (/\(([^)]+\/[^)]+)\)/.exec(body)?.[1] ?? "đã ghim") : null,
+    diagnostics: body,
   });
 }

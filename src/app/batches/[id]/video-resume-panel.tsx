@@ -1,5 +1,6 @@
 "use client";
 
+import { FriendlyReason } from "@/components/friendly-reason";
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Table, Td, Th } from "@/components/ui";
@@ -199,7 +200,7 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
                   {(reasonFor === p.videoId || p.nextStep === "RECOVER") && p.blockedReason ? (
                     <tr>
                       <Td colSpan={6} className="space-y-2">
-                        <Alert tone={p.nextStep === "RECOVER" ? "danger" : "warn"}>{p.blockedReason}</Alert>
+                        <FriendlyReason tone={p.nextStep === "RECOVER" ? "danger" : "warn"} reason={p.blockedReason} />
                         {/APPROVED_[A-Z_]+:/.test(p.blockedReason) ? (
                           <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => onReplan(p)}>
                             LẬP LẠI KẾ HOẠCH MODEL (không chi tiền — sau đó phải xác nhận lại)

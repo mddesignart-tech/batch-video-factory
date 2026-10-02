@@ -2,6 +2,8 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Components rendered in tests (renderToStaticMarkup) use the same JSX runtime as Next.
+  esbuild: { jsx: "automatic" },
   test: {
     globals: true,
     environment: "node",

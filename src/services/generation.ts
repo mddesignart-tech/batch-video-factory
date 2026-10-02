@@ -48,6 +48,7 @@ import { keyframeRequired, type MotionResolution } from "@/domain/local-motion";
 import { parseDialogueLines, type ParsedLine } from "@/domain/dialogue-lines";
 import { voiceRowMatches } from "@/domain/voice-line-match";
 import { MIN_VOICE_BYTES } from "@/services/voice-validity";
+import { NEEDS_SELECTION_STATUS, needsSelectionMessage } from "@/domain/video-selection";
 import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
 import {
@@ -1747,6 +1748,102 @@ function motionResolutionFor(ctx: SceneContext): MotionResolution {
   }).motion;
 }
 
+export interface VideoModelChoice {
+  provider: string;
+  model: string;
+  displayName: string;
+  lifecycle: string;
+  /** Can a person pin it for THIS scene (capable, provider usable, not shut down)? */
+  selectable: boolean;
+  /** Price the POST would be quoted at, when selectable. */
+  estimatedCost: number | null;
+  /** Rough wait, from the registry's speed rating - a hint, not a promise. */
+  expectedWait: string;
+  /** Verification / reliability / operator note, in one line. */
+  qualityNote: string;
+  /** Why the router does not choose it by itself; null = it would (AUTO_OK). */
+  notAutoReason: string | null;
+  /** Why it cannot be pinned here, when not selectable. */
+  unavailableReason: string | null;
+}
+
+/**
+ * The video models a person may choose for a scene that needs a selection
+ * (QĐ-120). Read-only: routes, never POSTs. Each model is asked the two
+ * questions the router asks - "may a person pin it?" (MANUAL) and "would the
+ * router pick it alone?" (AUTO, this model as the only candidate) - so the
+ * reasons shown are the router's own, not a second policy.
+ *
+ * DEPRECATED / DISABLED / shut-down models are returned too, but marked
+ * unavailable; the screen keeps them out of the default list.
+ */
+export async function videoModelChoices(sceneId: string): Promise<{
+  sceneNumber: number;
+  complexity: string;
+  duration: number;
+  choices: VideoModelChoice[];
+  pinned: string | null;
+}> {
+  const ctx = await loadContext(sceneId);
+  const { scene, project } = ctx;
+  const derived = deriveSceneVideoFacts(scene, { qualityMode: project.qualityMode, stage: "VIDEO" });
+  const facts = { ...derived.facts, providerBudgets: await providerWalletsUsd(), perVideoCapRemaining: await perVideoCapFor(ctx.batchId) };
+  const all = await prisma.modelRegistry.findMany({ where: { type: "video", provider: { not: "ffmpeg" } }, orderBy: [{ provider: "asc" }, { price: "asc" }] });
+  const usage = { seconds: scene.duration, jobs: 1 };
+  const choices: VideoModelChoice[] = [];
+  for (const m of all) {
+    const only = { ...ctx, models: ctx.models.filter((x) => x.type !== "video" || (x.provider === m.provider && x.modelId === m.modelId)) };
+    let estimatedCost: number | null = null;
+    let unavailableReason: string | null = null;
+    const gone = m.lifecycle === "DEPRECATED" || m.lifecycle === "DISABLED" || !m.enabled || (m.shutdownDate !== null && m.shutdownDate.getTime() <= Date.now());
+    try {
+      const d = routeFor(only, "video", usage, { provider: m.provider, model: m.modelId }, facts, "MANUAL");
+      estimatedCost = round(d.estimatedCost);
+    } catch (err) {
+      unavailableReason = err instanceof Error ? err.message : String(err);
+    }
+    if (gone && !unavailableReason) {
+      unavailableReason = !m.enabled ? "Model đang bị tắt trong bảng Mô hình AI." : `Model ${m.lifecycle === "DEPRECATED" ? "đã NGỪNG DÙNG" : "không khả dụng"}. ${m.replacementNote}`.trim();
+    }
+    let notAutoReason: string | null = null;
+    try {
+      routeFor(only, "video", usage, { provider: null, model: null }, facts, "AUTO");
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      // "...cho cảnh này. provider/model (LIFECYCLE): <reason> — hãy chọn thủ công..."
+      const own = text.split(`${m.provider}/${m.modelId}`)[1];
+      notAutoReason = own ? own.replace(/^\s*\([A-Z_]+\):\s*/, "").replace(/^:\s*/, "").split(" — hãy chọn")[0]!.split(" | ")[0]!.trim() : text;
+      // The lifecycle label itself, in words.
+      if (/^vòng đời = PIN_ONLY\.?$/.test(notAutoReason) || notAutoReason === "chỉ được chọn tay") notAutoReason = "chỉ được chọn tay (PIN_ONLY)";
+    }
+    choices.push({
+      provider: m.provider,
+      model: m.modelId,
+      displayName: m.displayName,
+      lifecycle: m.lifecycle,
+      selectable: !gone && unavailableReason === null,
+      estimatedCost,
+      expectedWait: m.provider === "mock" ? "vài giây (giả lập)" : m.speedRating >= 8 ? "~10–40 giây" : m.speedRating >= 5 ? "~30–120 giây" : "~2–5 phút",
+      qualityNote: [
+        m.verification === "BENCHMARK_VERIFIED" ? "Đã benchmark" : "Chưa benchmark",
+        m.reliability === "DEGRADED" ? `từng lỗi khi chạy thật${m.reliabilityNote ? ` (${m.reliabilityNote})` : ""}` : null,
+        m.notes || null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      notAutoReason,
+      unavailableReason,
+    });
+  }
+  return {
+    sceneNumber: scene.sceneNumber,
+    complexity: scene.complexity,
+    duration: scene.duration,
+    choices,
+    pinned: scene.videoModelPinned && scene.videoProvider && scene.videoModel ? `${scene.videoProvider}/${scene.videoModel}` : null,
+  };
+}
+
 /**
  * Returns the clip path, or null when the scene is animated locally.
  *
@@ -2122,7 +2219,24 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
         facts,
         videoPinned ? "MANUAL" : "AUTO",
       );
-    decision = routeClip(ctx, lowAutoFacts);
+    try {
+      decision = routeClip(ctx, lowAutoFacts);
+    } catch (err) {
+      // No model is cleared to run this scene automatically (or the pinned one
+      // is gone): a choice for a person, not a failure (QĐ-120). The policy that
+      // refused is untouched; nothing is sent, nothing is swapped in.
+      const noAuto = err instanceof RoutingError && (err.code === "needs_explicit_pin" || err.code === "no_capable_models") && !videoPinned;
+      const pinGone = err instanceof RoutingError && err.code === "manual_not_found" && videoPinned;
+      if (!noAuto && !pinGone) throw err;
+      const message = needsSelectionMessage({
+        sceneNumber: scene.sceneNumber,
+        complexity: scene.complexity,
+        unavailablePin: pinGone ? `${scene.videoProvider}/${scene.videoModel}` : null,
+        diagnostics: (err as Error).message,
+      });
+      await prisma.scene.update({ where: { id: scene.id }, data: { status: NEEDS_SELECTION_STATUS, errorMessage: message } });
+      throw new GenerationError(message, "video", "router", false);
+    }
   }
   const target = clipTarget;
   const outputPath = path.join(

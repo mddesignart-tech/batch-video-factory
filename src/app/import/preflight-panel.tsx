@@ -1,5 +1,6 @@
 "use client";
 
+import { FriendlyReason } from "@/components/friendly-reason";
 import { useState } from "react";
 import Link from "next/link";
 import { setSceneDurationMode } from "@/app/actions/storyboard-import";
@@ -306,7 +307,7 @@ function VideoBlock({ video, onUpdate }: { video: ImportVideoPreview; onUpdate?:
         </p>
       ) : null}
 
-      {video.blockedReason ? <Alert tone="danger">{video.blockedReason}</Alert> : null}
+      {video.blockedReason ? <FriendlyReason tone="danger" reason={video.blockedReason} /> : null}
 
       {video.duplicateOf.length > 0 ? (
         <Alert tone="warn">

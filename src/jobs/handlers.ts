@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { Job } from "@prisma/client";
+import { isNeedsSelection, NEEDS_SELECTION_STATUS, stoppedSceneStatus } from "@/domain/video-selection";
 import type { JobType } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
@@ -142,7 +143,7 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
   // A scene whose generation gave up will never produce media, so waiting for it
   // is waiting forever. Fail now with something the operator can act on rather
   // than spinning in the queue for minutes first.
-  const dead = pending.filter((s) => s.status === "failed");
+  const dead = pending.filter((s) => s.status === "failed" || s.status === NEEDS_SELECTION_STATUS);
   if (dead.length > 0) {
     throw new Error(
       `Không thể render: ${dead.length} cảnh (${dead
@@ -468,7 +469,8 @@ export async function onJobExhausted(
     await prisma.scene
       .update({
         where: { id: job.sceneId },
-        data: { status: "failed", errorMessage: message.slice(0, 1000) },
+        // A scene waiting for a video-model choice is not failed (QĐ-120).
+        data: { status: stoppedSceneStatus(message), errorMessage: message.slice(0, 2000) },
       })
       .catch(() => undefined);
   }
@@ -477,7 +479,7 @@ export async function onJobExhausted(
     const project = await prisma.project
       .update({
         where: { id: job.projectId },
-        data: { status: "failed", errorMessage: message.slice(0, 1000) },
+        data: { status: isNeedsSelection(message) ? "needs_review" : "failed", errorMessage: message.slice(0, 2000) },
       })
       .catch(() => null);
 

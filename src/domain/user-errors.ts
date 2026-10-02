@@ -48,6 +48,10 @@ const CATALOG: Record<string, { title: string; action: string; mayCost?: boolean
   OVER_SCENE_BUDGET: { title: "Một cảnh vượt giới hạn chi phí cảnh", action: "Sửa cảnh hoặc tăng trần cảnh." },
   NEEDS_PROVIDER_CONFIRMATION: { title: "Nhà cung cấp chưa được xác nhận giá", action: "Xác nhận nhà cung cấp ở bước duyệt." },
   NEEDS_EXPLICIT_PIN: { title: "Cảnh cần chọn model video", action: "Ghim model cho cảnh trong trình sửa cảnh." },
+  VIDEO_MODEL_NEEDS_SELECTION: {
+    title: "Cảnh cần chọn model Video AI",
+    action: "Mở Storyboard: chọn model video (xem giá rồi xác nhận), dùng LOCAL MOTION ($0) hoặc bỏ qua Video AI.",
+  },
 };
 
 const CODE_AT_START = /^\s*(?:BLOCKED:\s*)?([A-Z][A-Z0-9]+(?:_[A-Z0-9]+)+)\b\s*:?/;

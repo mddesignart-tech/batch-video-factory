@@ -5,6 +5,8 @@ import { Ban, Check, Image as ImageIcon, Mic, Video } from "lucide-react";
 import { ImageReview, type ImageModelChoice } from "./image-review";
 import { SceneImagePanel } from "./scene-image-panel";
 import { SceneVoicePanel } from "./scene-voice-panel";
+import { VideoSelectionPanel } from "./video-selection-panel";
+import { isNeedsSelection, needsSelectionMessage } from "@/domain/video-selection";
 import { budgetProblem } from "@/domain/budget-message";
 import { BudgetProblemBox } from "@/components/video-budget";
 import {
@@ -61,6 +63,8 @@ export interface SceneView {
   routingMode: string;
   videoProvider: string | null;
   videoModel: string | null;
+  /** A person pinned the video model (QĐ-069). */
+  videoModelPinned?: boolean;
   imageProvider: string | null;
   imageModel: string | null;
   voiceModel: string | null;
@@ -98,6 +102,8 @@ export interface RoutingView {
   /** Estimated price of "Tạo lại ảnh" / "Tạo lại video" (0 = local, null = unknown). */
   imageRegenCost?: number | null;
   videoRegenCost?: number | null;
+  /** The plan's "no model may run this scene" text (QĐ-120), shown friendly. */
+  needsSelection?: string | null;
 }
 
 interface ModelOption {
@@ -150,6 +156,12 @@ export function Storyboard({
   if (!selected) return null;
 
   const routing = routingByScene[selected.sceneNumber];
+  // A scene no video model may run automatically: a choice, shown as one (QĐ-120).
+  const selectionMessage = isNeedsSelection(selected.errorMessage)
+    ? selected.errorMessage
+    : routing?.needsSelection && !selected.videoPath
+      ? needsSelectionMessage({ sceneNumber: selected.sceneNumber, complexity: selected.complexity, diagnostics: routing.needsSelection })
+      : null;
   const totalDuration = scenes
     .filter((s) => !s.skipped)
     .reduce((sum, s) => sum + s.duration, 0);
@@ -326,7 +338,11 @@ export function Storyboard({
                     Lý do: {routing.reason}
                   </p>
                 ) : null}
-                {routing.error ? (
+                {routing.needsSelection ? (
+                  <p className="mt-2 text-[11px] text-warn-500">
+                    Video AI: cần chọn thủ công (xem khung bên dưới).
+                  </p>
+                ) : routing.error ? (
                   <p className="mt-2 text-[11px] text-danger-500">
                     {routing.error}
                   </p>
@@ -334,7 +350,19 @@ export function Storyboard({
               </div>
             ) : null}
 
-            {selected.errorMessage && budgetProblem(selected.errorMessage) ? (
+            {selectionMessage || (selected.videoModelPinned && !selected.videoPath && selected.motionMode === "VIDEO_AI") ? (
+              <VideoSelectionPanel
+                sceneId={selected.id}
+                sceneNumber={selected.sceneNumber}
+                complexity={selected.complexity}
+                projectId={projectId}
+                videoLimit={videoLimit}
+                rawMessage={selectionMessage}
+                pinned={selected.videoModelPinned && selected.videoProvider && selected.videoModel ? `${selected.videoProvider}/${selected.videoModel}` : null}
+              />
+            ) : null}
+
+            {selectionMessage ? null : selected.errorMessage && budgetProblem(selected.errorMessage) ? (
               <div className="mt-3">
                 <BudgetProblemBox problem={budgetProblem(selected.errorMessage)!} projectId={projectId} videoLimit={videoLimit} />
               </div>
@@ -605,7 +633,9 @@ export function Storyboard({
                   ) : null}
                   <div className="flex justify-between">
                     <span className="text-ink-500">Trạng thái</span>
-                    <span className="text-ink-300">{selected.status}</span>
+                    <span className={selected.status === "needs_selection" ? "text-warn-500" : "text-ink-300"}>
+                      {selected.status === "needs_selection" ? "VIDEO MODEL NEEDS_SELECTION" : selected.status}
+                    </span>
                   </div>
                 </div>
               </div>

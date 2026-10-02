@@ -30,6 +30,7 @@ import { CostPreview } from "./cost-preview";
 import { pacingSummary } from "@/domain/scene-timing";
 import { videoBudget } from "@/services/video-budget";
 import { budgetProblem } from "@/domain/budget-message";
+import { isNeedsSelection, splitNeedsSelection } from "@/domain/video-selection";
 import { BudgetProblemBox, VideoBudgetCard } from "@/components/video-budget";
 
 export const dynamic = "force-dynamic";
@@ -123,7 +124,20 @@ export default async function ProjectDetailPage({
         }
       />
 
-      {project.errorMessage && projectBudgetProblem ? (
+      {project.errorMessage && isNeedsSelection(project.errorMessage) ? (
+        <div className="mb-4">
+          <Alert tone="warn" title="Có cảnh cần chọn model Video AI">
+            {splitNeedsSelection(project.errorMessage).summary} Mở cảnh đó trong Storyboard để chọn model, dùng LOCAL
+            MOTION hoặc bỏ qua Video AI.
+            <details className="mt-1 text-xs">
+              <summary className="cursor-pointer text-ink-500">Xem chi tiết kỹ thuật</summary>
+              <p className="mt-1 whitespace-pre-wrap break-words font-mono text-ink-500">
+                {splitNeedsSelection(project.errorMessage).detail}
+              </p>
+            </details>
+          </Alert>
+        </div>
+      ) : project.errorMessage && projectBudgetProblem ? (
         <div className="mb-4">
           <BudgetProblemBox problem={projectBudgetProblem} projectId={project.id} videoLimit={budget.videoLimit} />
         </div>
@@ -218,6 +232,7 @@ export default async function ProjectDetailPage({
                 routingMode: scene.routingMode,
                 videoProvider: scene.videoProvider,
                 videoModel: scene.videoModel,
+                videoModelPinned: scene.videoModelPinned,
                 imageProvider: scene.imageProvider,
                 imageModel: scene.imageModel,
                 voiceModel: scene.voiceModel,
@@ -253,6 +268,10 @@ export default async function ProjectDetailPage({
                     reason: plan.video?.reason ?? plan.image?.reason ?? "",
                     estimatedCost: plan.estimatedCost,
                     error: plan.error ?? null,
+                    // Only the "no model may run this" stops; an approved-plan
+                    // change (APPROVED_*) is re-planned on the batch page.
+                    needsSelection:
+                      plan.needsProvider && !plan.needsProvider.startsWith("APPROVED_") ? plan.needsProvider : null,
                     // "Tạo lại" always buys a new asset: the routed price, or
                     // what the reused one would have cost.
                     imageRegenCost: plan.image?.estimatedCost || plan.saved.image || null,

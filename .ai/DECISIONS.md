@@ -3574,3 +3574,30 @@ qua router + headroom, trần cảnh VIDEO_AI).
 Test: `tests/voice-reuse.test.ts` › QĐ-119 (5 test) + QĐ-118 cập nhật (trả NEEDS_BUDGET thân thiện; guard gốc vẫn
 ném đúng câu cũ). Tiêu đề VIDEO_LIMIT_EXCEEDED/OVER_VIDEO_BUDGET đổi thành "Ngân sách video hiện không đủ" (3 kỳ
 vọng test cập nhật theo).
+
+## QĐ-120 — Không có model Video AI tự chọn được = CẦN CHỌN, không phải lỗi (2026-10-02, $0, không POST trả phí)
+
+Lỗi thật: "Piece of Cake" cảnh 3–4 (HIGH, motion AUTO) bị `failed` với khối đỏ liệt kê mọi lý do từ chối của router
+(Sora DEPRECATED, Runway PIN_ONLY, h3_max chỉ LOW_AUTO, gen4_turbo DEGRADED…). Chính sách router KHÔNG đổi: PIN_ONLY
+vẫn chỉ chạy khi ghim, DEPRECATED/DISABLED/đã tắt không tự chọn, không tự đổi model.
+
+- `generateSceneVideo`: router trả `needs_explicit_pin` / `no_capable_models` (cảnh không ghim) hoặc `manual_not_found`
+  (ghim vào model đã tắt) → `VIDEO_MODEL_NEEDS_SELECTION`, cảnh `needs_selection` (dự án `needs_review`), không phải
+  `failed`; câu ngắn + "Chi tiết kỹ thuật:" giữ nguyên chẩn đoán router (`domain/video-selection.ts`). Executor,
+  `onJobExhausted` và render (không chờ mãi cảnh này) dùng cùng quy tắc. Preflight đổi `blockedReason` sang cùng dạng.
+- Storyboard: khung "Không có model Video AI nào hiện đủ điều kiện chạy tự động cho cảnh này." + Độ phức tạp + "Video AI:
+  cần chọn thủ công" + [CHỌN MODEL VIDEO] [DÙNG LOCAL MOTION · $0] [BỎ QUA VIDEO AI · $0]; chẩn đoán trong "Xem chi tiết
+  kỹ thuật". Ô "AI Router đề xuất" chỉ ghi "Video AI: cần chọn thủ công". Preflight / TIẾP TỤC dùng `FriendlyReason`.
+- Danh sách chọn tay (`videoModelChoices`, chỉ đọc): mỗi model được hỏi đúng hai câu router hỏi — ghim tay được không
+  (MANUAL, ra giá) và router có tự chọn nếu chỉ còn nó không (AUTO, ra lý do). Hiện provider/model, giá, thời gian chờ
+  ước lượng (từ speedRating), ghi chú benchmark/độ tin cậy, lý do không AUTO. DEPRECATED/DISABLED/đã tắt nằm trong mục
+  "Model không khả dụng", không chọn được.
+- Chọn model = miễn phí (ghim). Tạo clip (`makeSceneVideo`): giá → kiểm ngân sách (QĐ-119) → xác nhận với đúng giá
+  (PLAN_CHANGED nếu đổi) → khoá theo cảnh (ALREADY_RUNNING) → 1 POST qua đúng `runProviderJob` (idempotency, reuse).
+  Ngoài lô đã duyệt, lần xác nhận này cấp đúng MỘT create token theo cảnh/model/giá tối đa (trước đây chỉ CLI cấp được),
+  thu hồi nếu không dùng; từ chối nếu đang có token khác.
+- "BỎ QUA VIDEO AI" = LOCAL_MOTION trên ảnh tĩnh (app chỉ có AUTO / LOCAL_MOTION / VIDEO_AI); giữ nút riêng vì ý nghĩa khác.
+- Ghim vào model DEPRECATED chưa tới ngày tắt vẫn chạy kèm cảnh báo như QĐ-028 (không đổi).
+- vitest: `esbuild.jsx = "automatic"` để test render component.
+
+Test: `tests/video-selection.test.ts` (6 test).

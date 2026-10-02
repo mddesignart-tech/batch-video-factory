@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { round } from "@/lib/utils";
 import { spendStatus } from "./spend-guard";
 import { spentOnProject } from "./cost-tracker";
+import type { BudgetProblem } from "@/domain/budget-message";
 
 /**
  * NGÂN SÁCH VIDEO - the one number a person manages day to day (QĐ-119).
@@ -120,4 +121,53 @@ export async function setVideoBudget(projectId: string, amount: number): Promise
     }
   }
   return videoBudget(projectId);
+}
+
+/**
+ * Would `cost` more fit the budgets that bind this video? Null when it does.
+ * The same limits the guards enforce (video budget, a live approval, the
+ * global cap - the last only for real money), read through videoBudget.
+ */
+export async function budgetShortfall(
+  projectId: string,
+  cost: number,
+  mockMode: boolean,
+): Promise<(BudgetProblem & { projectId: string; videoLimit: number | null }) | null> {
+  const vb = await videoBudget(projectId);
+  const eps = 1e-9;
+  const base = { projectId, videoLimit: vb.videoLimit, needed: cost };
+  if (vb.limit === null) {
+    return { ...base, scope: "VIDEO", used: vb.used, limit: null, remaining: null, detail: "VIDEO_BUDGET_UNSET: video này chưa có ngân sách. Đặt ngân sách video trước khi tạo nội dung trả phí." };
+  }
+  if (cost > (vb.remaining ?? 0) + eps) {
+    return {
+      ...base,
+      scope: vb.source === "APPROVED_BATCH" ? "BATCH" : "VIDEO",
+      used: vb.used,
+      limit: vb.limit,
+      remaining: vb.remaining,
+      detail: `VIDEO_LIMIT_EXCEEDED: video đã chi $${vb.used.toFixed(6)}, giới hạn $${vb.limit.toFixed(6)}, còn $${(vb.remaining ?? 0).toFixed(6)}; thao tác cần $${cost.toFixed(6)}.`,
+    };
+  }
+  if (vb.approval?.status === "APPROVED" && cost > vb.approval.batchRemaining + eps) {
+    return {
+      ...base,
+      scope: "BATCH",
+      used: vb.approval.batchUsed,
+      limit: vb.approval.batchCeiling,
+      remaining: vb.approval.batchRemaining,
+      detail: `BATCH_LIMIT_EXCEEDED: lô đã duyệt còn $${vb.approval.batchRemaining.toFixed(6)}; thao tác cần $${cost.toFixed(6)}.`,
+    };
+  }
+  if (!mockMode && cost > vb.global.remaining + eps) {
+    return {
+      ...base,
+      scope: "GLOBAL",
+      used: vb.global.spent,
+      limit: vb.global.cap,
+      remaining: vb.global.remaining,
+      detail: `GLOBAL_LIMIT_EXCEEDED: hạn mức toàn hệ thống còn $${vb.global.remaining.toFixed(6)}; thao tác cần $${cost.toFixed(6)}.`,
+    };
+  }
+  return null;
 }

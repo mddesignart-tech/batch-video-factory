@@ -41,6 +41,7 @@ import { getSettings } from "@/lib/settings";
 import { mapPool, withSemaphore } from "@/lib/semaphore";
 import { costClass, orderForRun, type CostClass } from "@/domain/queue-order";
 import { invalidVoiceLines, invalidVoiceMessage } from "@/services/voice-validity";
+import { isNeedsSelection, stoppedSceneStatus } from "@/domain/video-selection";
 
 /**
  * THE production executor for a batch whose videos already exist as rows - an
@@ -1197,7 +1198,8 @@ export async function runBatch(
           stopped = err instanceof Error ? err.message : String(err);
           await prisma.scene.update({
             where: { id: scene.id },
-            data: { status: "failed", errorMessage: stopped.slice(0, 500) },
+            // A scene waiting for a person to choose its video model is not a failure (QĐ-120).
+            data: { status: stoppedSceneStatus(stopped), errorMessage: stopped.slice(0, 2000) },
           });
           await logger.warn({
             event: "batch.video_stopped",
@@ -1227,7 +1229,7 @@ export async function runBatch(
       await prisma.project.update({
         where: { id: project.id },
         data: {
-          ...(stopped ? { status: "failed", errorMessage: stopped.slice(0, 1000) } : {}),
+          ...(stopped ? { status: isNeedsSelection(stopped) ? "needs_review" : "failed", errorMessage: stopped.slice(0, 2000) } : {}),
           runFinishedAt: new Date(),
           currentStep: null,
         },
