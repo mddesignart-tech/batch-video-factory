@@ -1048,7 +1048,8 @@ export async function preflightImportedBatch(
     cap.remaining,
   );
 
-  if (estimatedTotal > batch.maxBudget) {
+  // A batch ceiling of 0 was never set (old batches, QĐ-119) - not a $0 limit.
+  if (batch.maxBudget > 0 && estimatedTotal > batch.maxBudget) {
     warnings.push(
       `Dự toán $${estimatedTotal.toFixed(6)} vượt trần bạn đặt cho cả lô nhập ` +
         `($${batch.maxBudget.toFixed(2)}). Hãy nâng trần hoặc bỏ bớt video.`,
@@ -1156,7 +1157,7 @@ export async function preflightImportedBatch(
             2,
           )
         : 0,
-    overBatchCeiling: estimatedTotal > batch.maxBudget,
+    overBatchCeiling: batch.maxBudget > 0 && estimatedTotal > batch.maxBudget,
     globalRemaining: cap.remaining,
     counts: videos.reduce((into, v) => {
       into.imageBuy += v.counts.imageBuy;

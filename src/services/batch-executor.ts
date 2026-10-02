@@ -111,6 +111,23 @@ export interface ApprovalPreflight {
   spendPlan: BatchSpendPlan | null;
   /** The projects this approval covers. Null = every runnable video (idiom plan). */
   runnableProjectIds: string[] | null;
+  /** Plain-language money summary for DUYỆT & CHẠY (QĐ-119). Display only. */
+  costSummary?: ApprovalCostSummary;
+}
+
+export interface ApprovalCostSummary {
+  /** New money this run would spend, by kind. Reused assets are not in it. */
+  image: number;
+  voice: number;
+  video: number;
+  other: number;
+  total: number;
+  /** What reuse keeps in the wallet (shown as "Reuse: $0"). */
+  reuseSaved: number;
+  videos: { projectId: string; title: string; estimate: number; limit: number | null; remaining: number | null; enough: boolean }[];
+  globalRemaining: number;
+  /** Every video fits its budget and the total fits the global budget. */
+  enough: boolean;
 }
 
 /**
@@ -536,7 +553,47 @@ export async function preflightForApproval(
           onlyProjectIds: opts.onlyProjectIds,
           zeroCostOnly: opts.zeroCostOnly,
         });
-  return gateChecks(batchId, input, opts);
+  const check = await gateChecks(batchId, input, opts);
+  return { ...check, costSummary: await approvalCostSummary(check) };
+}
+
+/** The money summary a person reads before DUYỆT & CHẠY. Reads only. */
+async function approvalCostSummary(check: ApprovalPreflight): Promise<ApprovalCostSummary> {
+  const { videoBudget } = await import("./video-budget");
+  const covered = check.runnableProjectIds ? new Set(check.runnableProjectIds) : null;
+  const videos = (check.preflight?.videos ?? []).filter(
+    (v) => v.lifecycle !== "BLOCKED" && v.lifecycle !== "COMPLETED" && (!covered || covered.has(v.projectId)),
+  );
+  const sum = (f: (v: (typeof videos)[number]) => number) => round(videos.reduce((n, v) => n + f(v), 0));
+  const image = sum((v) => v.breakdown.image);
+  const voice = sum((v) => v.breakdown.voice);
+  const video = sum((v) => v.breakdown.video);
+  const total = check.preflight ? round(sum((v) => v.estimatedCost)) : round(check.estimatedTotal);
+  const rows: ApprovalCostSummary["videos"] = [];
+  for (const v of videos) {
+    const b = await videoBudget(v.projectId);
+    const remaining = b.remaining;
+    rows.push({
+      projectId: v.projectId,
+      title: v.title,
+      estimate: round(v.estimatedCost),
+      limit: b.limit,
+      remaining,
+      enough: remaining !== null && v.estimatedCost <= remaining + 1e-9,
+    });
+  }
+  const globalOk = check.mockMode || total <= check.globalRemaining + 1e-9;
+  return {
+    image,
+    voice,
+    video,
+    other: round(Math.max(0, total - image - voice - video)),
+    total,
+    reuseSaved: sum((v) => v.savings.total),
+    videos: rows,
+    globalRemaining: check.globalRemaining,
+    enough: globalOk && rows.every((r) => r.enough),
+  };
 }
 
 // ------------------------------------------------------------------ approve ---

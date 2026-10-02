@@ -211,7 +211,7 @@ export function ProjectActions({
                 <Input
                   name="maxBudget"
                   type="number"
-                  min={0}
+                  min={0.5}
                   step="0.5"
                   defaultValue={maxBudget}
                 />

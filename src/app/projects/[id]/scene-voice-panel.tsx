@@ -6,6 +6,8 @@ import { Loader2, Mic, Play } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
 import { getSceneVoicePlan, makeSceneVoiceAction } from "@/app/actions/projects";
 import type { SceneVoiceLinePlan, SceneVoicePlan } from "@/services/generation";
+import type { SceneVoiceResult } from "@/services/scene-voice";
+import { BudgetProblemBox } from "@/components/video-budget";
 
 /**
  * Voice of ONE scene, line by line (QĐ-117).
@@ -25,7 +27,17 @@ const STATE_LABEL: Record<SceneVoiceLinePlan["state"], { text: string; tone: "ok
   BLOCKED: { text: "BỊ CHẶN", tone: "danger" },
 };
 
-export function SceneVoicePanel({ sceneId, dialogueKey }: { sceneId: string; dialogueKey: string }) {
+export function SceneVoicePanel({
+  sceneId,
+  dialogueKey,
+  projectId,
+  videoLimit,
+}: {
+  sceneId: string;
+  dialogueKey: string;
+  projectId: string;
+  videoLimit: number | null;
+}) {
   const router = useRouter();
   const [plan, setPlan] = useState<SceneVoicePlan | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -34,6 +46,7 @@ export function SceneVoicePanel({ sceneId, dialogueKey }: { sceneId: string; dia
   // A second click while the first is in flight never reaches the server.
   const inFlight = useRef(false);
   const [playing, setPlaying] = useState<string | null>(null);
+  const [budget, setBudget] = useState<SceneVoiceResult["budget"] | null>(null);
 
   const load = useCallback(async () => {
     const r = await getSceneVoicePlan(sceneId);
@@ -46,6 +59,7 @@ export function SceneVoicePanel({ sceneId, dialogueKey }: { sceneId: string; dia
     setMessage(null);
     setConfirmCost(null);
     setPlaying(null);
+    setBudget(null);
     void load();
   }, [load, dialogueKey]);
 
@@ -56,6 +70,12 @@ export function SceneVoicePanel({ sceneId, dialogueKey }: { sceneId: string; dia
     try {
       const r = await makeSceneVoiceAction(sceneId, confirm ? { confirmPaid: true, expectedCost: confirmCost ?? undefined } : {});
       if (r.plan) setPlan(r.plan);
+      setBudget(r.status === "NEEDS_BUDGET" ? (r.budget ?? null) : null);
+      if (r.status === "NEEDS_BUDGET") {
+        setConfirmCost(null);
+        setMessage(null);
+        return;
+      }
       if (r.status === "NEEDS_CONFIRMATION") {
         setConfirmCost(r.plan?.incrementalCost ?? 0);
         setMessage({ ok: true, text: r.message });
@@ -75,7 +95,10 @@ export function SceneVoicePanel({ sceneId, dialogueKey }: { sceneId: string; dia
   }
 
   const money = (n: number) => `$${n.toFixed(6)}`;
+  const short = (n: number) => `~$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)}`;
   const lines = plan?.lines ?? [];
+  // On the button itself: what pressing it costs (QĐ-119).
+  const buttonCost = !plan || lines.length === 0 ? "" : plan.expectedPosts === 0 ? "REUSE · $0" : `${short(plan.incrementalCost)}${plan.mockMode ? " giả lập" : ""}`;
 
   return (
     <div className="mb-3 rounded-lg border border-ink-800 bg-ink-850 p-3 text-[11px]">
@@ -139,7 +162,7 @@ export function SceneVoicePanel({ sceneId, dialogueKey }: { sceneId: string; dia
         {confirmCost === null ? (
           <Button size="sm" variant="outline" disabled={busy || !plan || lines.length === 0} onClick={() => void make(false)}>
             {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-            NGHE THỬ GIỌNG
+            NGHE THỬ GIỌNG{buttonCost ? ` · ${buttonCost}` : ""}
           </Button>
         ) : (
           <>
@@ -153,6 +176,19 @@ export function SceneVoicePanel({ sceneId, dialogueKey }: { sceneId: string; dia
           </>
         )}
       </div>
+      {budget ? (
+        <div className="mt-2">
+          <BudgetProblemBox
+            problem={budget}
+            projectId={projectId}
+            videoLimit={budget.videoLimit ?? videoLimit}
+            onFixed={() => {
+              setBudget(null);
+              void load();
+            }}
+          />
+        </div>
+      ) : null}
       {message ? <p className={`mt-2 ${message.ok ? "text-ok-500" : "text-danger-500"}`}>{message.text}</p> : null}
     </div>
   );

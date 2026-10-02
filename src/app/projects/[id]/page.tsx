@@ -28,6 +28,9 @@ import { OutputCard } from "./output-card";
 import { existingOutputFor } from "@/services/output-export";
 import { CostPreview } from "./cost-preview";
 import { pacingSummary } from "@/domain/scene-timing";
+import { videoBudget } from "@/services/video-budget";
+import { budgetProblem } from "@/domain/budget-message";
+import { BudgetProblemBox, VideoBudgetCard } from "@/components/video-budget";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +95,8 @@ export default async function ProjectDetailPage({
   }
 
   const score = parseJson<ScriptScore | null>(project.scriptScoreJson, null);
+  const budget = await videoBudget(id);
+  const projectBudgetProblem = budgetProblem(project.errorMessage);
 
   return (
     <>
@@ -118,7 +123,11 @@ export default async function ProjectDetailPage({
         }
       />
 
-      {project.errorMessage ? (
+      {project.errorMessage && projectBudgetProblem ? (
+        <div className="mb-4">
+          <BudgetProblemBox problem={projectBudgetProblem} projectId={project.id} videoLimit={budget.videoLimit} />
+        </div>
+      ) : project.errorMessage ? (
         <div className="mb-4">
           <Alert tone="danger" title="Dự án gặp lỗi">
             {project.errorMessage}
@@ -189,6 +198,7 @@ export default async function ProjectDetailPage({
           {project.scenes.length === 0 ? null : (
             <Storyboard
               projectId={project.id}
+              videoLimit={budget.videoLimit}
               idiomPhrase={project.idiom.phrase}
               scenes={project.scenes.map((scene) => ({
                 id: scene.id,
@@ -243,6 +253,11 @@ export default async function ProjectDetailPage({
                     reason: plan.video?.reason ?? plan.image?.reason ?? "",
                     estimatedCost: plan.estimatedCost,
                     error: plan.error ?? null,
+                    // "Tạo lại" always buys a new asset: the routed price, or
+                    // what the reused one would have cost.
+                    imageRegenCost: plan.image?.estimatedCost || plan.saved.image || null,
+                    videoRegenCost:
+                      plan.motionSource === "LOCAL_MOTION" ? 0 : plan.video?.estimatedCost || plan.saved.video || null,
                   },
                 ]),
               )}
@@ -267,6 +282,8 @@ export default async function ProjectDetailPage({
         </div>
 
         <div className="space-y-4">
+          <VideoBudgetCard budget={budget} />
+
           {previewError ? (
             <Alert tone="warn" title="Không tính được chi phí">
               {previewError}

@@ -9,6 +9,47 @@ import { approveAndRunBatch, preflightBatch } from "@/app/actions/batch-run";
 import type { ApprovalPreflight } from "@/services/batch-executor";
 import { SpendPlanTable } from "@/components/spend-plan-table";
 import { SavingsSummary } from "@/app/import/preflight-panel";
+import Link from "next/link";
+import type { ApprovalCostSummary } from "@/services/batch-executor";
+
+const fine = (n: number) => `$${n > 0 && n < 0.01 ? n.toFixed(4) : n.toFixed(2)}`;
+
+/** The plain-language money summary above the technical details (QĐ-119). */
+function CostSummaryBlock({ summary, mockMode }: { summary: ApprovalCostSummary; mockMode: boolean }) {
+  const single = summary.videos.length === 1 ? summary.videos[0]! : null;
+  return (
+    <div className="space-y-2 rounded-lg border border-ink-700 bg-ink-850 p-3 text-sm">
+      <p className="font-semibold text-ink-100">
+        Chi phí phát sinh dự kiến: {fine(summary.total)}
+        {mockMode ? <span className="ml-1 text-xs font-normal text-ink-500">(giá giả lập Mock Mode)</span> : null}
+      </p>
+      <div className="grid gap-x-6 gap-y-0.5 text-xs text-ink-300 sm:grid-cols-2">
+        <span>Ảnh: {fine(summary.image)}</span>
+        <span>Giọng: {fine(summary.voice)}</span>
+        <span>Video AI: {fine(summary.video)}</span>
+        <span>Reuse: $0{summary.reuseSaved > 0 ? ` (tiết kiệm ${fine(summary.reuseSaved)})` : ""}</span>
+        {summary.other > 0 ? <span>Khác (kịch bản…): {fine(summary.other)}</span> : null}
+      </div>
+      <div className="space-y-0.5 border-t border-ink-800 pt-2 text-xs">
+        {single ? (
+          <p className={single.enough ? "text-ink-300" : "text-danger-500"}>
+            Ngân sách video còn lại: {single.remaining === null ? "chưa đặt" : fine(single.remaining)}
+          </p>
+        ) : (
+          summary.videos.map((v) => (
+            <p key={v.projectId} className={v.enough ? "text-ink-300" : "text-danger-500"}>
+              {v.title}: cần {fine(v.estimate)} · ngân sách video còn {v.remaining === null ? "chưa đặt" : fine(v.remaining)}
+            </p>
+          ))
+        )}
+        <p className="text-ink-300">Ngân sách toàn hệ thống còn lại: {fine(summary.globalRemaining)}</p>
+      </div>
+      <p className={summary.enough ? "text-xs text-ok-500" : "text-xs font-semibold text-danger-500"}>
+        {summary.enough ? "Đủ ngân sách." : "Thiếu ngân sách — tăng ngân sách trước khi chạy."}
+      </p>
+    </div>
+  );
+}
 
 /**
  * Savings of exactly the videos this approval runs (QĐ-112), so that
@@ -139,7 +180,11 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
 
         {pre ? (
           <>
-            <div className="grid gap-1 rounded-lg border border-ink-800 p-3 font-mono text-xs md:grid-cols-2">
+            {pre.costSummary ? <CostSummaryBlock summary={pre.costSummary} mockMode={pre.mockMode} /> : null}
+
+            <details className="rounded-lg border border-ink-800 p-3 text-xs">
+            <summary className="cursor-pointer text-ink-400">Chi tiết kỹ thuật (trần, số request, model)</summary>
+            <div className="mt-2 grid gap-1 font-mono text-xs md:grid-cols-2">
               <div>BATCH ESTIMATED (tăng thêm, chỉ video chạy): <strong>{formatUSD(pre.estimatedTotal)}</strong></div>
               <div>AUTHORIZED MAX: <strong>{Number.isFinite(batchNum) && batchNum > 0 ? formatUSD(batchNum) : "— (chưa nhập)"}</strong></div>
               <div>VIDEOS TO RUN: <strong>{pre.runnableVideos}</strong> · VIDEOS BLOCKED: <strong>{pre.blockedVideos}</strong></div>
@@ -156,6 +201,7 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
                 {pre.textPosts > 0 ? ` · TEXT API POST: ${pre.textPosts}` : ""}
               </div>
             </div>
+            </details>
 
             {pre.preflight ? <SavingsSummary preflight={approvalSavings(pre)} /> : null}
 
@@ -190,12 +236,30 @@ export function ApproveRunPanel({ batchId }: { batchId: string }) {
               <p className="text-xs text-warn-500">Nhập trần chi cả lô rồi bấm PREFLIGHT lại để kiểm với con số của bạn.</p>
             )}
 
-            <Button onClick={onRun} disabled={!canRun}>
-              {busy === "run" ? <Loader2 className="size-4 animate-spin" /> : null}
-              {pre.spendPlan && numbersMatch
-                ? `DUYỆT & CHẠY ${pre.runnableVideos} VIDEO — MAX ${formatUSD(batchNum)}`
-                : "DUYỆT & CHẠY BATCH"}
-            </Button>
+            {pre.costSummary && !pre.costSummary.enough ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {pre.costSummary.videos
+                  .filter((v) => !v.enough)
+                  .map((v) => (
+                    <Link key={v.projectId} href={`/projects/${v.projectId}`}>
+                      <Button variant="primary">TĂNG NGÂN SÁCH{pre.costSummary!.videos.length > 1 ? ` — ${v.title}` : ""}</Button>
+                    </Link>
+                  ))}
+                {pre.costSummary.videos.every((v) => v.enough) ? (
+                  <Link href="/settings">
+                    <Button variant="primary">TĂNG NGÂN SÁCH (toàn hệ thống)</Button>
+                  </Link>
+                ) : null}
+                <span className="text-xs text-ink-500">Tăng ngân sách rồi bấm PREFLIGHT lại.</span>
+              </div>
+            ) : (
+              <Button onClick={onRun} disabled={!canRun}>
+                {busy === "run" ? <Loader2 className="size-4 animate-spin" /> : null}
+                {pre.spendPlan && numbersMatch
+                  ? `DUYỆT & CHẠY ${pre.runnableVideos} VIDEO — MAX ${formatUSD(batchNum)}`
+                  : "DUYỆT & CHẠY BATCH"}
+              </Button>
+            )}
           </>
         ) : null}
 

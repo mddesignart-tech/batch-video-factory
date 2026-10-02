@@ -19,7 +19,8 @@ export interface FriendlyError {
 }
 
 const CATALOG: Record<string, { title: string; action: string; mayCost?: boolean }> = {
-  VIDEO_LIMIT_EXCEEDED: { title: "Vượt giới hạn chi phí video", action: "Tăng trần/video khi duyệt, hoặc sửa cảnh cho rẻ hơn." },
+  VIDEO_LIMIT_EXCEEDED: { title: "Ngân sách video hiện không đủ", action: "Bấm \"Tăng ngân sách video\" ở trang dự án, hoặc sửa cảnh cho rẻ hơn." },
+  VIDEO_BUDGET_UNSET: { title: "Video chưa có ngân sách", action: "Đặt \"Ngân sách video\" ở trang dự án trước khi tạo nội dung trả phí." },
   BATCH_LIMIT_EXCEEDED: { title: "Vượt giới hạn chi phí của lô", action: "Duyệt lô với trần cao hơn, hoặc chạy trước các video vừa ngân sách." },
   GLOBAL_LIMIT_EXCEEDED: { title: "Vượt hạn mức chi toàn ứng dụng", action: "Chạy các video $0 trước, hoặc tự tăng hạn mức trong Cài đặt." },
   SCENE_LIMIT_EXCEEDED: { title: "Một cảnh vượt giới hạn chi phí cảnh", action: "Sửa cảnh (vd. chuyển sang LOCAL_MOTION) hoặc tăng trần cảnh." },
@@ -43,7 +44,7 @@ const CATALOG: Record<string, { title: string; action: string; mayCost?: boolean
   CANCELLED: { title: "Đã dừng theo yêu cầu", action: "Bấm TIẾP TỤC khi muốn chạy tiếp." },
   RENDER_FAILED: { title: "Render tại máy thất bại", action: "Bấm TIẾP TỤC để render lại ($0). Nếu lặp lại, xem chi tiết." },
   NEEDS_CHARACTER_REFERENCE: { title: "Nhân vật chưa có ảnh tham chiếu / mô tả", action: "Thêm ảnh tham chiếu hoặc mô tả nhân vật." },
-  OVER_VIDEO_BUDGET: { title: "Vượt giới hạn chi phí video", action: "Tăng trần/video khi duyệt, hoặc sửa cảnh cho rẻ hơn." },
+  OVER_VIDEO_BUDGET: { title: "Ngân sách video hiện không đủ", action: "Bấm \"Tăng ngân sách video\" ở trang dự án, hoặc sửa cảnh cho rẻ hơn." },
   OVER_SCENE_BUDGET: { title: "Một cảnh vượt giới hạn chi phí cảnh", action: "Sửa cảnh hoặc tăng trần cảnh." },
   NEEDS_PROVIDER_CONFIRMATION: { title: "Nhà cung cấp chưa được xác nhận giá", action: "Xác nhận nhà cung cấp ở bước duyệt." },
   NEEDS_EXPLICIT_PIN: { title: "Cảnh cần chọn model video", action: "Ghim model cho cảnh trong trình sửa cảnh." },
@@ -67,6 +68,10 @@ export function friendlyError(message: string | null | undefined): FriendlyError
     }
   }
   if (!code && /^render:/i.test(detail)) code = "RENDER_FAILED";
+  // Executor headroom sentences (QĐ-119): "video đã chi $X > trần $Y", "lô đã chi ...".
+  if (!code && /video đã chi \$?[0-9.]+ > trần/.test(detail)) code = "VIDEO_LIMIT_EXCEEDED";
+  if (!code && /lô đã chi \$?[0-9.]+ > trần/.test(detail)) code = "BATCH_LIMIT_EXCEEDED";
+  if (!code && /hạn mức toàn cục đã hết/.test(detail)) code = "GLOBAL_LIMIT_EXCEEDED";
   if (!code && /Không thấy|không tồn tại|missing/i.test(detail) && /file|ảnh|clip/i.test(detail)) code = "MISSING_LOCAL_FILE";
   const entry = CATALOG[code];
   if (!entry) {

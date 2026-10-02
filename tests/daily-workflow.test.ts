@@ -88,7 +88,7 @@ describe("1. Workspace + preflight + STRICT/PARTIAL + $0 trước + duyệt thê
     expect(by[ids.p1!]!.costClass).toBe("PAID_LIGHT");
     expect(by[ids.v1!]!.costClass).toBe("PAID_VIDEO");
     expect(by[ids.b1!]!.status).toBe("BỊ CHẶN");
-    expect(by[ids.b1!]!.problem?.title).toBe("Vượt giới hạn chi phí video");
+    expect(by[ids.b1!]!.problem?.title).toBe("Ngân sách video hiện không đủ");
     expect(ws.summary!.zeroCostVideos).toBe(2);
     expect(ws.summary!.blocked).toBe(1);
     expect(ws.summary!.videoAi).toBe(1);
@@ -182,7 +182,7 @@ describe("1. Workspace + preflight + STRICT/PARTIAL + $0 trước + duyệt thê
     expect(r.summary.blocked).toBe(1);
     expect(r.summary.apiSpent).toBe(0); // mock is never production money
     const b1 = r.summary.rows.find((x) => x.title === "Video bị chặn")!;
-    expect(b1.error_reason).toBe("Vượt giới hạn chi phí video");
+    expect(b1.error_reason).toBe("Ngân sách video hiện không đủ");
     expect(r.summary.totalDurationSec).toBeGreaterThan(0);
   });
 

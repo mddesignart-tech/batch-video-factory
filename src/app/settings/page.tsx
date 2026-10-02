@@ -103,36 +103,62 @@ export default async function SettingsPage() {
             </CardContent>
           </Card>
 
+          {/* SIMPLE MODE (QĐ-119): one sentence a person needs; every limit below
+              is unchanged and still enforced - it is only folded away. */}
           <Card>
             <CardHeader>
-              <CardTitle>Mặc định cho lô</CardTitle>
+              <CardTitle>Bảo vệ chi phí</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-1.5 text-xs">
-              <Row label="Tỉ lệ khung hình" value="9:16 (1080x1920)" />
-              <Row label="Chế độ video mặc định" value={settings.defaultQualityMode} />
+            <CardContent className="space-y-2 text-xs">
               <Row
-                label="MAX PER VIDEO mặc định"
-                value={`$${DEFAULT_MAX_COST_PER_VIDEO.toFixed(2)} — đặt lại cho từng lô lúc nhập/duyệt`}
+                label="Ngân sách toàn hệ thống"
+                value={`$${spend.cap.toFixed(2)} · đã dùng $${spend.spent.toFixed(2)} · còn $${spend.remaining.toFixed(2)}`}
               />
-              <Row
-                label="MAX BATCH"
-                value="Đặt cho từng lô lúc duyệt; không bao giờ vượt hạn mức toàn cục bên dưới"
-              />
-              <Row
-                label="Hạn mức toàn cục"
-                value={`$${spend.cap.toFixed(2)} · đã chi $${spend.spent.toFixed(6)} · còn $${spend.remaining.toFixed(6)}`}
-              />
+              <p className="text-ink-400">
+                Hằng ngày bạn chỉ cần đặt <strong className="text-ink-200">Ngân sách video</strong> ở trang
+                của từng dự án. Mọi nút trả phí đều hiện giá trước khi gửi.
+              </p>
+              <details className="rounded-lg border border-ink-800 p-2">
+                <summary className="cursor-pointer text-ink-300">Nâng cao — giới hạn toàn hệ thống / lô / video / cảnh</summary>
+                <div className="mt-3 space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Mặc định cho lô</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-1.5 text-xs">
+                      <Row label="Tỉ lệ khung hình" value="9:16 (1080x1920)" />
+                      <Row label="Chế độ video mặc định" value={settings.defaultQualityMode} />
+                      <Row
+                        label="MAX PER VIDEO mặc định"
+                        value={`$${DEFAULT_MAX_COST_PER_VIDEO.toFixed(2)} — đặt lại cho từng lô lúc nhập/duyệt`}
+                      />
+                      <Row
+                        label="MAX BATCH"
+                        value="Đặt cho từng lô lúc duyệt; không bao giờ vượt hạn mức toàn cục bên dưới"
+                      />
+                      <Row
+                        label="Hạn mức toàn cục"
+                        value={`$${spend.cap.toFixed(2)} · đã chi $${spend.spent.toFixed(6)} · còn $${spend.remaining.toFixed(6)}`}
+                      />
+                    </CardContent>
+                  </Card>
+
+                  <SpendCapForm
+                    cap={spend.cap}
+                    spent={spend.spent}
+                    databaseFile={resolveDatabaseFile()}
+                    productionDatabase={isProductionDatabase()}
+                  />
+
+                  <ProviderBudgets rows={budgets} />
+                  <p className="text-ink-500">
+                    Giới hạn mặc định cho video mới, trần/video của lô và trần mỗi cảnh VIDEO_AI nằm trong
+                    &ldquo;Cấu hình ứng dụng&rdquo;. Trần lô đặt khi DUYỆT &amp; CHẠY.
+                  </p>
+                </div>
+              </details>
             </CardContent>
           </Card>
-
-          <SpendCapForm
-            cap={spend.cap}
-            spent={spend.spent}
-            databaseFile={resolveDatabaseFile()}
-            productionDatabase={isProductionDatabase()}
-          />
-
-          <ProviderBudgets rows={budgets} />
 
           <Card>
             <CardHeader>

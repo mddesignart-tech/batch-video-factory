@@ -3544,3 +3544,33 @@ vẫn đúng nghĩa, chỉ không bị đọc như hạn mức nữa. Trang chi 
 
 Test: `tests/voice-reuse.test.ts` › QĐ-118 (đỏ trên code cũ với đúng thông báo trên; xanh sau sửa; trần đã duyệt
 và ngân sách video vẫn chặn).
+
+## QĐ-119 — Chi phí dễ hiểu cho người dùng không kỹ thuật (2026-10-02, $0, không POST trả phí)
+
+Chỉ đổi cách TRÌNH BÀY; mọi guard giữ nguyên (global cap + ví ở POST, quyền chi lô đã duyệt, ngân sách video
+qua router + headroom, trần cảnh VIDEO_AI).
+
+- **Một con số hằng ngày: NGÂN SÁCH VIDEO** (`project.maxBudget`). Thẻ ở trang dự án: Đã dùng / Giới hạn /
+  Còn lại, nút "Đổi ngân sách" (một ô, gợi ý $1/$2/$5). `services/video-budget.ts` chỉ ĐỌC các giới hạn đang
+  áp dụng: giới hạn hiệu lực = min(ngân sách video, trần/video của quyền chi ĐÃ duyệt); DRAFT không đặt trần
+  (QĐ-118). "Đổi ngân sách" phải > $0; lô một video chưa duyệt (bọc dự án cũ) đi theo để preflight cùng số;
+  quyền chi đã duyệt KHÔNG bao giờ bị nâng từ trang dự án.
+- **Không còn trần $0 âm thầm.** Ngân sách ≤ 0 = "chưa đặt": thao tác trả phí báo VIDEO_BUDGET_UNSET và yêu cầu
+  đặt ngân sách, không báo "trần $0". Form dự án không nhận 0 nữa. `Batch.maxBudget = 0` của lô cũ không còn
+  sinh cảnh báo "vượt trần cả lô $0.00".
+- **Nhãn giá trên nút trả phí:** "NGHE THỬ GIỌNG · ~$X" hoặc "· REUSE · $0"; "Tạo lại ảnh/video · ~$X" (video
+  LOCAL_MOTION: "$0 tại máy") và hai nút này nay hỏi xác nhận kèm giá trước khi xếp job.
+- **Lỗi ngân sách thân thiện:** `domain/budget-message.ts` nhận ra các câu của guard (headroom, router, global
+  cap) và tách số → "Ngân sách video hiện không đủ. Đã dùng / Còn lại / Thao tác này cần thêm khoảng", nút
+  "Tăng ngân sách video" (gợi ý số làm tròn lên), câu gốc trong "Chi tiết kỹ thuật". NGHE THỬ GIỌNG kiểm ngân
+  sách TRƯỚC khi hỏi xác nhận (NEEDS_BUDGET, 0 POST). `friendlyError` cũng nhận "video/lô đã chi … > trần".
+- **Tóm tắt trước DUYỆT & CHẠY:** chi phí phát sinh dự kiến, Ảnh / Giọng / Video AI, Reuse $0 (tiết kiệm),
+  ngân sách video còn lại, toàn hệ thống còn lại; thiếu → nút TĂNG NGÂN SÁCH thay cho DUYỆT & CHẠY. Bảng kỹ thuật
+  cũ nằm trong "Chi tiết kỹ thuật".
+- **Cài đặt → Bảo vệ chi phí:** một dòng ngân sách toàn hệ thống; hạn mức toàn cục, ví nhà cung cấp, mặc định lô
+  nằm trong "Nâng cao" (form giữ nguyên).
+- Sửa kèm: byte NUL vô tình ghi vào `storyboard.tsx` ở QĐ-117 (git coi là file nhị phân).
+
+Test: `tests/voice-reuse.test.ts` › QĐ-119 (5 test) + QĐ-118 cập nhật (trả NEEDS_BUDGET thân thiện; guard gốc vẫn
+ném đúng câu cũ). Tiêu đề VIDEO_LIMIT_EXCEEDED/OVER_VIDEO_BUDGET đổi thành "Ngân sách video hiện không đủ" (3 kỳ
+vọng test cập nhật theo).

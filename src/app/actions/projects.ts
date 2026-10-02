@@ -17,6 +17,7 @@ import {
 import type { ActionResult } from "./idioms";
 import { makeSceneVoice, sceneVoiceStatus, type SceneVoiceResult } from "@/services/scene-voice";
 import type { SceneVoicePlan } from "@/services/generation";
+import { setVideoBudget, videoBudget, type VideoBudget } from "@/services/video-budget";
 
 /**
  * Project and storyboard actions.
@@ -32,7 +33,7 @@ const CreateInput = z.object({
   routerStrategy: z.enum(ROUTER_STRATEGIES).default("AUTO"),
   stylePresetId: z.string().optional(),
   targetDuration: z.coerce.number().min(15).max(60).default(25),
-  maxBudget: z.coerce.number().min(0).max(1000).default(10),
+  maxBudget: z.coerce.number().positive("Ngân sách video phải lớn hơn $0.").max(1000).default(10),
   generateScript: z.coerce.boolean().default(true),
 });
 
@@ -156,14 +157,17 @@ export async function updateProjectSettings(
     title: z.string().min(1).optional(),
     qualityMode: z.enum(QUALITY_MODES).optional(),
     routerStrategy: z.enum(ROUTER_STRATEGIES).optional(),
-    maxBudget: z.coerce.number().min(0).max(1000).optional(),
+    maxBudget: z.coerce.number().positive("Ngân sách video phải lớn hơn $0.").max(1000).optional(),
     targetDuration: z.coerce.number().min(15).max(60).optional(),
   });
   const parsed = schema.safeParse(Object.fromEntries(formData.entries()));
   if (!parsed.success) {
-    return { ok: false, message: "Dữ liệu không hợp lệ." };
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ." };
   }
-  await prisma.project.update({ where: { id: projectId }, data: parsed.data });
+  const { maxBudget, ...rest } = parsed.data;
+  await prisma.project.update({ where: { id: projectId }, data: rest });
+  // The same path as "Đổi ngân sách", so a batch of one made for this project follows.
+  if (maxBudget !== undefined) await setVideoBudget(projectId, maxBudget);
   revalidatePath(`/projects/${projectId}`);
   return { ok: true, message: "Đã lưu cài đặt dự án." };
 }
@@ -351,5 +355,29 @@ export async function makeSceneVoiceAction(
     return r;
   } catch (err) {
     return { status: "FAILED", message: errorMessage(err), plan: null, postsMade: 0 };
+  }
+}
+
+/** NGÂN SÁCH VIDEO of one project. Read-only. */
+export async function getVideoBudget(projectId: string): Promise<{ ok: boolean; message: string; budget?: VideoBudget }> {
+  try {
+    return { ok: true, message: "", budget: await videoBudget(projectId) };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/** "Đổi ngân sách": the one number a person sets for a video (> $0). */
+export async function updateVideoBudget(
+  projectId: string,
+  amount: number,
+): Promise<{ ok: boolean; message: string; budget?: VideoBudget }> {
+  try {
+    const budget = await setVideoBudget(projectId, amount);
+    await logger.info({ event: "project.budget_changed", projectId, message: `Ngân sách video: $${amount.toFixed(2)}` });
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, message: `Đã đặt ngân sách video $${budget.videoLimit?.toFixed(2)}.`, budget };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
   }
 }

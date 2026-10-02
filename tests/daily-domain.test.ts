@@ -172,7 +172,7 @@ describe("trạng thái thân thiện", () => {
 describe("lỗi cho người dùng", () => {
   it("mã lý do -> câu tiếng Việt, giữ chi tiết kỹ thuật", () => {
     const e = friendlyError("VIDEO_LIMIT_EXCEEDED: Video A vượt giới hạn video $0.10 — dự toán $0.50, giới hạn $0.40.");
-    expect(e?.title).toBe("Vượt giới hạn chi phí video");
+    expect(e?.title).toBe("Ngân sách video hiện không đủ");
     expect(e?.detail).toContain("$0.50");
     expect(friendlyError("BLOCKED: MISSING_LOCAL_FILE: scene-02.png")?.title).toBe("Thiếu file nguồn");
     expect(friendlyError("APPROVED_MODEL_UNAVAILABLE: runway/gen4 không khả dụng")?.title).toBe("Model đã duyệt hiện không khả dụng");

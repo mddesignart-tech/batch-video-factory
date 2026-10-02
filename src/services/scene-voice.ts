@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { round } from "@/lib/utils";
 import { planSceneVoice, type SceneVoicePlan } from "./generation";
+import { videoBudget } from "./video-budget";
+import { budgetProblem, type BudgetProblem } from "@/domain/budget-message";
 
 /**
  * "NGHE THỬ GIỌNG" / "Tạo giọng" for ONE scene (voice preview, QĐ-117).
@@ -21,7 +23,7 @@ import { planSceneVoice, type SceneVoicePlan } from "./generation";
  * generateSceneVoice still guards any other caller of the same line.
  */
 
-export type SceneVoiceStatus = "DONE" | "NEEDS_CONFIRMATION" | "BLOCKED" | "ALREADY_RUNNING" | "FAILED";
+export type SceneVoiceStatus = "DONE" | "NEEDS_CONFIRMATION" | "NEEDS_BUDGET" | "BLOCKED" | "ALREADY_RUNNING" | "FAILED";
 
 export interface SceneVoiceResult {
   status: SceneVoiceStatus;
@@ -29,6 +31,8 @@ export interface SceneVoiceResult {
   plan: SceneVoicePlan | null;
   /** TTS ProviderJobs this call created (0 for a reuse). */
   postsMade: number;
+  /** Set when a budget stands in the way (QĐ-119): the numbers for the friendly message. */
+  budget?: BudgetProblem & { projectId: string; videoLimit: number | null };
 }
 
 const running = new Set<string>();
@@ -60,7 +64,14 @@ export async function makeSceneVoice(
       };
     }
     const money = (n: number) => `$${n.toFixed(6)}${plan.mockMode ? " (giá giả lập Mock Mode)" : ""}`;
+    const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId }, select: { projectId: true } });
     if (plan.expectedPosts > 0) {
+      // Budget first, in the person's terms - before asking them to confirm a
+      // purchase the guards would refuse anyway. The guards still check again.
+      const shortfall = await budgetShortfall(scene.projectId, plan.incrementalCost, plan.mockMode);
+      if (shortfall) {
+        return { status: "NEEDS_BUDGET", message: shortfall.detail, plan, postsMade: 0, budget: shortfall };
+      }
       if (!opts.confirmPaid) {
         return {
           status: "NEEDS_CONFIRMATION",
@@ -84,7 +95,19 @@ export async function makeSceneVoice(
       const { executeSceneAsset } = await import("./batch-executor");
       await executeSceneAsset(sceneId, "voice", { allowRebuyMissingVoice: opts.confirmPaid === true && plan.expectedPosts > 0 });
     } catch (err) {
-      return { status: "FAILED", message: err instanceof Error ? err.message : String(err), plan, postsMade: 0 };
+      const message = err instanceof Error ? err.message : String(err);
+      const problem = budgetProblem(message);
+      if (problem) {
+        const vb = await videoBudget(scene.projectId);
+        return {
+          status: "NEEDS_BUDGET",
+          message,
+          plan,
+          postsMade: 0,
+          budget: { ...problem, needed: problem.needed ?? plan.incrementalCost, projectId: scene.projectId, videoLimit: vb.videoLimit },
+        };
+      }
+      return { status: "FAILED", message, plan, postsMade: 0 };
     }
     const postsMade = (await prisma.providerJob.count({ where: { sceneId, kind: "audio" } })) - before;
     const after = await planSceneVoice(sceneId);
@@ -105,4 +128,53 @@ export async function makeSceneVoice(
   } finally {
     running.delete(sceneId);
   }
+}
+
+/**
+ * Would `cost` more fit the budgets that bind this video? Null when it does.
+ * The same limits the guards enforce (video budget, a live approval, the
+ * global cap - the last only for real money), read through videoBudget.
+ */
+async function budgetShortfall(
+  projectId: string,
+  cost: number,
+  mockMode: boolean,
+): Promise<(BudgetProblem & { projectId: string; videoLimit: number | null }) | null> {
+  const vb = await videoBudget(projectId);
+  const eps = 1e-9;
+  const base = { projectId, videoLimit: vb.videoLimit, needed: cost };
+  if (vb.limit === null) {
+    return { ...base, scope: "VIDEO", used: vb.used, limit: null, remaining: null, detail: "VIDEO_BUDGET_UNSET: video này chưa có ngân sách. Đặt ngân sách video trước khi tạo nội dung trả phí." };
+  }
+  if (cost > (vb.remaining ?? 0) + eps) {
+    return {
+      ...base,
+      scope: vb.source === "APPROVED_BATCH" ? "BATCH" : "VIDEO",
+      used: vb.used,
+      limit: vb.limit,
+      remaining: vb.remaining,
+      detail: `VIDEO_LIMIT_EXCEEDED: video đã chi $${vb.used.toFixed(6)}, giới hạn $${vb.limit.toFixed(6)}, còn $${(vb.remaining ?? 0).toFixed(6)}; thao tác cần $${cost.toFixed(6)}.`,
+    };
+  }
+  if (vb.approval?.status === "APPROVED" && cost > vb.approval.batchRemaining + eps) {
+    return {
+      ...base,
+      scope: "BATCH",
+      used: vb.approval.batchUsed,
+      limit: vb.approval.batchCeiling,
+      remaining: vb.approval.batchRemaining,
+      detail: `BATCH_LIMIT_EXCEEDED: lô đã duyệt còn $${vb.approval.batchRemaining.toFixed(6)}; thao tác cần $${cost.toFixed(6)}.`,
+    };
+  }
+  if (!mockMode && cost > vb.global.remaining + eps) {
+    return {
+      ...base,
+      scope: "GLOBAL",
+      used: vb.global.spent,
+      limit: vb.global.cap,
+      remaining: vb.global.remaining,
+      detail: `GLOBAL_LIMIT_EXCEEDED: hạn mức toàn hệ thống còn $${vb.global.remaining.toFixed(6)}; thao tác cần $${cost.toFixed(6)}.`,
+    };
+  }
+  return null;
 }

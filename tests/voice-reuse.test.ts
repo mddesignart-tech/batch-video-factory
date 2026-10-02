@@ -368,15 +368,20 @@ describe("QĐ-118 — trần lô của bản DRAFT không phải hạn mức $0"
     // A set ceiling still binds: an APPROVED $0.10 batch already overrun stops it...
     await prisma.batchAuthorization.update({ where: { id: auth.id }, data: { status: "APPROVED", authorizedMaxSpend: 0.1 } });
     const blocked = await makeSceneVoice(s1.id, { confirmPaid: true, expectedCost: cost });
-    expect(blocked.status).toBe("FAILED");
-    expect(blocked.message).toMatch(/lô đã chi \$0\.334007 > trần \$0\.100000/);
+    expect(blocked.status).toBe("NEEDS_BUDGET");
+    expect(blocked.budget!.scope).toBe("BATCH");
+    expect(blocked.budget!.remaining).toBe(0);
+    // The guard itself, unchanged underneath the friendly pre-check:
+    const { executeSceneAsset } = await import("@/services/batch-executor");
+    await expect(executeSceneAsset(s1.id, "voice", { allowRebuyMissingVoice: true })).rejects.toThrow(/lô đã chi \$0\.334007 > trần \$0\.100000/);
     // ...and so does the video's own budget when there is no approval.
     await prisma.batchAuthorization.update({ where: { id: auth.id }, data: { status: "DRAFT", authorizedMaxSpend: 0 } });
     const p = await prisma.project.findUniqueOrThrow({ where: { id: v.projectId } });
     await prisma.project.update({ where: { id: v.projectId }, data: { maxBudget: 0.1 } });
     const overVideo = await makeSceneVoice(s1.id, { confirmPaid: true, expectedCost: cost });
-    expect(overVideo.status).toBe("FAILED");
-    expect(overVideo.message).toMatch(/video đã chi/);
+    expect(overVideo.status).toBe("NEEDS_BUDGET");
+    expect(overVideo.budget!.scope).toBe("VIDEO");
+    await expect(executeSceneAsset(s1.id, "voice", { allowRebuyMissingVoice: true })).rejects.toThrow(/video đã chi/);
     expect(await voicePurchases(v.projectId)).toBe(0);
 
     // DRAFT ($0 = nothing approved yet) + a valid video budget: runs.
@@ -385,5 +390,111 @@ describe("QĐ-118 — trần lô của bản DRAFT không phải hạn mức $0"
     expect(ok.message).not.toMatch(/trần \$0\.000000/);
     expect(ok.status).toBe("DONE");
     expect(await voicePurchases(v.projectId)).toBe(1);
+  });
+});
+
+describe("QĐ-119 — chi phí dễ hiểu: một ngân sách video, lỗi thân thiện, tóm tắt trước khi chạy", () => {
+  it("nhận ra mọi câu chặn vì ngân sách và tách số (thuần)", async () => {
+    const { budgetProblem, suggestedBudget } = await import("@/domain/budget-message");
+    const { friendlyError } = await import("@/domain/user-errors");
+    const lot = budgetProblem("cảnh 1: lô đã chi $0.334007 > trần $0.000000. DỪNG.")!;
+    expect(lot).toMatchObject({ scope: "BATCH", used: 0.334007, limit: 0, remaining: 0 });
+    expect(budgetProblem("cảnh 2: video đã chi $1.2 > trần $1. DỪNG.")).toMatchObject({ scope: "VIDEO", used: 1.2, limit: 1, remaining: 0 });
+    expect(budgetProblem("Mô hình đã chọn tốn $0.05 nhưng ngân sách còn lại chỉ $0.01.")).toMatchObject({ scope: "VIDEO", needed: 0.05, remaining: 0.01 });
+    expect(
+      budgetProblem("Đã chi $8.5900 cho API thật. Yêu cầu này ước tính thêm $0.0500, tổng $8.6400 sẽ vượt hạn mức $8.60. Yêu cầu bị chặn."),
+    ).toMatchObject({ scope: "GLOBAL", used: 8.59, needed: 0.05, limit: 8.6 });
+    expect(budgetProblem("render: ffmpeg exited 1")).toBeNull();
+    expect(friendlyError("cảnh 1: video đã chi $0.33 > trần $0.10. DỪNG.")!.code).toBe("VIDEO_LIMIT_EXCEEDED");
+    expect(friendlyError("cảnh 1: lô đã chi $0.33 > trần $0.10. DỪNG.")!.code).toBe("BATCH_LIMIT_EXCEEDED");
+    expect(suggestedBudget(0.33, 0.05, 0.1)).toBe(0.5);
+    expect(suggestedBudget(4.9, 0.3, 5)).toBe(6);
+  });
+
+  it("NGÂN SÁCH VIDEO: Đã dùng / Giới hạn / Còn lại; đổi ngân sách > $0; lô một video chưa duyệt đi theo; lô đã duyệt không bị nâng", async () => {
+    const { videoBudget, setVideoBudget } = await import("@/services/video-budget");
+    const v = await importVideo([`Budget card ${tag}.`]);
+    await prisma.costEntry.create({ data: { projectId: v.projectId, batchId: v.batchId, category: "image", provider: "mock", model: "x", amount: 0.3, estimated: false } });
+    const b = await videoBudget(v.projectId);
+    expect(b.used).toBeCloseTo(0.3, 6);
+    expect(b.source).toBe("VIDEO");
+    expect(b.remaining).toBeCloseTo((b.limit ?? 0) - 0.3, 6);
+
+    await expect(setVideoBudget(v.projectId, 0)).rejects.toThrow(/lớn hơn \$0/);
+    const after = await setVideoBudget(v.projectId, 2);
+    expect(after).toMatchObject({ videoLimit: 2, limit: 2 });
+    expect(after.remaining).toBeCloseTo(1.7, 6);
+    // A batch of one nobody approved follows, so its preflight prices against $2.
+    expect((await prisma.batch.findUniqueOrThrow({ where: { id: v.batchId } })).maxCostPerVideo).toBe(2);
+    expect((await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId: v.batchId } })).maxCostPerVideo).toBe(2);
+
+    // An approval that was GIVEN binds and is never raised from the project page.
+    await prisma.batchAuthorization.update({ where: { batchId: v.batchId }, data: { status: "APPROVED", authorizedMaxSpend: 1, maxCostPerVideo: 0.5 } });
+    try {
+      const approved = await setVideoBudget(v.projectId, 3);
+      expect(approved.source).toBe("APPROVED_BATCH");
+      expect(approved.limit).toBe(0.5);
+      expect((await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId: v.batchId } })).maxCostPerVideo).toBe(0.5);
+    } finally {
+      await prisma.batchAuthorization.update({ where: { batchId: v.batchId }, data: { status: "DRAFT", authorizedMaxSpend: 0 } });
+    }
+  });
+
+  it("dự án cũ ngân sách $0: không khoá âm thầm 'trần $0' — báo CHƯA ĐẶT; đặt ngân sách xong thì NGHE THỬ GIỌNG chạy", async () => {
+    const { setVideoBudget } = await import("@/services/video-budget");
+    const v = await importVideo([`Zero budget ${tag}.`]);
+    await prisma.project.update({ where: { id: v.projectId }, data: { maxBudget: 0 } });
+    const s1 = await scene(v.projectId, 1);
+    const r = await makeSceneVoice(s1.id, { confirmPaid: true });
+    expect(r.status).toBe("NEEDS_BUDGET");
+    expect(r.budget).toMatchObject({ scope: "VIDEO", limit: null });
+    expect(r.message).toMatch(/VIDEO_BUDGET_UNSET/);
+    expect(await voicePurchases(v.projectId)).toBe(0);
+
+    await setVideoBudget(v.projectId, 1);
+    const cost = (await planSceneVoice(s1.id)).incrementalCost;
+    const ok = await makeSceneVoice(s1.id, { confirmPaid: true, expectedCost: cost });
+    expect(ok.status).toBe("DONE");
+    expect(await voicePurchases(v.projectId)).toBe(1);
+  });
+
+  it("thiếu ngân sách video: báo Đã dùng / Còn lại / Cần thêm, 0 POST; tăng ngân sách rồi chạy được", async () => {
+    const { setVideoBudget } = await import("@/services/video-budget");
+    const v = await importVideo([`Short budget ${tag}.`]);
+    const s1 = await scene(v.projectId, 1);
+    const cost = (await planSceneVoice(s1.id)).incrementalCost;
+    expect(cost).toBeGreaterThan(0);
+    await prisma.costEntry.create({ data: { projectId: v.projectId, category: "image", provider: "mock", model: "x", amount: 0.33, estimated: false } });
+    await setVideoBudget(v.projectId, 0.33);
+    const r = await makeSceneVoice(s1.id, { confirmPaid: true, expectedCost: cost });
+    expect(r.status).toBe("NEEDS_BUDGET");
+    expect(r.budget).toMatchObject({ scope: "VIDEO", remaining: 0, needed: cost });
+    expect(r.budget!.used).toBeCloseTo(0.33, 6);
+    expect(await voicePurchases(v.projectId)).toBe(0);
+    await setVideoBudget(v.projectId, 1);
+    expect((await makeSceneVoice(s1.id, { confirmPaid: true, expectedCost: cost })).status).toBe("DONE");
+  });
+
+  it("PREFLIGHT: tóm tắt Ảnh / Giọng / Video AI / Reuse, ngân sách video + toàn hệ thống còn lại; thiếu thì không đủ", async () => {
+    const { preflightForApproval } = await import("@/services/batch-executor");
+    const { setVideoBudget } = await import("@/services/video-budget");
+    const v = await importVideo([`Summary one ${tag}.`, `Summary two ${tag}.`]);
+    const pre = await preflightForApproval(v.batchId, { maxBatch: 5 });
+    const sum = pre.costSummary!;
+    expect(sum.total).toBeCloseTo(pre.estimatedTotal, 6);
+    expect(sum.voice).toBeGreaterThan(0);
+    expect(sum.image).toBe(0); // imported pictures
+    expect(sum.video).toBe(0); // LOCAL_MOTION
+    expect(sum.videos).toHaveLength(1);
+    expect(sum.videos[0]!.remaining).toBeGreaterThan(0);
+    expect(sum.globalRemaining).toBe(pre.globalRemaining);
+    expect(sum.enough).toBe(true);
+
+    await setVideoBudget(v.projectId, 1);
+    await prisma.costEntry.create({ data: { projectId: v.projectId, category: "image", provider: "mock", model: "x", amount: 1, estimated: false } });
+    const short = (await preflightForApproval(v.batchId, { maxBatch: 5 })).costSummary!;
+    expect(short.videos[0]!.remaining).toBe(0);
+    expect(short.videos[0]!.enough).toBe(false);
+    expect(short.enough).toBe(false);
   });
 });

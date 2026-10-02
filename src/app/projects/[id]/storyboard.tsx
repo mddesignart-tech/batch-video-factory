@@ -5,6 +5,8 @@ import { Ban, Check, Image as ImageIcon, Mic, Video } from "lucide-react";
 import { ImageReview, type ImageModelChoice } from "./image-review";
 import { SceneImagePanel } from "./scene-image-panel";
 import { SceneVoicePanel } from "./scene-voice-panel";
+import { budgetProblem } from "@/domain/budget-message";
+import { BudgetProblemBox } from "@/components/video-budget";
 import {
   Badge,
   Card,
@@ -93,6 +95,9 @@ export interface RoutingView {
   reason: string;
   estimatedCost: number;
   error: string | null;
+  /** Estimated price of "Tạo lại ảnh" / "Tạo lại video" (0 = local, null = unknown). */
+  imageRegenCost?: number | null;
+  videoRegenCost?: number | null;
 }
 
 interface ModelOption {
@@ -117,6 +122,7 @@ const PRIORITY_LABEL: Record<string, string> = {
 
 export function Storyboard({
   projectId,
+  videoLimit,
   idiomPhrase,
   scenes,
   routingByScene,
@@ -126,6 +132,8 @@ export function Storyboard({
   qualityMode,
 }: {
   projectId: string;
+  /** The video's own budget (NGÂN SÁCH VIDEO), for the "Tăng ngân sách video" button. */
+  videoLimit: number | null;
   idiomPhrase: string;
   scenes: SceneView[];
   routingByScene: Record<number, RoutingView>;
@@ -326,7 +334,11 @@ export function Storyboard({
               </div>
             ) : null}
 
-            {selected.errorMessage ? (
+            {selected.errorMessage && budgetProblem(selected.errorMessage) ? (
+              <div className="mt-3">
+                <BudgetProblemBox problem={budgetProblem(selected.errorMessage)!} projectId={projectId} videoLimit={videoLimit} />
+              </div>
+            ) : selected.errorMessage ? (
               <div className="mt-3 rounded-lg border border-danger-500/30 bg-danger-500/10 p-3 text-xs text-danger-500">
                 {selected.errorMessage}
               </div>
@@ -362,26 +374,30 @@ export function Storyboard({
             />
             <SceneVoicePanel
               sceneId={selected.id}
-              dialogueKey={`${selected.dialogue} ${selected.narration}`}
+              dialogueKey={JSON.stringify([selected.dialogue, selected.narration])}
+              projectId={projectId}
+              videoLimit={videoLimit}
             />
             <div className="mb-3 flex flex-wrap gap-1.5">
               <ActionButton
                 size="sm"
                 variant="outline"
                 action={() => regenerateSceneAsset(selected.id, "image")}
+                confirm={`Tạo lại ảnh cảnh ${selected.sceneNumber}: tạo ảnh MỚI, ${costText(routing?.imageRegenCost)}. Tiếp tục?`}
                 onDone={setResult}
               >
                 <ImageIcon className="h-3 w-3" />
-                Tạo lại ảnh
+                Tạo lại ảnh · {costText(routing?.imageRegenCost, true)}
               </ActionButton>
               <ActionButton
                 size="sm"
                 variant="outline"
                 action={() => regenerateSceneAsset(selected.id, "video")}
+                confirm={`Tạo lại video cảnh ${selected.sceneNumber}: tạo clip MỚI, ${costText(routing?.videoRegenCost)}. Tiếp tục?`}
                 onDone={setResult}
               >
                 <Video className="h-3 w-3" />
-                Tạo lại video
+                Tạo lại video · {costText(routing?.videoRegenCost, true)}
               </ActionButton>
               <ActionButton
                 size="sm"
@@ -652,4 +668,12 @@ function RoutingRow({ label, value }: { label: string; value: string | null }) {
       <span className="truncate text-ink-300">{value ?? "bỏ qua"}</span>
     </div>
   );
+}
+
+/** "~$0.04" on a paid button; "$0 tại máy" for local work; unknown says so. */
+function costText(cost: number | null | undefined, short = false): string {
+  if (cost === 0) return short ? "$0 tại máy" : "làm tại máy, $0";
+  if (cost === null || cost === undefined) return short ? "~? (xem dự toán)" : "chi phí xem ở bảng dự toán";
+  const v = `~$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`;
+  return short ? v : `ước tính ${v}`;
 }
