@@ -3524,3 +3524,23 @@ Test mới `tests/voice-reuse.test.ts` (15 test, mock): nghe thử → chạy = 
 lại toàn project, đổi ảnh/prompt/camera/phụ đề = 0; sửa một từ = 1; đổi giọng = 1/cảnh; double-click = 1;
 hai worker = 1; file mất không tự mua (chỉ khi xác nhận); tắt mọi model giọng → giọng cũ vẫn REUSE + render.
 "POST" đếm theo dòng sổ chi (mua lại cùng idempotency key cập nhật lại cùng dòng ProviderJob).
+
+## QĐ-118 — Trần lô của bản quyền chi DRAFT không phải hạn mức $0 (2026-10-02, $0, không POST trả phí)
+
+Lỗi thật (production): NGHE THỬ GIỌNG ở project cũ "Break a Leg" (tạo 2026-09-13, trước khi có lô) báo
+`cảnh 1: lô đã chi $0.334007 > trần $0.000000. DỪNG.` dù hạn mức toàn cục còn ~$1.41.
+
+**Nguồn số 0.** `wrapProjectInBatch` / `createAuthorization` / import ghi `BatchAuthorization` trạng thái DRAFT với
+`authorizedMaxSpend = 0` nghĩa là "chưa ai duyệt, chưa cho phép gì" (danh sách lô hiện "chưa duyệt"; cổng POST
+`batchApprovalFor` chỉ nhận APPROVED). Nhưng `executeScene` / `executeSceneAsset` (nút từng cảnh, job hàng đợi,
+NGHE THỬ GIỌNG) lấy trần từ bản ghi này mà không xét trạng thái → $0 thành trần thật; chi phí cũ của project
+($0.33 ảnh + text, ghi trước khi có lô) bị tính là "lô đã chi".
+
+**Sửa.** `sceneCeilings`: bản DRAFT không đặt trần nào ở bước từng cảnh — video theo ngân sách riêng
+(`project.maxBudget`, chỉnh ở trang dự án), hạn mức toàn cục và ví vẫn chặn ở POST. Mọi quyền chi đã từng được
+duyệt (APPROVED và các trạng thái đóng sau đó) giữ nguyên trần. Không migration, không sửa DB: số 0 của DRAFT
+vẫn đúng nghĩa, chỉ không bị đọc như hạn mức nữa. Trang chi tiết lô hiện "chưa duyệt" thay vì "$0.00"; hạn mức lô
+đặt khi DUYỆT & CHẠY. `runBatch` / "Chạy tiếp" vẫn đòi lô đã duyệt (không đổi).
+
+Test: `tests/voice-reuse.test.ts` › QĐ-118 (đỏ trên code cũ với đúng thông báo trên; xanh sau sửa; trần đã duyệt
+và ngân sách video vẫn chặn).

@@ -120,8 +120,12 @@ export function BatchProgressView({
         />
         <Stat
           label="Hạn mức đã duyệt"
-          value={formatUSD(authorization?.authorizedMaxSpend ?? 0)}
-          hint={`Còn lại ${formatUSD(ledger?.available ?? 0, 4)}`}
+          value={!authorization || authorization.status === "DRAFT" ? "chưa duyệt" : formatUSD(authorization.authorizedMaxSpend)}
+          hint={
+            !authorization || authorization.status === "DRAFT"
+              ? "Đặt hạn mức lô khi bấm DUYỆT & CHẠY; trước đó video theo ngân sách riêng của nó"
+              : `Còn lại ${formatUSD(ledger?.available ?? 0, 4)}`
+          }
           tone="brand"
         />
         <Stat

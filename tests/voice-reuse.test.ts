@@ -351,3 +351,39 @@ describe("QĐ-117 — model TTS bị tắt / ngừng dùng", () => {
     }
   }, 600_000);
 });
+
+describe("QĐ-118 — trần lô của bản DRAFT không phải hạn mức $0", () => {
+  it("project cũ trong lô DRAFT đã có chi phí: NGHE THỬ GIỌNG chạy được; trần đã duyệt / ngân sách video vẫn chặn", async () => {
+    const v = await importVideo([`Draft ceiling ${tag}.`]);
+    const auth = await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId: v.batchId } });
+    expect(auth.status).toBe("DRAFT");
+    expect(auth.authorizedMaxSpend).toBe(0);
+    // Spend from before the batch existed (the legacy project's script and images).
+    await prisma.costEntry.create({
+      data: { projectId: v.projectId, batchId: v.batchId, category: "image", provider: "mock", model: "legacy", amount: 0.334007, estimated: false },
+    });
+    const s1 = await scene(v.projectId, 1);
+    const cost = (await planSceneVoice(s1.id)).incrementalCost;
+
+    // A set ceiling still binds: an APPROVED $0.10 batch already overrun stops it...
+    await prisma.batchAuthorization.update({ where: { id: auth.id }, data: { status: "APPROVED", authorizedMaxSpend: 0.1 } });
+    const blocked = await makeSceneVoice(s1.id, { confirmPaid: true, expectedCost: cost });
+    expect(blocked.status).toBe("FAILED");
+    expect(blocked.message).toMatch(/lô đã chi \$0\.334007 > trần \$0\.100000/);
+    // ...and so does the video's own budget when there is no approval.
+    await prisma.batchAuthorization.update({ where: { id: auth.id }, data: { status: "DRAFT", authorizedMaxSpend: 0 } });
+    const p = await prisma.project.findUniqueOrThrow({ where: { id: v.projectId } });
+    await prisma.project.update({ where: { id: v.projectId }, data: { maxBudget: 0.1 } });
+    const overVideo = await makeSceneVoice(s1.id, { confirmPaid: true, expectedCost: cost });
+    expect(overVideo.status).toBe("FAILED");
+    expect(overVideo.message).toMatch(/video đã chi/);
+    expect(await voicePurchases(v.projectId)).toBe(0);
+
+    // DRAFT ($0 = nothing approved yet) + a valid video budget: runs.
+    await prisma.project.update({ where: { id: v.projectId }, data: { maxBudget: p.maxBudget } });
+    const ok = await makeSceneVoice(s1.id, { confirmPaid: true, expectedCost: cost });
+    expect(ok.message).not.toMatch(/trần \$0\.000000/);
+    expect(ok.status).toBe("DONE");
+    expect(await voicePurchases(v.projectId)).toBe(1);
+  });
+});

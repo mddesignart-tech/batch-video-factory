@@ -862,18 +862,31 @@ export async function executeScene(sceneId: string): Promise<void> {
     include: { project: { select: { id: true, batchId: true, maxBudget: true } } },
   });
   const project = scene.project;
+  const ceilings = await sceneCeilings(project);
+  await assertHeadroom(project.id, project.batchId ?? "", ceilings, `cảnh ${scene.sceneNumber}`);
+  await runScene(scene.id, project.id, project.batchId ?? "", ceilings);
+}
+
+/**
+ * The ceilings one scene step outside a batch run answers to.
+ *
+ * A DRAFT approval is a costed plan nobody has approved yet: its
+ * `authorizedMaxSpend` is 0 because nothing has been PERMITTED, not because a
+ * person set a $0 ceiling (createAuthorization, wrapProjectInBatch). Reading
+ * that 0 as a limit stopped every per-scene step of a legacy project wrapped in
+ * a batch of one ("lô đã chi $0.33 > trần $0.00") - while the POST gate itself
+ * never treats a DRAFT as an approval (batchApprovalFor). So a DRAFT governs
+ * nothing here either: the video is held to its own MAX BUDGET, the global cap
+ * and the wallets still apply at the POST. Any approval that WAS given
+ * (APPROVED, and the closed states it leaves behind) keeps its ceilings.
+ */
+async function sceneCeilings(project: { batchId: string | null; maxBudget: number }): Promise<Ceilings> {
   const auth = project.batchId
     ? await prisma.batchAuthorization.findUnique({ where: { batchId: project.batchId } })
     : null;
-  const ceilings: Ceilings = auth
-    ? {
-        perVideo: auth.maxCostPerVideo,
-        batch: auth.authorizedMaxSpend,
-        providers: parseJson<string[]>(auth.providerScopeJson, []),
-      }
+  return auth && auth.status !== "DRAFT"
+    ? { perVideo: auth.maxCostPerVideo, batch: auth.authorizedMaxSpend, providers: parseJson<string[]>(auth.providerScopeJson, []) }
     : { perVideo: project.maxBudget, batch: Number.POSITIVE_INFINITY, providers: [] };
-  await assertHeadroom(project.id, project.batchId ?? "", ceilings, `cảnh ${scene.sceneNumber}`);
-  await runScene(scene.id, project.id, project.batchId ?? "", ceilings);
 }
 
 /** One asset of one scene (the "regenerate" buttons), with the same ceilings. */
@@ -887,12 +900,7 @@ export async function executeSceneAsset(
     include: { project: { select: { id: true, batchId: true, maxBudget: true } } },
   });
   const project = scene.project;
-  const auth = project.batchId
-    ? await prisma.batchAuthorization.findUnique({ where: { batchId: project.batchId } })
-    : null;
-  const ceilings: Ceilings = auth
-    ? { perVideo: auth.maxCostPerVideo, batch: auth.authorizedMaxSpend, providers: parseJson<string[]>(auth.providerScopeJson, []) }
-    : { perVideo: project.maxBudget, batch: Number.POSITIVE_INFINITY, providers: [] };
+  const ceilings = await sceneCeilings(project);
   await assertHeadroom(project.id, project.batchId ?? "", ceilings, `cảnh ${scene.sceneNumber}`);
   if (kind === "image") return generateSceneImage(sceneId);
   if (kind === "video") return generateSceneVideo(sceneId);
