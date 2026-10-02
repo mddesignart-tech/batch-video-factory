@@ -10,6 +10,7 @@ import { parseJson, round, sleep } from "@/lib/utils";
 import {
   referencePriority,
   sceneCharacters,
+  type SceneCharacterColumns,
   type SceneCharacterLists,
 } from "@/domain/scene-characters";
 import { MAX_REFERENCES_SENT } from "@/providers/openai/openai-image-client";
@@ -44,7 +45,9 @@ import {
 } from "./batch-authorization";
 import { commit as commitReservation, release as releaseReservation } from "./cost-reservation";
 import { keyframeRequired, type MotionResolution } from "@/domain/local-motion";
-import { parseDialogueLines } from "@/domain/dialogue-lines";
+import { parseDialogueLines, type ParsedLine } from "@/domain/dialogue-lines";
+import { voiceRowMatches } from "@/domain/voice-line-match";
+import { MIN_VOICE_BYTES } from "@/services/voice-validity";
 import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
 import {
@@ -2266,7 +2269,20 @@ export async function voiceSettingsFor(
  *
  * Returns the paths written, in line order.
  */
-export async function generateSceneVoice(sceneId: string): Promise<string[]> {
+export async function generateSceneVoice(
+  sceneId: string,
+  opts: {
+    /**
+     * A line whose paid audio is gone from disk (same words, same voice - only
+     * the file is missing) is NOT bought again unless the caller says the
+     * person saw that cost and approved it: a preflight-approved run, a
+     * confirmed TIẾP TỤC, or a confirmed "Tạo giọng". Every other caller (the
+     * batch page's "Chạy tiếp", queue jobs, recovery) stops with
+     * VOICE_MISSING_LOCAL_FILE instead of buying silently.
+     */
+    allowRebuyMissing?: boolean;
+  } = {},
+): Promise<string[]> {
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
 
@@ -2274,12 +2290,55 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
   // standing silently in frame must be drawn and must not be given a line.
   const speaking = sceneCharacters(scene).speaking;
   const lines = parseDialogueLines(scene.dialogue, scene.narration, speaking);
-  if (lines.length === 0) return [];
+  // Lines the script no longer has (dialogue shortened or removed) must not be
+  // rendered: render plays every completed row. Rows only - the Asset rows and
+  // the ledger keep the purchase, so the audio stays reusable.
+  const stale = await prisma.dialogueLine.deleteMany({
+    where: { sceneId: scene.id, lineNumber: { gt: lines.length } },
+  });
+  if (lines.length === 0) {
+    if (stale.count > 0) {
+      await prisma.scene.update({ where: { id: scene.id }, data: { audioPath: null } });
+    }
+    return [];
+  }
 
   const written: string[] = [];
 
   for (const line of lines) {
     const settings = await voiceSettingsFor(line.speaker);
+
+    // A line that is ALREADY this audio - same words, voice, instructions,
+    // speed (and the pinned model, if any) - with its file on disk is handed
+    // back BEFORE routing. Audio that exists does not depend on the model's
+    // status today: a model since disabled, shut down or deprecated must not
+    // block it, and must not make the router pick another model and buy the
+    // same line again (TTS model deprecation safety).
+    const existing = await prisma.dialogueLine.findUnique({
+      where: { sceneId_lineNumber: { sceneId: scene.id, lineNumber: line.lineNumber } },
+    });
+    if (
+      existing &&
+      voiceRowMatches(existing, line.text, settings) &&
+      fileOnDiskSafe(existing.outputPath) &&
+      (await lineAssetMatches(
+        scene.id,
+        existing.outputPath,
+        voiceReuseKey({
+          provider: existing.provider,
+          model: existing.model,
+          text: line.text,
+          voiceId: settings.voiceId,
+          instructions: settings.instructions,
+          speed: settings.speed,
+          accent: settings.accent,
+          targetDuration: scene.duration,
+        }),
+      ))
+    ) {
+      written.push(toAbsolute(existing.outputPath));
+      continue;
+    }
 
     const routeLine = (c: SceneContext) =>
       routeFor(
@@ -2364,6 +2423,24 @@ export async function generateSceneVoice(sceneId: string): Promise<string[]> {
           decision.provider,
           false,
           "PAID_ASSET_NEEDS_RECOVERY",
+        );
+      }
+      // The same audio was bought for this line and its file is gone: never
+      // re-bought behind the person's back (MISSING_LOCAL_FILE).
+      if (
+        found.status === "NONE" &&
+        !opts.allowRebuyMissing &&
+        done &&
+        voiceRowMatches(done, line.text, settings, { provider: decision.provider, model: decision.modelId }) &&
+        !fileOnDiskSafe(done.outputPath)
+      ) {
+        throw new ProviderError(
+          `VOICE_MISSING_LOCAL_FILE: cảnh ${scene.sceneNumber}, câu ${line.lineNumber} - file giọng đã tạo ` +
+            `(${done.outputPath}) không còn trên đĩa. KHÔNG tự gọi TTS lại. ` +
+            `Bấm TIẾP TỤC (xem chi phí và xác nhận) hoặc "Tạo giọng" ở Storyboard nếu muốn tạo lại.`,
+          decision.provider,
+          false,
+          "VOICE_MISSING_LOCAL_FILE",
         );
       }
       const reusedLine =
@@ -2577,6 +2654,223 @@ async function lineAssetMatches(sceneId: string, outputPath: string, reuseKey: s
     orderBy: { createdAt: "desc" },
   });
   return !row || row.reuseKey === reuseKey;
+}
+
+/**
+ * The voice a scene ALREADY has, line by line, judged without routing: the
+ * stored row must still be this line's audio (same words, voice, instructions,
+ * speed, pinned model) and its file must be on disk. Read-only, no POST.
+ *
+ * The estimator's "existing voice" and the preflight's voice POST count both
+ * come from here, so a changed line or a lost file is never priced at $0.
+ */
+export async function existingVoiceLines(
+  scene: Pick<Scene, "dialogue" | "narration"> & SceneCharacterColumns & {
+    dialogueLines: { lineNumber: number; status: string; text: string; voiceId: string; instructions: string; speed: number; provider: string; model: string; outputPath: string }[];
+  },
+): Promise<{ lines: (ParsedLine & { state: "DONE" | "MISSING_LOCAL_FILE" | "CHANGED" | "NONE" })[]; allDone: boolean }> {
+  const parsed = parseDialogueLines(scene.dialogue, scene.narration, sceneCharacters(scene).speaking);
+  const settingsBySpeaker = new Map<string, Awaited<ReturnType<typeof voiceSettingsFor>>>();
+  const lines: (ParsedLine & { state: "DONE" | "MISSING_LOCAL_FILE" | "CHANGED" | "NONE" })[] = [];
+  for (const line of parsed) {
+    let settings = settingsBySpeaker.get(line.speaker);
+    if (!settings) {
+      settings = await voiceSettingsFor(line.speaker);
+      settingsBySpeaker.set(line.speaker, settings);
+    }
+    const row = scene.dialogueLines.find((r) => r.lineNumber === line.lineNumber);
+    const state = !row
+      ? "NONE"
+      : !voiceRowMatches(row, line.text, settings)
+        ? "CHANGED"
+        : fileOnDiskSafe(row.outputPath)
+          ? "DONE"
+          : "MISSING_LOCAL_FILE";
+    lines.push({ ...line, state });
+  }
+  return { lines, allDone: lines.length > 0 && lines.every((l) => l.state === "DONE") };
+}
+
+export type SceneVoiceLineState =
+  | "DONE"
+  | "REUSE"
+  | "WILL_CREATE"
+  | "MISSING_LOCAL_FILE"
+  | "INVALID"
+  | "NEEDS_RECOVERY"
+  | "BLOCKED";
+
+export interface SceneVoiceLinePlan {
+  lineNumber: number;
+  speaker: string;
+  text: string;
+  state: SceneVoiceLineState;
+  provider: string | null;
+  model: string | null;
+  voiceId: string;
+  /** What THIS action would pay: 0 for DONE / REUSE. */
+  incrementalCost: number;
+  /** Paid earlier for the audio on this line (0 for a reuse). */
+  paidCost: number;
+  durationSec: number | null;
+  audioPath: string | null;
+  message: string | null;
+}
+
+export interface SceneVoicePlan {
+  sceneId: string;
+  sceneNumber: number;
+  lines: SceneVoiceLinePlan[];
+  /** Expected TTS POSTs if the voice is made now. */
+  expectedPosts: number;
+  incrementalCost: number;
+  mockMode: boolean;
+}
+
+/**
+ * What making this scene's voice NOW would do, per line - the same questions,
+ * in the same order, as generateSceneVoice: is the line done, is the identical
+ * audio in the library, is the paid file lost. Read-only: no POST, no row
+ * written, no asset marked.
+ */
+export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
+  const ctx = await loadContext(sceneId);
+  const { scene, project } = ctx;
+  const parsed = parseDialogueLines(scene.dialogue, scene.narration, sceneCharacters(scene).speaking);
+  const rows = await prisma.dialogueLine.findMany({ where: { sceneId: scene.id } });
+  const out: SceneVoiceLinePlan[] = [];
+  for (const line of parsed) {
+    const settings = await voiceSettingsFor(line.speaker);
+    const row = rows.find((r) => r.lineNumber === line.lineNumber) ?? null;
+    const base = {
+      lineNumber: line.lineNumber,
+      speaker: line.speaker,
+      text: line.text,
+      voiceId: settings.voiceId,
+      paidCost: 0,
+      durationSec: null as number | null,
+      audioPath: null as string | null,
+      message: null as string | null,
+    };
+    // Existing audio first, judged on the model it WAS made with - the same
+    // order as generateSceneVoice, so a model retired since never matters here.
+    if (
+      row &&
+      voiceRowMatches(row, line.text, settings) &&
+      fileOnDiskSafe(row.outputPath) &&
+      (await lineAssetMatches(
+        scene.id,
+        row.outputPath,
+        voiceReuseKey({ provider: row.provider, model: row.model, text: line.text, voiceId: settings.voiceId, instructions: settings.instructions, speed: settings.speed, accent: settings.accent, targetDuration: scene.duration }),
+      ))
+    ) {
+      const bytes = fs.statSync(toAbsolute(row.outputPath)).size;
+      out.push({
+        ...base,
+        provider: row.provider,
+        model: row.model,
+        state: bytes < MIN_VOICE_BYTES ? "INVALID" : "DONE",
+        incrementalCost: 0,
+        paidCost: row.actualCost,
+        durationSec: row.durationSec || null,
+        audioPath: row.outputPath,
+        message: bytes < MIN_VOICE_BYTES ? `File giọng chỉ ${bytes} byte - hỏng. Tạo lại có thể tốn phí.` : null,
+      });
+      continue;
+    }
+    let decision: RouteDecision;
+    try {
+      decision = routeFor(ctx, "voice", { characters: line.text.length, jobs: 1 }, { provider: settings.provider, model: settings.model });
+    } catch (err) {
+      if (!(err instanceof RoutingError) || err.code !== "over_budget") {
+        out.push({
+          ...base,
+          state: "BLOCKED",
+          provider: settings.provider,
+          model: settings.model,
+          incrementalCost: 0,
+          message: `MODEL_UNAVAILABLE: ${errorText(err)}${voiceAlternatives(ctx, settings.model)}`,
+        });
+        continue;
+      }
+      decision = routeFor({ ...ctx, budgetRemaining: Number.MAX_SAFE_INTEGER }, "voice", { characters: line.text.length, jobs: 1 }, { provider: settings.provider, model: settings.model });
+      base.message = errorText(err);
+    }
+    const key = voiceReuseKey({
+      provider: decision.provider,
+      model: decision.modelId,
+      text: line.text,
+      voiceId: settings.voiceId,
+      instructions: settings.instructions,
+      speed: settings.speed,
+      accent: settings.accent,
+      targetDuration: scene.duration,
+    });
+    // A pin on a model the vendor is retiring still runs, but never silently.
+    if (decision.reason.includes("NGỪNG DÙNG")) {
+      base.message = `MODEL_DEPRECATED: ${decision.reason}${voiceAlternatives(ctx, decision.modelId)}`;
+    }
+    const common = { ...base, provider: decision.provider, model: decision.modelId };
+    const matches = row ? voiceRowMatches(row, line.text, settings, { provider: decision.provider, model: decision.modelId }) : false;
+    if (row && matches && fileOnDiskSafe(row.outputPath) && (await lineAssetMatches(scene.id, row.outputPath, key))) {
+      const bytes = fs.statSync(toAbsolute(row.outputPath)).size;
+      out.push({
+        ...common,
+        state: bytes < MIN_VOICE_BYTES ? "INVALID" : "DONE",
+        incrementalCost: 0,
+        paidCost: row.actualCost,
+        durationSec: row.durationSec || null,
+        audioPath: row.outputPath,
+        message: bytes < MIN_VOICE_BYTES ? `File giọng chỉ ${bytes} byte - hỏng. Tạo lại có thể tốn phí.` : null,
+      });
+      continue;
+    }
+    const found = await findReusableAsset({ reuseKey: key, sceneId: scene.id, projectId: project.id });
+    if (found.status === "REUSE") {
+      out.push({ ...common, state: "REUSE", incrementalCost: 0, durationSec: found.asset.durationSec, audioPath: found.asset.filePath });
+      continue;
+    }
+    if (found.status === "NEEDS_RECOVERY" || found.status === "IN_PROGRESS") {
+      out.push({
+        ...common,
+        state: "NEEDS_RECOVERY",
+        incrementalCost: 0,
+        message: found.status === "NEEDS_RECOVERY" ? found.reason : "Câu này đang được tạo ở nơi khác.",
+      });
+      continue;
+    }
+    const lost = Boolean(row && matches && !fileOnDiskSafe(row.outputPath));
+    out.push({
+      ...common,
+      state: lost ? "MISSING_LOCAL_FILE" : "WILL_CREATE",
+      incrementalCost: round(decision.estimatedCost),
+      paidCost: lost ? (row?.actualCost ?? 0) : 0,
+      message: lost ? `File giọng đã tạo (${row!.outputPath}) không còn trên đĩa. Tạo lại sẽ tốn phí.` : base.message,
+    });
+  }
+  const paying = out.filter((l) => l.state === "WILL_CREATE" || l.state === "MISSING_LOCAL_FILE");
+  return {
+    sceneId: scene.id,
+    sceneNumber: scene.sceneNumber,
+    lines: out,
+    expectedPosts: paying.length,
+    incrementalCost: round(paying.reduce((n, l) => n + l.incrementalCost, 0)),
+    mockMode: isMockMode(),
+  };
+}
+
+/** Voice models that could replace `current`, for a MODEL_* message. Never routes. */
+function voiceAlternatives(ctx: SceneContext, current: string | null): string {
+  const others = ctx.models
+    .filter((m) => m.type === "voice" && m.enabled && m.modelId !== current && m.lifecycle !== "DEPRECATED" && m.lifecycle !== "DISABLED")
+    .map((m) => `${m.provider}/${m.modelId}`);
+  return others.length > 0
+    ? ` Model thay thế: ${others.join(", ")} - đổi ở trang Nhân vật; giá mới hiện ở đây trước khi tạo.`
+    : " Chưa có model giọng thay thế nào được bật trong Mô hình AI.";
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function fileOnDiskSafe(relative: string): boolean {

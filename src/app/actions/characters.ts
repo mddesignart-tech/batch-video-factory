@@ -331,64 +331,88 @@ export async function previewVoice(
     const { toAbsolute, toRelative, uuidFilename } = await import("@/lib/paths");
     const path = await import("node:path");
 
-    const provider = await getVoiceProvider(character.voiceProvider, character.voiceModel);
-    const outputPath = toAbsolute(
-      path.join("voice-preview", uuidFilename(".wav")),
-    );
+    const fs = await import("node:fs");
+    const { voiceReuseKey } = await import("@/services/asset-keys");
+    const { acquireAssetCreationLock, findReusableAsset } = await import("@/services/asset-reuse");
 
-    const estimate = await provider.estimateCost({
-      projectId: "preview",
-      sceneId: "preview",
+    // In Mock Mode the registry speaks with the mock voice whatever the
+    // character says; the key and the ledger name what really spoke.
+    const spokenBy = isMockMode() ? "mock" : character.voiceProvider;
+    const settings = {
       model: character.voiceModel,
       text: line,
       voiceId: character.voiceId,
       instructions: character.voiceInstructions,
-      accent: character.voiceAccent === "UK" ? "UK" : "US",
-      gender: character.voiceGender === "female" ? "female" : "male",
+      accent: (character.voiceAccent === "UK" ? "UK" : "US") as "US" | "UK",
+      gender: (character.voiceGender === "female" ? "female" : "male") as "male" | "female",
       speed: character.voiceSpeed,
       targetDuration: 5,
-      outputPath,
-    });
-
-    if (!isMockMode()) {
-      await assertCanSpend({
-        provider: character.voiceProvider,
-        model: character.voiceModel,
-        estimatedCost: estimate.amount,
-      });
-    }
-
-    const job = await provider.createVoice({
-      projectId: "preview",
-      sceneId: "preview",
-      model: character.voiceModel,
-      text: line,
-      voiceId: character.voiceId,
-      instructions: character.voiceInstructions,
-      accent: character.voiceAccent === "UK" ? "UK" : "US",
-      gender: character.voiceGender === "female" ? "female" : "male",
-      speed: character.voiceSpeed,
-      targetDuration: 5,
-      outputPath,
-    });
-    const asset = await provider.downloadResult(job.externalId);
-
-    await recordCost({
-      category: "voice",
-      provider: character.voiceProvider,
-      model: character.voiceModel,
-      amount: asset.actualCost,
-      note: `nghe thử giọng ${character.name}`,
-    });
-
-    revalidatePath("/characters");
-    return {
-      ok: true,
-      message: `Đã tạo bản nghe thử (${asset.actualCost.toFixed(6)} USD).`,
-      audioPath: toRelative(asset.filePath),
-      cost: asset.actualCost,
     };
+    const key = voiceReuseKey({ provider: spokenBy, ...settings });
+
+    // The same sentence in the same voice is the same audio: play it again at
+    // $0. Held across the purchase, so a double click buys it once.
+    const release = await acquireAssetCreationLock(`preview:${key}`);
+    try {
+      const indexPath = toAbsolute(path.join("voice-preview", "index.json"));
+      const index = readPreviewIndex(fs, indexPath);
+      const known = index[key];
+      if (known && fs.existsSync(toAbsolute(known))) {
+        return { ok: true, message: "Dùng lại bản nghe thử đã có (cùng câu, cùng giọng) - 0 TTS POST, $0.", audioPath: known, cost: 0 };
+      }
+      const library = await findReusableAsset({ reuseKey: key });
+      if (library.status === "REUSE") {
+        return { ok: true, message: "Câu này đã có trong thư viện - phát lại, 0 TTS POST, $0.", audioPath: library.asset.filePath, cost: 0 };
+      }
+
+      const provider = await getVoiceProvider(character.voiceProvider, character.voiceModel);
+      const outputPath = toAbsolute(path.join("voice-preview", uuidFilename(".wav")));
+      const request = { projectId: "preview", sceneId: "preview", ...settings, outputPath };
+      const estimate = await provider.estimateCost(request);
+
+      if (!isMockMode()) {
+        await assertCanSpend({
+          provider: character.voiceProvider,
+          model: character.voiceModel,
+          estimatedCost: estimate.amount,
+        });
+      }
+
+      const job = await provider.createVoice(request);
+      const asset = await provider.downloadResult(job.externalId);
+
+      await recordCost({
+        category: "voice",
+        provider: spokenBy,
+        model: isMockMode() ? "mock-voice" : character.voiceModel,
+        amount: asset.actualCost,
+        note: `nghe thử giọng ${character.name}`,
+      });
+      index[key] = toRelative(asset.filePath);
+      fs.mkdirSync(path.dirname(indexPath), { recursive: true });
+      fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+
+      revalidatePath("/characters");
+      return {
+        ok: true,
+        message: `Đã tạo bản nghe thử (${asset.actualCost.toFixed(6)} USD${isMockMode() ? ", Mock Mode" : ""}).`,
+        audioPath: toRelative(asset.filePath),
+        cost: asset.actualCost,
+      };
+    } finally {
+      release();
+    }
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/** Preview index: reuse key -> relative file. A broken index is an empty one. */
+function readPreviewIndex(fs: typeof import("node:fs"), file: string): Record<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
   }
 }

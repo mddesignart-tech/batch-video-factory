@@ -26,7 +26,7 @@ import {
 } from "./cost-estimator";
 import { generateScript, recordConcept } from "./script-service";
 import { availableProviderNames } from "./provider-health";
-import { speechTextFor } from "./generation";
+import { existingVoiceLines, speechTextFor } from "./generation";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
 import { sceneReuseFacts } from "./reuse-plan";
 import { providerSpendBreakdown } from "./provider-budget";
@@ -288,6 +288,13 @@ export async function buildPlannedScenes(
       (scene.imageSource === "IMPORTED" && fileOnDisk(scene.imagePath)) ||
       (paidImages.has(scene.id) && fileOnDisk(scene.imagePath)),
   });
+  // The voice each scene ALREADY has, judged against its CURRENT lines and
+  // voice settings (not just "a row says completed"): an edited line or a new
+  // voice is a voice to buy, and a lost file is never priced at $0.
+  const voiceDone = new Map<string, boolean>();
+  for (const scene of scenes) {
+    voiceDone.set(scene.id, scene.dialogueLines.length > 0 && (await existingVoiceLines(scene)).allDone);
+  }
   return scenes.map((scene) => ({
     reuseFacts: reuse.get(scene.id) ?? null,
     sceneNumber: scene.sceneNumber,
@@ -324,13 +331,9 @@ export async function buildPlannedScenes(
     // the one direction an estimate must never be wrong in. QĐ-071.
     hasExistingVideo: fileOnDisk(scene.videoPath),
     hasExistingImage: paidImages.has(scene.id) && fileOnDisk(scene.imagePath),
-    hasExistingVoice:
-      scene.dialogueLines.length > 0 &&
-      // EVERY line, not any: a scene with two lines and one file still buys the
-      // second, and calling that "reused" under-states the bill.
-      scene.dialogueLines.every(
-        (line) => line.status === "completed" && fileOnDisk(line.outputPath),
-      ),
+    // EVERY current line, not any: a scene with two lines and one file still
+    // buys the second, and calling that "reused" under-states the bill.
+    hasExistingVoice: voiceDone.get(scene.id) === true,
     // The same derivation `generateSceneVideo` runs. The preview is what the
     // real-run script checks its plan against before spending, so a preview
     // that refuses a scene the generator would route stops a batch that was

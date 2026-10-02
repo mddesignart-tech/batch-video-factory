@@ -22,6 +22,7 @@ import { sceneCharacters } from "@/domain/scene-characters";
 import { evaluateSpendLimits, usd, type SpendVerdict } from "@/domain/spend-limits";
 import { sceneSpendLimit, videoSpendLimit } from "./batch-authorization";
 import { getSettings } from "@/lib/settings";
+import { existingVoiceLines } from "./generation";
 import { invalidVoiceLines, invalidVoiceMessage } from "./voice-validity";
 import {
   estimateVoiceDuration,
@@ -675,12 +676,11 @@ export async function preflightImportedBatch(
         );
       }
       if (plan.voice === "BUY" && scene) {
-        const lines = await prisma.dialogueLine.findMany({
-          where: { sceneId: scene.id },
-          select: { status: true },
-        });
-        counts.voicePosts +=
-          lines.length > 0 ? lines.filter((l) => l.status !== "completed").length : 1;
+        // One POST per line that is not already this line's audio on disk -
+        // a changed line or a lost file counts, a matching line does not.
+        const rows = await prisma.dialogueLine.findMany({ where: { sceneId: scene.id } });
+        const existing = await existingVoiceLines({ ...scene, dialogueLines: rows });
+        counts.voicePosts += existing.lines.length > 0 ? existing.lines.filter((l) => l.state !== "DONE").length : 1;
       }
       sceneLines.push({
         sceneNumber: row.sceneNumber,

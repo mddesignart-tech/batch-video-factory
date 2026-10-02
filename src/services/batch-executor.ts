@@ -692,6 +692,9 @@ async function approveAndRunLocked(opts: Parameters<typeof approveAndRun>[0]): P
   const run = startRun(opts.batchId, {
     resume: false,
     onlyProjectIds: scoped ? (check.runnableProjectIds ?? []) : undefined,
+    // The preflight the person just approved priced every voice to buy,
+    // including one whose file was lost.
+    rebuyMissingVoice: true,
   });
   return { preflight: check, run: opts.wait ? await run : undefined };
 }
@@ -720,7 +723,7 @@ export { isRunning } from "@/services/run-registry";
 /** Start (or return) the run for a batch. The UI does not await it. */
 export function startRun(
   batchId: string,
-  opts: { resume: boolean; onlyProjectIds?: string[] },
+  opts: { resume: boolean; onlyProjectIds?: string[]; rebuyMissingVoice?: boolean },
 ): Promise<RunSummary> {
   const existing = currentRun<RunSummary>(batchId);
   if (existing) return existing;
@@ -818,6 +821,8 @@ async function runScene(
   batchId: string,
   ceilings: Ceilings,
   progress?: { scene: number; of: number; paidSlots: number },
+  /** The person saw the voice cost and approved it (see generateSceneVoice). */
+  allowRebuyMissingVoice = false,
 ): Promise<void> {
   // Each media step may send a paid request: MAX CONCURRENT PAID REQUESTS
   // bounds how many run at once across the app. The gates inside are unchanged.
@@ -836,7 +841,7 @@ async function runScene(
   // gate (2c) refuses any other model at the POST itself (QĐ-111).
   await step("Clip", () => generateSceneVideo(sceneId));
   await assertHeadroom(projectId, batchId, ceilings, "sau clip");
-  await step("Giọng", () => generateSceneVoice(sceneId));
+  await step("Giọng", () => generateSceneVoice(sceneId, { allowRebuyMissing: allowRebuyMissingVoice }));
 
   const done = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
   if (done.status !== "completed" || done.errorMessage !== null) {
@@ -872,7 +877,11 @@ export async function executeScene(sceneId: string): Promise<void> {
 }
 
 /** One asset of one scene (the "regenerate" buttons), with the same ceilings. */
-export async function executeSceneAsset(sceneId: string, kind: "image" | "video" | "voice"): Promise<unknown> {
+export async function executeSceneAsset(
+  sceneId: string,
+  kind: "image" | "video" | "voice",
+  opts: { allowRebuyMissingVoice?: boolean } = {},
+): Promise<unknown> {
   const scene = await prisma.scene.findUniqueOrThrow({
     where: { id: sceneId },
     include: { project: { select: { id: true, batchId: true, maxBudget: true } } },
@@ -887,7 +896,7 @@ export async function executeSceneAsset(sceneId: string, kind: "image" | "video"
   await assertHeadroom(project.id, project.batchId ?? "", ceilings, `cảnh ${scene.sceneNumber}`);
   if (kind === "image") return generateSceneImage(sceneId);
   if (kind === "video") return generateSceneVideo(sceneId);
-  return generateSceneVoice(sceneId);
+  return generateSceneVoice(sceneId, { allowRebuyMissing: opts.allowRebuyMissingVoice === true });
 }
 
 /**
@@ -922,6 +931,12 @@ export async function runBatch(
     onlyProjectIds?: string[];
     /** Run under a video lock the caller already holds (per-video TIẾP TỤC, QĐ-110). */
     lockOwner?: string;
+    /**
+     * The person approved a plan that priced the voices to buy (preflight
+     * approval, confirmed TIẾP TỤC). Without it a voice whose paid file was
+     * lost stops as VOICE_MISSING_LOCAL_FILE instead of being bought again.
+     */
+    rebuyMissingVoice?: boolean;
   },
 ): Promise<RunSummary> {
   const auth = await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId } });
@@ -1112,7 +1127,7 @@ export async function runBatch(
             scene: scene.sceneNumber,
             of: scenes.length,
             paidSlots: settings.maxConcurrentPaidRequests,
-          });
+          }, opts.rebuyMissingVoice === true);
         } catch (err) {
           stopped = err instanceof Error ? err.message : String(err);
           await prisma.scene.update({
@@ -1314,7 +1329,7 @@ export async function extendApproval(opts: {
       where: { id: { in: added }, status: "needs_review" },
       data: { status: "script_ready", errorMessage: null },
     });
-    const run = startRun(opts.batchId, { resume: true, onlyProjectIds: added });
+    const run = startRun(opts.batchId, { resume: true, onlyProjectIds: added, rebuyMissingVoice: true });
     return { preflight: check, added, run: opts.wait ? await run : undefined };
   } finally {
     unlockAction(actionKey);

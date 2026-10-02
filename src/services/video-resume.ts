@@ -444,7 +444,13 @@ export async function continueVideo(
         `việc tại máy [${plan.localWorkRequired.join(", ")}], dự toán tăng thêm $${(plan.estimatedIncrementalCost ?? 0).toFixed(6)}.`,
     });
     // The run takes over THIS lock (same owner) and releases it when done.
-    const run = runBatch(plan.batchId, { resume: true, onlyProjectIds: [projectId], lockOwner: owner }).finally(() =>
+    const run = runBatch(plan.batchId, {
+      resume: true,
+      onlyProjectIds: [projectId],
+      lockOwner: owner,
+      // Only past a confirmation that priced the voices to buy.
+      rebuyMissingVoice: plan.paidRequestsRequired.voice > 0 && opts.confirmPaid === true,
+    }).finally(() =>
       unlockVideo(projectId, owner),
     );
     handedOff = true;
@@ -588,7 +594,12 @@ export async function continueAllEligible(
   // Each video is locked for this run; one already taken is left to its owner.
   const owner = `continue-all:${batchId}:${Date.now().toString(36)}`;
   const mine = runnable.filter((p) => tryLockVideo(p.videoId, owner)).map((p) => p.videoId);
-  const run = runBatch(batchId, { resume: true, onlyProjectIds: mine, lockOwner: owner }).finally(() => {
+  const run = runBatch(batchId, {
+    resume: true,
+    onlyProjectIds: mine,
+    lockOwner: owner,
+    rebuyMissingVoice: paid > 0 && opts.confirmPaid === true,
+  }).finally(() => {
     for (const id of mine) unlockVideo(id, owner);
   });
   if (!opts.wait) {

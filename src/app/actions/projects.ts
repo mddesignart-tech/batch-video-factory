@@ -15,6 +15,8 @@ import {
   startMediaGeneration,
 } from "@/services/project-service";
 import type { ActionResult } from "./idioms";
+import { makeSceneVoice, sceneVoiceStatus, type SceneVoiceResult } from "@/services/scene-voice";
+import type { SceneVoicePlan } from "@/services/generation";
 
 /**
  * Project and storyboard actions.
@@ -282,6 +284,15 @@ export async function regenerateSceneAsset(
     };
   }
 
+  // Voice never goes through the queue blind: the same words in the same voice
+  // are the same audio (reused, $0), and anything to buy is shown with its
+  // price first. retryCount is not touched - it is not part of a voice's key.
+  if (kind === "voice") {
+    const r = await makeSceneVoice(sceneId);
+    revalidatePath(`/projects/${scene.projectId}`);
+    return { ok: r.status === "DONE", message: r.message };
+  }
+
   await prisma.scene.update({
     where: { id: sceneId },
     data: { retryCount: { increment: 1 }, errorMessage: null },
@@ -314,4 +325,31 @@ export async function regenerateSceneAsset(
     ok: true,
     message: `Đã thêm job tạo lại ${labels[kind]} cho cảnh ${scene.sceneNumber}.`,
   };
+}
+
+/** Voice state of one scene, line by line. Read-only: never a paid call. */
+export async function getSceneVoicePlan(sceneId: string): Promise<{ ok: boolean; message: string; plan?: SceneVoicePlan }> {
+  try {
+    return { ok: true, message: "", plan: await sceneVoiceStatus(sceneId) };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/**
+ * NGHE THỬ GIỌNG: make (or reuse) this scene's voice now. Paid lines are only
+ * sent with `confirmPaid` and the cost the person saw (`expectedCost`).
+ */
+export async function makeSceneVoiceAction(
+  sceneId: string,
+  opts: { confirmPaid?: boolean; expectedCost?: number } = {},
+): Promise<SceneVoiceResult> {
+  try {
+    const r = await makeSceneVoice(sceneId, opts);
+    const scene = await prisma.scene.findUnique({ where: { id: sceneId }, select: { projectId: true } });
+    if (scene) revalidatePath(`/projects/${scene.projectId}`);
+    return r;
+  } catch (err) {
+    return { status: "FAILED", message: errorMessage(err), plan: null, postsMade: 0 };
+  }
 }

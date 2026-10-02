@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Ban, Check, Image as ImageIcon, Mic, Video } from "lucide-react";
 import { ImageReview, type ImageModelChoice } from "./image-review";
 import { SceneImagePanel } from "./scene-image-panel";
+import { SceneVoicePanel } from "./scene-voice-panel";
 import {
   Badge,
   Card,
@@ -359,6 +360,10 @@ export function Storyboard({
               hasClip={Boolean(selected.videoPath)}
               onDone={setResult}
             />
+            <SceneVoicePanel
+              sceneId={selected.id}
+              dialogueKey={`${selected.dialogue} ${selected.narration}`}
+            />
             <div className="mb-3 flex flex-wrap gap-1.5">
               <ActionButton
                 size="sm"
@@ -377,15 +382,6 @@ export function Storyboard({
               >
                 <Video className="h-3 w-3" />
                 Tạo lại video
-              </ActionButton>
-              <ActionButton
-                size="sm"
-                variant="outline"
-                action={() => regenerateSceneAsset(selected.id, "voice")}
-                onDone={setResult}
-              >
-                <Mic className="h-3 w-3" />
-                Tạo lại giọng
               </ActionButton>
               <ActionButton
                 size="sm"

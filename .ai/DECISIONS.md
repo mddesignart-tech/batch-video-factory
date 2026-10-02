@@ -3488,3 +3488,39 @@ không bị sửa, không commit. WAL vẫn là quyết định riêng.
 "docs: complete v1.2 user guide and release documentation"; GitHub Release "Batch Video Factory V1.2.0 —
 Daily Production Release" tạo qua giao diện web (máy không có `gh`, như QĐ-092), nội dung từ
 `RELEASE_NOTES_V1.2.md`. Đây là baseline V1.2. Không bắt đầu V1.3.
+
+## QĐ-117 — Voice preview / voice reuse: giọng tạo MỘT lần (2026-10-02, $0, không POST trả phí)
+
+Không phải V1.3, không đổi routing ảnh/video. Đọc code trước: engine reuse giọng (khoá `voiceReuseKey`, khoá
+tạo theo reuse key, dòng `DialogueLine` + `Asset` audio) đã có; render chỉ đọc file (không gọi TTS). Sửa đúng
+các chỗ có bằng chứng sai:
+
+1. **Ước tính coi giọng cũ là "có sẵn" khi lời thoại / giọng đã đổi.** `hasExistingVoice` chỉ xét
+   "completed + file còn" → sửa một từ hoặc đổi giọng nhân vật vẫn báo REUSE $0, TIẾP TỤC không hỏi xác nhận
+   nhưng lúc chạy lại mua TTS. Nay dùng `existingVoiceLines` (lời, voiceId, instructions, speed, model ghim
+   phải khớp, file trên đĩa). Preflight đếm `voicePosts` theo cùng quy tắc (file mất / câu đổi đều tính).
+2. **File giọng đã trả tiền bị mất → mua lại âm thầm** ở "Chạy tiếp" trang lô, job hàng đợi, nút tạo lại.
+   Nay `generateSceneVoice` dừng `VOICE_MISSING_LOCAL_FILE`; chỉ mua lại khi người dùng đã thấy giá:
+   DUYỆT & CHẠY / DUYỆT THÊM (preflight), TIẾP TỤC đã xác nhận, hoặc "Xác nhận tạo giọng" ở Storyboard
+   (cờ `rebuyMissingVoice` / `allowRebuyMissing`).
+3. **Model TTS bị tắt / ngừng dùng chặn cả giọng đã có** (router chạy trước khi xét câu đã xong; ở chế độ
+   router còn có thể chọn model khác rồi mua lại). Nay câu đã xong được trả lại TRƯỚC khi route, xét theo model
+   đã ghi trên dòng. Câu MỚI mà model không còn dùng được: `MODEL_UNAVAILABLE` / `MODEL_DEPRECATED` kèm danh
+   sách model thay thế; đổi model ở trang Nhân vật, giá mới hiện trước khi tạo. Model TTS không hard-code trong
+   workflow (chỉ seed + gợi ý datalist).
+4. **Không có nghe thử ở cấp cảnh; "Tạo lại giọng" xếp job không báo giá.** Thêm panel VOICE trong Storyboard
+   (`SceneVoicePanel`): trạng thái từng câu (ĐÃ TẠO / REUSE / CẦN TẠO / MISSING / INVALID), ▶ Nghe, model,
+   thời lượng, đã trả, chạy lại; "NGHE THỬ GIỌNG" chạy chính `generateSceneVoice` (lưu Asset, lần chạy sau
+   REUSE $0), hỏi giá trước mọi POST, khoá theo cảnh chống double-click (ALREADY_RUNNING), PLAN_CHANGED nếu giá
+   đổi. `regenerateSceneAsset("voice")` đi cùng đường này (không tăng retryCount, không xếp job mù).
+5. **Nghe thử ở trang Nhân vật** (câu mẫu, không gắn cảnh): cùng câu + cùng giọng → phát lại bản cũ $0
+   (chỉ mục `data/voice-preview/index.json` theo reuse key, khoá chống bấm đúp); Mock Mode ghi sổ là `mock`.
+   Bản này không thành Asset của cảnh (Asset bắt buộc có project) — muốn giọng dùng lại khi chạy thì dùng
+   NGHE THỬ GIỌNG ở Storyboard.
+6. Dòng thoại thừa khi lời thoại bị rút ngắn được xoá (chỉ dòng, Asset + sổ giữ nguyên) để render không phát
+   câu cũ.
+
+Test mới `tests/voice-reuse.test.ts` (15 test, mock): nghe thử → chạy = 1 POST/câu; TIẾP TỤC, render lại, chạy
+lại toàn project, đổi ảnh/prompt/camera/phụ đề = 0; sửa một từ = 1; đổi giọng = 1/cảnh; double-click = 1;
+hai worker = 1; file mất không tự mua (chỉ khi xác nhận); tắt mọi model giọng → giọng cũ vẫn REUSE + render.
+"POST" đếm theo dòng sổ chi (mua lại cùng idempotency key cập nhật lại cùng dòng ProviderJob).
