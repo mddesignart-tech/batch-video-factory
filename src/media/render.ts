@@ -1,3 +1,4 @@
+import { splitByText, usesAuthorSubtitle } from "@/domain/scene-subtitles";
 import { effectiveFit, type FitMode } from "@/domain/platform-profile";
 import fs from "node:fs";
 import path from "node:path";
@@ -117,6 +118,12 @@ export interface RenderScene {
   maxDuration?: number | null;
   /** How the scene was planned to move; decides the visual floor. */
   motionSource?: string | null;
+  /**
+   * The scene's spoken lines, in order - the SAME list its voice was made from
+   * (QĐ-122). With two or more, every line captions itself; the single
+   * `subtitle` field only stands in for a one-line scene.
+   */
+  spokenLines?: string[];
 }
 
 export interface RenderRequest {
@@ -656,7 +663,9 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
             // three speakers, so it cannot represent them; each line then
             // captions itself, which is also what a learner needs to read
             // along with.
-            if (audio.timeline.entries.length === 1 && scene.subtitle.trim().length > 0) {
+            // Only for a ONE-line scene: with several lines and one of them
+            // voiced so far, the author's subtitle belongs to another line.
+            if (audio.timeline.entries.length === 1 && usesAuthorSubtitle(scene.spokenLines?.length ?? 1, scene.subtitle)) {
               const only = audio.timeline.entries[0];
               return {
                 ...audio.timeline,
@@ -670,13 +679,26 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
           // A legacy scene inside an otherwise modern project still needs its
           // slot on the clock, with its caption across the whole scene.
           const length = sceneDurations[i] ?? scene.duration;
+          // Several speakers and no audio yet: each line in order, never only
+          // the stored subtitle (which holds one of them).
+          if ((scene.spokenLines?.length ?? 0) >= 2) {
+            return { entries: splitByText(scene.spokenLines!, 0, length), sceneDurationSec: length };
+          }
           return {
             entries: [{ startSec: 0, endSec: length, text: scene.subtitle }],
             sceneDurationSec: length,
           };
         }),
       )
-    : buildCues(usable.map((scene, i) => ({ ...scene, duration: sceneDurations[i] ?? scene.duration })));
+    : buildCues(
+        usable.flatMap((scene, i) => {
+          const duration = sceneDurations[i] ?? scene.duration;
+          // A multi-speaker scene is captioned line by line, in order, over
+          // its own duration - the same slot on the clock as before.
+          if ((scene.spokenLines?.length ?? 0) < 2) return [{ ...scene, duration }];
+          return splitByText(scene.spokenLines!, 0, duration).map((e) => ({ duration: e.endSec - e.startSec, subtitle: e.text }));
+        }),
+      );
 
   const srt = buildSRT(cues);
   const ass = buildASS(cues, {

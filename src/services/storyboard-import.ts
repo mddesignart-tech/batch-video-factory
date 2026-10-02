@@ -1047,11 +1047,16 @@ export async function materialiseImport(
           // empty list therefore does not mean "narrate anonymously", it means
           // the narration is silently dropped, and a scene that had words in it
           // renders mute.
+          // Everyone the dialogue NAMES speaks, in order of appearance - not just
+          // the scene's focus character (QĐ-122): with only the focus character
+          // allowed, "Max: … Leo: …" lost a speaker, because the parser keeps a
+          // label of someone not speaking as plain text.
           speakingCharactersJson: JSON.stringify(
             scene.dialogue.trim().length > 0 || scene.narration.trim().length > 0
-              ? scene.characterId !== null
-                ? [castByStoryboardId.get(scene.characterId)].filter(Boolean)
-                : castNames.slice(0, 1)
+              ? labelledSpeakers(scene.dialogue, castNames) ??
+                  (scene.characterId !== null
+                    ? [castByStoryboardId.get(scene.characterId)].filter(Boolean)
+                    : castNames.slice(0, 1))
               : [],
           ),
           complexity: resolved.complexity,
@@ -1114,4 +1119,18 @@ export async function materialiseImport(
   });
 
   return { batchId: batch.id, projects, copiedImages, reusedCharacterImages, sceneImages, skipped };
+}
+
+/**
+ * The cast members a dialogue names with a "Name:" label, in order of first
+ * appearance; null when it names none (the caller keeps its old rule).
+ */
+function labelledSpeakers(dialogue: string, castNames: string[]): string[] | null {
+  const byLower = new Map(castNames.map((n) => [n.toLowerCase(), n]));
+  const out: string[] = [];
+  for (const m of dialogue.matchAll(/([A-Z][A-Za-z '-]{0,19}):\s*/g)) {
+    const name = byLower.get(m[1]!.trim().toLowerCase());
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out.length > 0 ? out : null;
 }

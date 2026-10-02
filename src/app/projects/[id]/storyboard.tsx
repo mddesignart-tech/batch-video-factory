@@ -8,6 +8,8 @@ import { SceneVoicePanel } from "./scene-voice-panel";
 import { VideoSelectionPanel } from "./video-selection-panel";
 import { isNeedsSelection, needsSelectionMessage } from "@/domain/video-selection";
 import { aspectOf, effectiveFit, type FitMode } from "@/domain/platform-profile";
+import { parseDialogueLines } from "@/domain/dialogue-lines";
+import { usesAuthorSubtitle } from "@/domain/scene-subtitles";
 import { budgetProblem } from "@/domain/budget-message";
 import { BudgetProblemBox } from "@/components/video-budget";
 import {
@@ -163,6 +165,12 @@ export function Storyboard({
   if (!selected) return null;
 
   const routing = routingByScene[selected.sceneNumber];
+  // Subtitles come from the voice's own ordered lines (QĐ-122): with two or
+  // more speakers every line shows, not the one line the stored field holds.
+  const voiceLines = parseDialogueLines(selected.dialogue, selected.narration, selected.speakingCharacters);
+  const subtitleText = usesAuthorSubtitle(voiceLines.length, selected.subtitle)
+    ? selected.subtitle
+    : voiceLines.map((l) => (l.speaker ? `${l.speaker}: ${l.text}` : l.text)).join(" / ");
   // The preview is the final video's shape: vertical, landscape or square.
   const frameCss = `${frame?.width ?? 1080} / ${frame?.height ?? 1920}`;
   // A scene no video model may run automatically: a choice, shown as one (QĐ-120).
@@ -308,7 +316,7 @@ export function Storyboard({
 
             <div className="mt-4 space-y-2 text-xs">
               <PreviewRow label="Lời thoại" value={selected.dialogue} />
-              <PreviewRow label="Phụ đề" value={selected.subtitle} />
+              <PreviewRow label="Phụ đề" value={subtitleText} />
               <PreviewRow label="Hình ảnh" value={selected.visualDescription} />
               <PreviewRow label="Hành động" value={selected.characterAction} />
               <PreviewRow label="Máy quay" value={selected.camera} />

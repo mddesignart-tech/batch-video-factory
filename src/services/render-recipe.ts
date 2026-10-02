@@ -71,6 +71,9 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
       minDuration: s.minDuration ?? null,
       maxDuration: s.maxDuration ?? null,
       motionSource: s.motionSource ?? null,
+      // Multi-speaker captions (QĐ-122); absent for a one-line scene, so an
+      // unchanged single-speaker video keeps its recipe.
+      spoken: s.spokenLines && s.spokenLines.length >= 2 ? s.spokenLines : undefined,
     })),
   };
 }

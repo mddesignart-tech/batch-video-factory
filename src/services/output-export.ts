@@ -1,3 +1,4 @@
+import { sceneSubtitleText } from "@/domain/scene-subtitles";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -226,7 +227,8 @@ export async function exportProjectOutput(projectId: string): Promise<string> {
         duration: s.finalDuration ?? s.duration,
         motion: s.motionSource,
         image: s.imageSource,
-        subtitle: s.subtitle,
+        // Every speaker's line, in order - not the one line the stored field holds (QĐ-122).
+        subtitle: sceneSubtitleText(s),
       })),
       sceneCount: project.scenes.length,
       subtitleFile: wantSrt ? "subtitles.srt" : null,

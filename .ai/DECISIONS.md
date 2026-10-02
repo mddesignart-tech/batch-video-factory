@@ -3636,3 +3636,25 @@ méo); phụ đề cách đáy 20% cho mọi khung; router video không xét hư
 - Ảnh AI: đã có — kích thước theo khung tạo, provider chọn cỡ gần nhất (gpt-image-1: 1024x1536 / 1536x1024 / 1024x1024).
 
 Không có tích hợp đăng bài. Test: `tests/platform-profile.test.ts` (10 test).
+
+## QĐ-122 — Cảnh nhiều người nói: phụ đề lấy từ chính danh sách câu của giọng (2026-10-02, $0, không POST trả phí)
+
+Lỗi thật: "Piece of Cake" cảnh 4, lời thoại `Max: "So easy!" Leo: "No, Max, it's an idiom."`, ô Phụ đề chỉ hiện
+`Leo: No, Max, it's an idiom.`. Kiểm tra: parser ra đúng 2 câu Max → Leo; giọng đã tạo đúng 2 file, đúng thứ tự, đúng
+giọng từng người. Sai ở trường `scene.subtitle` (kịch bản AI ghi MỘT câu) và những chỗ dùng nó thay cho phụ đề:
+
+1. Ô "Phụ đề" Storyboard và `metadata.json` hiện nguyên trường này.
+2. Render: cảnh chưa có giọng / dự án kiểu cũ lấy nguyên `scene.subtitle` cho cả cảnh → mất câu đầu.
+3. Render: cảnh nhiều câu mà mới có giọng 1 câu → câu đó bị thay bằng `scene.subtitle` của người khác.
+4. Nhập storyboard: danh sách người nói chỉ gồm nhân vật trọng tâm / người đầu cast → parser giữ nhãn của người còn lại
+   như chữ thường → mất người nói (DB thật: 0 cảnh bị, 5 cảnh nhiều câu có trường phụ đề một câu).
+
+Sửa (`domain/scene-subtitles.ts`): phụ đề = `parseDialogueLines` với đúng tham số giọng dùng (dialogue, narration,
+speaking). Trường `subtitle` chỉ thay phụ đề khi cảnh có ĐÚNG MỘT câu (giữ quyết định cũ: bản dễ đọc của tác giả). Render
+nhận `spokenLines` từ handler; cảnh ≥2 câu chưa có giọng chia thời lượng cảnh theo độ dài từng câu, theo thứ tự; công thức
+render thêm `spoken` chỉ khi ≥2 câu (cảnh một câu giữ nguyên công thức). Storyboard / metadata hiện "Max: … / Leo: …".
+Nhập storyboard: người nói = mọi nhân vật trong cast có nhãn "Tên:" trong lời thoại, theo thứ tự xuất hiện (không có nhãn
+→ quy tắc cũ); người nói cũng được tính là có mặt trong khung (quy tắc sẵn có của `sceneCharacters`) — chỉ áp cho lần
+nhập mới. Giọng vẫn theo từng câu (khoá reuse theo câu): sửa một câu chỉ tạo lại đúng câu đó.
+
+Test: `tests/multi-speaker-dialogue.test.ts` (4 test; 2 test đỏ trên code cũ đúng chỗ).

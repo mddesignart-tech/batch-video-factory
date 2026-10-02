@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { Job } from "@prisma/client";
+import { spokenLines } from "@/domain/scene-subtitles";
 import { isNeedsSelection, NEEDS_SELECTION_STATUS, stoppedSceneStatus } from "@/domain/video-selection";
 import type { JobType } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
@@ -206,6 +207,8 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
       minDuration: s.minDuration,
       maxDuration: s.maxDuration,
       motionSource: s.motionSource,
+      // The voice's own ordered lines: subtitles never re-parse (QĐ-122).
+      spokenLines: spokenLines(s).map((l) => l.text),
     })),
   };
 
