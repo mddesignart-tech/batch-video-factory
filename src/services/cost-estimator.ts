@@ -277,6 +277,8 @@ export interface EstimateInput {
   needs1080p?: boolean;
   /** Frame clips are made for (QĐ-121); a model of the other orientation is not capable. */
   frameAspect?: string;
+  /** Multi-content engine: lets a model's content-specific benchmark score count. */
+  contentType?: string | null;
   aspectWidth?: number;
   /**
    * Each vendor's own wallet, in dollars. The environment half of the gate.
@@ -389,6 +391,7 @@ export function estimateProject(input: EstimateInput): ProjectEstimate {
       budgetRemaining: remaining,
       needs1080p: input.needs1080p ?? false,
       frameAspect: input.frameAspect,
+      contentType: input.contentType,
       providerBudgets: input.providerBudgets,
       perVideoCapRemaining: input.perVideoCapRemaining,
       paidQa: input.paidQa === true,
@@ -478,6 +481,7 @@ export function planScene(opts: {
   budgetRemaining: number;
   needs1080p: boolean;
   frameAspect?: string;
+  contentType?: string | null;
   providerBudgets?: Record<string, number | null>;
   perVideoCapRemaining?: number | null;
   /** Paid AI QA switched on (QĐ-113). Off: scoring is priced as optional only. */
@@ -491,6 +495,7 @@ export function planScene(opts: {
     availableProviders,
     needs1080p,
     frameAspect,
+    contentType,
   } = opts;
 
   // Decide where the movement comes from FIRST. Everything below depends on it:
@@ -599,6 +604,7 @@ export function planScene(opts: {
           consistencyRequired: type === "image" || type === "video",
           needs1080p: type === "video" ? needs1080p : false,
           frameAspect: type === "video" ? frameAspect : undefined,
+          contentType: type === "video" ? contentType : undefined,
           needsReferenceImage: false,
           budgetRemaining: Number.MAX_SAFE_INTEGER,
           usage,
@@ -630,6 +636,7 @@ export function planScene(opts: {
         consistencyRequired: type === "image" || type === "video",
         needs1080p: type === "video" ? needs1080p : false,
         frameAspect: type === "video" ? frameAspect : undefined,
+        contentType: type === "video" ? contentType : undefined,
         needsReferenceImage: type === "video" ? wantsKeyframe : false,
         budgetRemaining: remaining,
         usage,

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { VIDEO_ADAPTERS } from "./video-adapters";
 import { splitModelSize } from "@/domain/video-duration";
 import {
   LOCAL_PROVIDERS,
@@ -20,8 +21,8 @@ import {
  * "free" right before the most expensive request the system can make.
  */
 
-/** Video providers this build speaks to. */
-export const VIDEO_PROVIDERS = new Set(["openai", "google", "runway"]);
+/** Video providers this build speaks to: exactly the registered adapters. */
+export const VIDEO_PROVIDERS = new Set(Object.keys(VIDEO_ADAPTERS));
 
 /** One HTTP call's ceiling. Whole-job waiting is the caller's concern. */
 export const DEFAULT_VIDEO_TIMEOUT_MS = 120_000;

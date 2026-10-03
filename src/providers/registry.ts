@@ -152,25 +152,13 @@ export async function getVideoProvider(
 ): Promise<VideoProvider> {
   if (isMockMode() || name === "mock") return mockVideo;
 
-  const { VIDEO_PROVIDERS, buildVideoConfig } = await import("./video-config");
-  if (!VIDEO_PROVIDERS.has(name)) notImplemented(name, "video");
-
-  const config = await buildVideoConfig(name, model);
+  const { buildVideoConfig } = await import("./video-config");
+  const { VIDEO_ADAPTERS, hasVideoAdapter } = await import("./video-adapters");
+  if (!hasVideoAdapter(name)) notImplemented(name, "video");
 
   // Each vendor speaks a different dialect - multipart vs JSON data URI vs
-  // long-running operation - so they get one adapter each rather than a single
-  // class full of branches.
-  if (name === "runway") {
-    const { RunwayVideoProvider } = await import("./runway/runway-video-provider");
-    return new RunwayVideoProvider(config);
-  }
-  if (name === "google") {
-    const { GoogleVideoProvider } = await import("./google/google-video-provider");
-    return new GoogleVideoProvider(config);
-  }
-
-  const { OpenAIVideoProvider } = await import("./openai/openai-video-provider");
-  return new OpenAIVideoProvider(config);
+  // long-running operation - so each has its own adapter (providers/video-adapters).
+  return VIDEO_ADAPTERS[name]!(await buildVideoConfig(name, model));
 }
 
 /**

@@ -1,3 +1,4 @@
+import { contentQuality, profileAspectMismatch, profileDurationMismatch } from "@/domain/video-model-profile";
 import { orientationOf, viShape } from "@/domain/platform-profile";
 import type { ModelRegistry } from "@prisma/client";
 import type {
@@ -47,6 +48,12 @@ export interface RouteContext {
    * have to be stretched or cut down to a sliver. Undefined = not checked.
    */
   frameAspect?: string;
+  /**
+   * Multi-content engine: the project's content type. Only read when a model's
+   * capability profile carries a benchmark score for that kind of content
+   * (domain/video-model-profile); otherwise it changes nothing.
+   */
+  contentType?: string | null;
   needs1080p: boolean;
   needsReferenceImage: boolean;
   /**
@@ -223,8 +230,10 @@ export function explainIncapable(model: ModelRegistry, ctx: RouteContext): strin
     return `nhà cung cấp "${model.provider}" chưa sẵn sàng (thiếu key, đang tắt, hoặc bị giới hạn tần suất)`;
   }
   if (ctx.type === "video") {
-    const shape = videoShapeMismatch(model, ctx);
+    const shape = videoShapeMismatch(model, ctx) ?? profileAspectMismatch(model, ctx.frameAspect);
     if (shape) return shape;
+    const length = profileDurationMismatch(model, ctx.durationSeconds);
+    if (length) return length;
     if (model.maxDuration > 0 && ctx.durationSeconds > model.maxDuration) {
       return `cảnh dài ${ctx.durationSeconds}s nhưng model chỉ hỗ trợ tối đa ${model.maxDuration}s`;
     }
@@ -277,6 +286,10 @@ export function isCapable(model: ModelRegistry, ctx: RouteContext): boolean {
 
   if (ctx.type === "video") {
     if (videoShapeMismatch(model, ctx)) return false;
+    // A capability profile can only NARROW what a model is allowed to do, and
+    // only when it states a list. No profile = the checks below, as before.
+    if (profileAspectMismatch(model, ctx.frameAspect)) return false;
+    if (profileDurationMismatch(model, ctx.durationSeconds)) return false;
     if (model.maxDuration > 0 && ctx.durationSeconds > model.maxDuration) {
       return false;
     }
@@ -365,7 +378,10 @@ function toCandidate(model: ModelRegistry, ctx: RouteContext): RouteCandidate {
     modelId: model.modelId,
     displayName: model.displayName,
     estimatedCost,
-    quality: qualityIndex(model),
+    // A benchmark score for THIS kind of content (product fidelity for a
+    // review, animals for an animal video) outranks the generic index - only
+    // when the profile has one.
+    quality: contentQuality(model, ctx.contentType) ?? qualityIndex(model),
     value: valueIndex(model, estimatedCost),
     lowAuto: model.lifecycle === "LOW_AUTO",
   };

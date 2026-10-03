@@ -1,3 +1,4 @@
+import { storedProfile } from "@/domain/video-model-profile";
 import fs from "node:fs";
 import path from "node:path";
 import type { Asset, ModelRegistry, Project, Scene } from "@prisma/client";
@@ -221,6 +222,7 @@ function routeFor(
     needs1080p: type === "video" && project.qualityMode === "QUALITY",
     // The frame clips are MADE for (QĐ-121): a model of the other orientation is not capable.
     frameAspect: type === "video" ? project.aspectRatio : undefined,
+    contentType: type === "video" ? project.contentType : undefined,
     needsReferenceImage:
       type === "video" &&
       shouldGenerateKeyframe(
@@ -1767,6 +1769,8 @@ export interface VideoModelChoice {
   notAutoReason: string | null;
   /** Why it cannot be pinned here, when not selectable. */
   unavailableReason: string | null;
+  /** Marked "Mặc định" by the operator (capability profile): offered first. */
+  isDefault: boolean;
 }
 
 /**
@@ -1827,6 +1831,7 @@ export async function videoModelChoices(sceneId: string): Promise<{
       estimatedCost,
       expectedWait: m.provider === "mock" ? "vài giây (giả lập)" : m.speedRating >= 8 ? "~10–40 giây" : m.speedRating >= 5 ? "~30–120 giây" : "~2–5 phút",
       qualityNote: [
+        storedProfile(m.capabilityProfileJson)?.isDefault ? "Mặc định" : null,
         m.verification === "BENCHMARK_VERIFIED" ? "Đã benchmark" : "Chưa benchmark",
         m.reliability === "DEGRADED" ? `từng lỗi khi chạy thật${m.reliabilityNote ? ` (${m.reliabilityNote})` : ""}` : null,
         m.notes || null,
@@ -1835,8 +1840,12 @@ export async function videoModelChoices(sceneId: string): Promise<{
         .join(" · "),
       notAutoReason,
       unavailableReason,
+      isDefault: storedProfile(m.capabilityProfileJson)?.isDefault === true,
     });
   }
+  // The operator's default first (stable otherwise). Offering it first is all
+  // "Mặc định" does - it is never bought without the person's confirmation.
+  choices.sort((a, b) => Number(b.isDefault && b.selectable) - Number(a.isDefault && a.selectable));
   return {
     sceneNumber: scene.sceneNumber,
     complexity: scene.complexity,

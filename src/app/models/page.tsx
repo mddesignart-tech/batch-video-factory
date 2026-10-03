@@ -13,6 +13,8 @@ import { prisma } from "@/lib/prisma";
 import { MODEL_TYPES } from "@/domain/enums";
 import { qualityIndex } from "@/services/pricing";
 import { ModelRow, NewModelButton } from "./model-forms";
+import { VideoAiAdmin } from "./video-ai-admin";
+import { listVideoModels } from "@/services/video-model-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +41,8 @@ export default async function ModelsPage() {
     orderBy: [{ type: "asc" }, { provider: "asc" }, { price: "asc" }],
   });
 
+  const videoRows = await listVideoModels();
+
   const providers = await prisma.providerConfig.findMany({
     select: { name: true, displayName: true },
     orderBy: { priority: "asc" },
@@ -63,6 +67,13 @@ export default async function ModelsPage() {
           sẽ báo sai.
         </CardContent>
       </Card>
+
+      <details className="mb-4">
+        <summary className="mb-2 cursor-pointer text-sm text-ink-300">
+          Video AI (Nâng cao) - nhà cung cấp, routing, benchmark
+        </summary>
+        <VideoAiAdmin rows={videoRows} />
+      </details>
 
       <div className="mb-4">
         <NewModelButton
