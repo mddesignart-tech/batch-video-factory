@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { COMPLEXITIES, SPEND_PRIORITIES } from "./enums";
+import { isNarrator } from "./scene-characters";
 
 /**
  * The contract every TextProvider must satisfy.
@@ -42,6 +43,15 @@ const BaseSceneSchema = z
     spendPriority: z.enum(SPEND_PRIORITIES).default("NORMAL"),
     /** The old single list. Accepted so an older model reply still parses. */
     characters: z.array(z.string()).optional(),
+    // ---- multi-content engine: optional, so every older script still parses ----
+    /** Template beat this scene plays ("hook", "feature", "cta"...). */
+    sceneRole: z.string().optional(),
+    /** Beat label shown in the script preview ("Điểm nổi bật 2"). */
+    beatLabel: z.string().optional(),
+    /** Router hint from the template. Never a purchase by itself. */
+    motionHint: z.enum(["LOCAL_MOTION", "VIDEO_AI", "AUTO"]).optional(),
+    /** Asset Library ids of the person's own pictures this scene should show. */
+    assetIds: z.array(z.string()).optional(),
   })
   .merge(CharacterListsSchema);
 
@@ -56,12 +66,13 @@ const BaseSceneSchema = z
  */
 export const SceneSchema = BaseSceneSchema.transform((scene) => {
   const legacy = scene.characters ?? [];
+  // The narrator speaks but is never drawn (see scene-characters.isNarrator).
   const present = dedupe([
     ...scene.charactersPresent,
     ...scene.speakingCharacters,
     ...scene.primaryCharacters,
     ...legacy,
-  ]);
+  ]).filter((name) => !isNarrator(name));
   const speaking = dedupe(
     scene.speakingCharacters.length > 0
       ? scene.speakingCharacters
@@ -70,7 +81,7 @@ export const SceneSchema = BaseSceneSchema.transform((scene) => {
         scene.dialogue.trim().length > 0
         ? legacy
         : [],
-  ).filter((name) => present.includes(name));
+  ).filter((name) => present.includes(name) || isNarrator(name));
 
   const primary = dedupe(
     scene.primaryCharacters.length > 0
@@ -112,12 +123,27 @@ export const ScriptSchema = z.object({
   setup: z.string().default(""),
   escalation: z.string().default(""),
   punchline: z.string().default(""),
-  meaning: z.string().min(1),
-  exampleSentence: z.string().min(1),
-  durationTarget: z.number().min(15).max(60),
-  scenes: z.array(SceneSchema).min(3).max(10),
+  // Required by the idiom writer, empty for a product review: both parse.
+  meaning: z.string().default(""),
+  exampleSentence: z.string().default(""),
+  durationTarget: z.number().min(5).max(180),
+  scenes: z.array(SceneSchema).min(3).max(30),
   closingCTA: z.string().default("Follow for more funny English!"),
   angleKey: z.string().default(""),
+  // ---- multi-content engine (all optional) ----
+  contentType: z.string().optional(),
+  templateId: z.string().optional(),
+  templateVersion: z.string().optional(),
+  language: z.string().optional(),
+  /**
+   * Facts the script states, with where each came from. An AI_GENERATED fact
+   * is never presented as a specification; the preview flags it for review.
+   */
+  facts: z
+    .array(z.object({ text: z.string(), origin: z.enum(["SOURCE_FACT", "USER_PROVIDED", "AI_GENERATED"]) }))
+    .optional(),
+  /** Factual content the writer produced on its own - a person should check it. */
+  needsFactReview: z.boolean().optional(),
 });
 export type ScriptDoc = z.infer<typeof ScriptSchema>;
 

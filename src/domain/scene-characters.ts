@@ -40,11 +40,13 @@ export function sceneCharacters(
   // Anyone who speaks or leads is necessarily visible. Repairing that here
   // rather than trusting the stored rows keeps a hand-edited or part-migrated
   // scene from quietly losing a reference image.
-  const merged = dedupe([...present, ...speaking, ...primary]);
+  // The NARRATOR is the one speaker who is never in frame: a voice, not a
+  // character to draw (multi-content engine). No legacy scene names it.
+  const merged = dedupe([...present, ...speaking, ...primary]).filter((n) => !isNarrator(n));
 
   return {
     present: merged,
-    speaking: dedupe(speaking).filter((n) => inList(merged, n)),
+    speaking: dedupe(speaking).filter((n) => isNarrator(n) || inList(merged, n)),
     primary: dedupe(primary).filter((n) => inList(merged, n)),
   };
 }
@@ -58,7 +60,18 @@ export function sceneCharacters(
  * primary, then speaking, then everyone else still in frame.
  */
 export function referencePriority(lists: SceneCharacterLists): string[] {
-  return dedupe([...lists.primary, ...lists.speaking, ...lists.present]);
+  return dedupe([...lists.primary, ...lists.speaking, ...lists.present]).filter((n) => !isNarrator(n));
+}
+
+/**
+ * The voice-only speaker of narration in a multi-content video. It has a
+ * Character row (so its voice is editable like anyone's) but is never drawn,
+ * never given a reference image and never counted as present.
+ */
+export const NARRATOR_NAME = "Narrator";
+
+export function isNarrator(name: string): boolean {
+  return name.trim().toLowerCase() === NARRATOR_NAME.toLowerCase();
 }
 
 /** Store the three lists on a scene row. */

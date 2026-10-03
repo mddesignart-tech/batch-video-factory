@@ -6,6 +6,7 @@ import {
   type SceneDoc,
 } from "@/domain/script";
 import type {
+  ContentScriptRequest,
   CostEstimate,
   ProviderUsage,
   ScriptRequest,
@@ -13,6 +14,7 @@ import type {
   YoutubeMeta,
 } from "@/providers/types";
 import { hashCode, sleep } from "@/lib/utils";
+import { writeMockContentScript } from "./mock-content-writer";
 
 /**
  * Mock script writer.
@@ -257,6 +259,14 @@ export class MockTextProvider implements TextProvider {
     // Validate our own output through exactly the same gate a real provider's
     // output goes through. A template bug should fail loudly, here, not later.
     return { script: ScriptSchema.parse(doc), usage: freeUsage(startedAt) };
+  }
+
+  async generateContentScript(
+    req: ContentScriptRequest,
+  ): Promise<{ script: ScriptDoc; usage: ProviderUsage }> {
+    const startedAt = Date.now();
+    await sleep(60);
+    return { script: writeMockContentScript(req), usage: freeUsage(startedAt) };
   }
 
   async scoreScript(

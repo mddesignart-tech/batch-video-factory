@@ -106,6 +106,55 @@ export interface ScriptRequest {
 }
 
 /**
+ * A script for any content type (multi-content engine). The structure comes
+ * from the template's planned beats; the provider fills them in. Real
+ * providers send `systemPrompt` (prompts/content-script.txt, rendered by the
+ * script engine); the mock writes a deterministic script from the same inputs.
+ */
+export interface ContentScriptRequest {
+  contentType: string;
+  templateId: string;
+  templateVersion: string;
+  templateName: string;
+  /** Language code (content-options LANGUAGES). */
+  language: string;
+  audience: string;
+  tone: string;
+  voiceMode: string;
+  bilingualMode?: string | null;
+  durationSeconds: number;
+  /** The planned beats, in order: role, label, purpose, seconds, motion hint. */
+  beats: {
+    role: string;
+    label: string;
+    purpose: string;
+    durationSeconds: number;
+    motion: "LOCAL_MOTION" | "VIDEO_AI" | "AUTO";
+    prefersUserAsset: boolean;
+  }[];
+  /** Product / brand / tool name the person typed (user provided). */
+  subjectName?: string;
+  /** The person's idea / prompt. May be empty when only text was pasted. */
+  idea: string;
+  /** Pasted text (TEXT source) - the writer must stay faithful to it. */
+  sourceText: string;
+  /** Facts with provenance (product data, contact details...). */
+  facts: { text: string; origin: "SOURCE_FACT" | "USER_PROVIDED" | "AI_GENERATED" }[];
+  /** Call to action the person typed; empty = none unless the template allows a soft one. */
+  cta: string;
+  /** The person's own pictures, already in the Asset Library. */
+  userAssets: { id: string; label: string }[];
+  characters: { name: string; personality: string; visualPrompt: string }[];
+  /** Voice-only speaker of narration. */
+  narrator: string;
+  stylePrompt: string;
+  /** Whether a factual template must flag what it adds on its own. */
+  factual: boolean;
+  model: string;
+  systemPrompt: string;
+}
+
+/**
  * What one provider call actually consumed.
  *
  * Every text call reports this so the cost ledger records what was billed
@@ -132,6 +181,10 @@ export interface TextProvider extends BaseProvider {
   estimateScriptCost(req: ScriptRequest): Promise<CostEstimate>;
   generateScript(
     req: ScriptRequest,
+  ): Promise<{ script: ScriptDoc; usage: ProviderUsage }>;
+  /** Multi-content engine: a script for any template, same ScriptDoc shape. */
+  generateContentScript(
+    req: ContentScriptRequest,
   ): Promise<{ script: ScriptDoc; usage: ProviderUsage }>;
   scoreScript(
     script: ScriptDoc,

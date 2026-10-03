@@ -1,4 +1,5 @@
 import { generationAspectFor, type OutputProfile } from "@/domain/platform-profile";
+import { needsScriptApproval } from "@/domain/content-legacy";
 import type { Project } from "@prisma/client";
 import type { QualityMode, RouterStrategy } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
@@ -165,6 +166,11 @@ export async function generateProjectScript(projectId: string): Promise<ScriptDo
     include: { idiom: true, stylePreset: true },
   });
   if (!project) throw new Error("Không tìm thấy dự án.");
+  // A multi-content project is written by its template, never by the idiom writer.
+  if (project.contentType) {
+    const { generateContentProjectScript } = await import("./content-service");
+    return generateContentProjectScript(projectId);
+  }
 
   const characters = await prisma.character.findMany({
     where: { enabled: true },
@@ -404,6 +410,7 @@ export async function previewProjectCost(
     // simply left behind when that was fixed.
     needs1080p: project.qualityMode === "QUALITY",
     frameAspect: project.aspectRatio,
+    contentType: project.contentType,
     // The environment half of the LOW_AUTO gate. Real wallets, so the preview
     // cannot promise a clip this account has no money for.
     providerBudgets: Object.fromEntries(wallets.map((w) => [w.provider, w.remainingUsd])),
@@ -530,6 +537,9 @@ export async function startMediaGeneration(
   if (!project) throw new Error("Không tìm thấy dự án.");
   if (project.scenes.length === 0) {
     throw new Error("Dự án chưa có kịch bản. Hãy tạo kịch bản trước.");
+  }
+  if (needsScriptApproval(project)) {
+    throw new Error("SCRIPT_NOT_APPROVED: hãy xem và bấm DUYỆT KỊCH BẢN trước khi tạo media.");
   }
 
   const preview = await previewProjectCost(projectId);

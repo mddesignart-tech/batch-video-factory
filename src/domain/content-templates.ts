@@ -198,7 +198,8 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
       },
     ],
     sceneRules: ["HOOK → literal situation → funny mistake → real meaning → example → recap."],
-    sources: ["IDIOM", "PROMPT"],
+    // The 133-idiom library and the original writer, unchanged.
+    sources: ["IDIOM", "STORYBOARD"],
     ideaPlaceholder: "Ví dụ: “Break a leg” cho người mới học",
   },
   {

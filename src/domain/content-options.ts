@@ -66,12 +66,12 @@ export interface AudienceOption {
 }
 
 export const AUDIENCES: readonly AudienceOption[] = [
-  { id: "TODDLER", label: "Trẻ nhỏ", avgSceneSeconds: 5, maxSentenceWords: 6, speechRate: 0.8, promptHint: "very young children: tiny sentences, very common words, one idea per scene, gentle and safe, big clear visuals" },
-  { id: "KIDS", label: "Thiếu nhi", avgSceneSeconds: 4.5, maxSentenceWords: 9, speechRate: 0.9, promptHint: "children: short sentences, simple words, playful, explain every new word, bright uncluttered visuals" },
+  { id: "TODDLER", label: "Trẻ nhỏ", avgSceneSeconds: 5.5, maxSentenceWords: 6, speechRate: 0.8, promptHint: "very young children: tiny sentences, very common words, one idea per scene, gentle and safe, big clear visuals" },
+  { id: "KIDS", label: "Thiếu nhi", avgSceneSeconds: 5, maxSentenceWords: 9, speechRate: 0.9, promptHint: "children: short sentences, simple words, playful, explain every new word, bright uncluttered visuals" },
   { id: "STUDENTS", label: "Học sinh", avgSceneSeconds: 4.5, maxSentenceWords: 12, speechRate: 1, promptHint: "school students: clear, friendly, concrete examples, one key point per scene" },
   { id: "BEGINNER", label: "Người mới bắt đầu", avgSceneSeconds: 5, maxSentenceWords: 12, speechRate: 0.95, promptHint: "beginners: no jargon, define terms, step by step" },
-  { id: "ADULTS", label: "Người lớn", avgSceneSeconds: 4, maxSentenceWords: 16, speechRate: 1, promptHint: "adults: natural, direct, respectful of their time" },
-  { id: "EXPERT", label: "Chuyên môn", avgSceneSeconds: 4, maxSentenceWords: 20, speechRate: 1.05, promptHint: "professionals: precise terms allowed, denser information, no oversimplification" },
+  { id: "ADULTS", label: "Người lớn", avgSceneSeconds: 4.5, maxSentenceWords: 16, speechRate: 1, promptHint: "adults: natural, direct, respectful of their time" },
+  { id: "EXPERT", label: "Chuyên môn", avgSceneSeconds: 4.5, maxSentenceWords: 20, speechRate: 1.05, promptHint: "professionals: precise terms allowed, denser information, no oversimplification" },
   { id: "GENERAL", label: "Chung", avgSceneSeconds: 4.5, maxSentenceWords: 14, speechRate: 1, promptHint: "a general audience: clear and engaging" },
 ];
 

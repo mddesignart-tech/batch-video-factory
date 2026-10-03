@@ -6,6 +6,7 @@ import {
   type ScriptScore,
 } from "@/domain/script";
 import type {
+  ContentScriptRequest,
   CostEstimate,
   ProviderUsage,
   ScriptRequest,
@@ -105,6 +106,41 @@ export class OpenAICompatibleTextProvider implements TextProvider {
     } catch (err) {
       // The call was billed even though its output is unusable. Attach the cost
       // so the caller records it rather than losing it.
+      throw new ProviderError(
+        err instanceof Error ? err.message : String(err),
+        this.config.providerName,
+        true,
+        "invalid_json",
+        usage,
+      );
+    }
+  }
+
+  /**
+   * Multi-content engine. Same repair-then-validate path as the idiom writer;
+   * the prompt (prompts/content-script.txt) is rendered by the script engine.
+   */
+  async generateContentScript(
+    req: ContentScriptRequest,
+  ): Promise<{ script: ScriptDoc; usage: ProviderUsage }> {
+    const result = await chatCompletion(this.config, {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You write scripts for short social videos of any kind. You follow the given " +
+            "structure and rules exactly and never invent facts. Reply with one valid JSON object and nothing else.",
+        },
+        { role: "user", content: req.systemPrompt },
+      ],
+      temperature: 0.7,
+      jsonMode: true,
+      purpose: "script",
+    });
+    const usage = this.usageOf(result);
+    try {
+      return { script: parseScript(result.content), usage };
+    } catch (err) {
       throw new ProviderError(
         err instanceof Error ? err.message : String(err),
         this.config.providerName,

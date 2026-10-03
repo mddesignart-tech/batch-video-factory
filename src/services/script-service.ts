@@ -281,170 +281,18 @@ export async function generateScript(
   };
 
   const started = Date.now();
-
-  /**
-   * The batch this script is being written FOR, if any.
-   *
-   * Writing a script is a paid call, and a cheap one - a fraction of a cent at
-   * Groq prices. It is still spending, and a batch ceiling that quietly excludes
-   * it is a ceiling that does not mean what it says: ten videos would leak ten
-   * text calls past a figure the operator was told was absolute.
-   *
-   * Resolved once, outside the closure, so a batch lookup does not run three
-   * times for the script, the score and the rewrite.
-   */
-  const project = opts.projectId
-    ? await prisma.project.findUnique({
-        where: { id: opts.projectId },
-        select: { batchId: true },
-      })
-    : null;
-  const batchAuth = await batchApprovalFor(project?.batchId);
-
-  /**
-   * One guarded, recorded text call.
-   *
-   * Everything a paid request needs wrapped around it lives here so no call
-   * site can forget a piece: the spend gate before, the ProviderJob and cost
-   * ledger entry after, and the token counts the provider reported.
-   */
-  const call = async <T extends { usage: ProviderUsage }>(
+  const ctx = await textCallContext({
+    provider: opts.provider,
+    model: opts.model,
+    projectId: opts.projectId,
+    subjectKey: opts.idiomId,
+    requestInfo: { idiom: opts.idiom },
+  });
+  const call = <T extends { usage: ProviderUsage }>(
     purpose: string,
     estimate: number,
     run: () => Promise<T>,
-  ): Promise<T> => {
-    await assertCanSpend({
-      provider: opts.provider,
-      model: opts.model,
-      estimatedCost: estimate,
-    });
-
-    // Unique per attempt, deliberately.
-    //
-    // Unlike scene media - where generation.ts looks this key up and reuses a
-    // finished job rather than paying twice - regenerating a script is a
-    // deliberate, user-initiated act whose entire purpose is to get a DIFFERENT
-    // result. Deduplicating it would make "regenerate" silently do nothing.
-    //
-    // The counter alone was not enough: it resets to 0 with the process, so the
-    // first regeneration in a new process collided with the first one in the
-    // previous process and the whole call crashed on the unique constraint.
-    const key = sha256(
-      [
-        opts.projectId ?? opts.idiomId,
-        "text",
-        purpose,
-        opts.provider,
-        opts.model,
-        String(callCounter++),
-        randomUUID(),
-      ].join("|"),
-    );
-
-    // Inside a batch, the money is held against the batch ceiling before the
-    // request leaves - the same reserve/commit path scene media uses. The key
-    // is unique per attempt here rather than deterministic, which is correct
-    // for text: each regeneration is a genuinely new purchase, so each gets its
-    // own short-lived hold rather than resuming an earlier one.
-    if (batchAuth) {
-      await assertBatchAuthorized({
-        batchId: batchAuth.batchId,
-        projectId: opts.projectId ?? "",
-        sceneId: "",
-        kind: "text",
-        provider: opts.provider,
-        model: opts.model,
-        estimatedCost: estimate,
-        idempotencyKey: key,
-      });
-    }
-
-    const job = await prisma.providerJob.create({
-      data: {
-        provider: opts.provider,
-        model: opts.model,
-        kind: "text",
-        idempotencyKey: key,
-        status: "processing",
-        // The prompt is stored, the API key never is - it only ever exists in
-        // an Authorization header inside the client.
-        requestJson: JSON.stringify({ purpose, idiom: opts.idiom }),
-        projectId: opts.projectId ?? null,
-        estimatedCost: estimate,
-        attempts: 1,
-      },
-    });
-
-    try {
-      const result = await run();
-      const { usage } = result;
-
-      await prisma.providerJob.update({
-        where: { id: job.id },
-        data: {
-          status: "completed",
-          completedAt: new Date(),
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          durationMs: usage.durationMs,
-          actualCost: usage.actualCost,
-          responseJson: JSON.stringify({ model: usage.model }),
-        },
-      });
-
-      await recordCost({
-        projectId: opts.projectId ?? null,
-        batchId: batchAuth?.batchId ?? null,
-        category: "text",
-        provider: opts.provider,
-        model: usage.model,
-        amount: usage.actualCost,
-        note: purpose,
-      });
-      if (batchAuth) await commitReservation(key, usage.actualCost, purpose);
-
-      return result;
-    } catch (err) {
-      // A call can fail after the provider has already charged for it - a
-      // truncated reply, or output we could not parse. Record that spend, or
-      // the ledger under-counts real money and the cap stops protecting.
-      const spent =
-        err instanceof ProviderError ? err.usage : undefined;
-
-      await prisma.providerJob.update({
-        where: { id: job.id },
-        data: {
-          status: "failed",
-          error: err instanceof Error ? err.message.slice(0, 500) : String(err),
-          inputTokens: spent?.inputTokens ?? null,
-          outputTokens: spent?.outputTokens ?? null,
-          durationMs: spent?.durationMs ?? null,
-          actualCost: spent?.actualCost ?? 0,
-        },
-      });
-
-      if (spent && spent.actualCost > 0) {
-        await recordCost({
-          projectId: opts.projectId ?? null,
-          batchId: batchAuth?.batchId ?? null,
-          category: "text",
-          provider: opts.provider,
-          model: spent.model,
-          amount: spent.actualCost,
-          note: `${purpose} (thất bại nhưng vẫn bị tính phí)`,
-        });
-      }
-      // The request reached the provider - `run()` is the HTTP call - so the
-      // hold stands unless the provider reported a cost we can use instead.
-      if (batchAuth) {
-        await releaseReservation(key, {
-          billed: true,
-          actualCost: spent?.actualCost,
-        });
-      }
-      throw err;
-    }
-  };
+  ): Promise<T> => guardedTextCall(ctx, purpose, estimate, run);
 
   const estimate = (await provider.estimateScriptCost(request)).amount;
 
@@ -512,6 +360,192 @@ export async function generateScript(
   };
 }
 
+// ------------------------------------------------------- guarded text call ---
+
+/** Who a text call is for. Resolved once per script, shared by every call. */
+export interface TextCallContext {
+  provider: string;
+  model: string;
+  projectId?: string | null;
+  /** Fallback key part when there is no project yet. */
+  subjectKey: string;
+  /** Extra fields stored in ProviderJob.requestJson (never a key or secret). */
+  requestInfo: Record<string, unknown>;
+  batchAuth: Awaited<ReturnType<typeof batchApprovalFor>>;
+}
+
+export async function textCallContext(
+  input: Omit<TextCallContext, "batchAuth">,
+): Promise<TextCallContext> {
+  /**
+   * The batch this script is being written FOR, if any.
+   *
+   * Writing a script is a paid call, and a cheap one - a fraction of a cent at
+   * Groq prices. It is still spending, and a batch ceiling that quietly excludes
+   * it is a ceiling that does not mean what it says: ten videos would leak ten
+   * text calls past a figure the operator was told was absolute.
+   *
+   * Resolved once, so a batch lookup does not run three times for the script,
+   * the score and the rewrite.
+   */
+  const project = input.projectId
+    ? await prisma.project.findUnique({
+        where: { id: input.projectId },
+        select: { batchId: true },
+      })
+    : null;
+  const batchAuth = await batchApprovalFor(project?.batchId);
+  return { ...input, batchAuth };
+}
+
+/**
+ * One guarded, recorded text call.
+ *
+ * Everything a paid request needs wrapped around it lives here so no call
+ * site can forget a piece: the spend gate before, the ProviderJob and cost
+ * ledger entry after, and the token counts the provider reported.
+ */
+export async function guardedTextCall<T extends { usage: ProviderUsage }>(
+  ctx: TextCallContext,
+  purpose: string,
+  estimate: number,
+  run: () => Promise<T>,
+): Promise<T> {
+  const opts = ctx;
+  const batchAuth = ctx.batchAuth;
+  await assertCanSpend({
+    provider: opts.provider,
+    model: opts.model,
+    estimatedCost: estimate,
+  });
+
+  // Unique per attempt, deliberately.
+  //
+  // Unlike scene media - where generation.ts looks this key up and reuses a
+  // finished job rather than paying twice - regenerating a script is a
+  // deliberate, user-initiated act whose entire purpose is to get a DIFFERENT
+  // result. Deduplicating it would make "regenerate" silently do nothing.
+  //
+  // The counter alone was not enough: it resets to 0 with the process, so the
+  // first regeneration in a new process collided with the first one in the
+  // previous process and the whole call crashed on the unique constraint.
+  const key = sha256(
+    [
+      opts.projectId ?? opts.subjectKey,
+      "text",
+      purpose,
+      opts.provider,
+      opts.model,
+      String(callCounter++),
+      randomUUID(),
+    ].join("|"),
+  );
+
+  // Inside a batch, the money is held against the batch ceiling before the
+  // request leaves - the same reserve/commit path scene media uses. The key
+  // is unique per attempt here rather than deterministic, which is correct
+  // for text: each regeneration is a genuinely new purchase, so each gets its
+  // own short-lived hold rather than resuming an earlier one.
+  if (batchAuth) {
+    await assertBatchAuthorized({
+      batchId: batchAuth.batchId,
+      projectId: opts.projectId ?? "",
+      sceneId: "",
+      kind: "text",
+      provider: opts.provider,
+      model: opts.model,
+      estimatedCost: estimate,
+      idempotencyKey: key,
+    });
+  }
+
+  const job = await prisma.providerJob.create({
+    data: {
+      provider: opts.provider,
+      model: opts.model,
+      kind: "text",
+      idempotencyKey: key,
+      status: "processing",
+      // The prompt is stored, the API key never is - it only ever exists in
+      // an Authorization header inside the client.
+      requestJson: JSON.stringify({ purpose, ...opts.requestInfo }),
+      projectId: opts.projectId ?? null,
+      estimatedCost: estimate,
+      attempts: 1,
+    },
+  });
+
+  try {
+    const result = await run();
+    const { usage } = result;
+
+    await prisma.providerJob.update({
+      where: { id: job.id },
+      data: {
+        status: "completed",
+        completedAt: new Date(),
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        durationMs: usage.durationMs,
+        actualCost: usage.actualCost,
+        responseJson: JSON.stringify({ model: usage.model }),
+      },
+    });
+
+    await recordCost({
+      projectId: opts.projectId ?? null,
+      batchId: batchAuth?.batchId ?? null,
+      category: "text",
+      provider: opts.provider,
+      model: usage.model,
+      amount: usage.actualCost,
+      note: purpose,
+    });
+    if (batchAuth) await commitReservation(key, usage.actualCost, purpose);
+
+    return result;
+  } catch (err) {
+    // A call can fail after the provider has already charged for it - a
+    // truncated reply, or output we could not parse. Record that spend, or
+    // the ledger under-counts real money and the cap stops protecting.
+    const spent =
+      err instanceof ProviderError ? err.usage : undefined;
+
+    await prisma.providerJob.update({
+      where: { id: job.id },
+      data: {
+        status: "failed",
+        error: err instanceof Error ? err.message.slice(0, 500) : String(err),
+        inputTokens: spent?.inputTokens ?? null,
+        outputTokens: spent?.outputTokens ?? null,
+        durationMs: spent?.durationMs ?? null,
+        actualCost: spent?.actualCost ?? 0,
+      },
+    });
+
+    if (spent && spent.actualCost > 0) {
+      await recordCost({
+        projectId: opts.projectId ?? null,
+        batchId: batchAuth?.batchId ?? null,
+        category: "text",
+        provider: opts.provider,
+        model: spent.model,
+        amount: spent.actualCost,
+        note: `${purpose} (thất bại nhưng vẫn bị tính phí)`,
+      });
+    }
+    // The request reached the provider - `run()` is the HTTP call - so the
+    // hold stands unless the provider reported a cost we can use instead.
+    if (batchAuth) {
+      await releaseReservation(key, {
+        billed: true,
+        actualCost: spent?.actualCost,
+      });
+    }
+    throw err;
+  }
+}
+
 /** Distinguishes repeated calls within one generation run in the job table. */
 let callCounter = 0;
 
@@ -551,10 +585,13 @@ export function withDerivedRouting(script: ScriptDoc): ScriptDoc {
       // what the picture contains. See complexity.extractSignals.
       characters: scene.characters,
     });
+    // A multi-content scene names its own beat; the idiom writer's scenes keep
+    // the positional roles they always had.
     const role =
-      index === script.scenes.length - 1
+      scene.sceneRole ??
+      (index === script.scenes.length - 1
         ? "example"
-        : (roles[index] ?? "escalation");
+        : (roles[index] ?? "escalation"));
     const { priority } = assignSpendPriority({
       sceneNumber: scene.sceneNumber,
       totalScenes: script.scenes.length,

@@ -1,3 +1,4 @@
+import { needsScriptApproval } from "@/domain/content-legacy";
 import fs from "node:fs";
 import type { Job } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -680,6 +681,21 @@ async function approveAndRunLocked(opts: Parameters<typeof approveAndRun>[0]): P
     throw new ExecutorError("Trần chi mỗi video phải là một số lớn hơn 0.");
   }
   if (isRunning(opts.batchId)) throw new ExecutorError("Lô này đang chạy.");
+
+  // Multi-content engine: a script the AI wrote is read by a person before any
+  // image, voice or clip is bought for it. Legacy / imported videos never had
+  // this step and are not affected (needsScriptApproval).
+  const unapproved = (
+    await prisma.project.findMany({
+      where: { batchId: opts.batchId, contentType: { not: null }, scriptApprovedAt: null },
+      select: { id: true, title: true, contentType: true, contentSourceType: true, scriptApprovedAt: true },
+    })
+  ).filter((p) => needsScriptApproval(p) && (!opts.onlyProjectIds || opts.onlyProjectIds.includes(p.id)));
+  if (unapproved.length > 0) {
+    throw new ExecutorError(
+      `SCRIPT_NOT_APPROVED: hãy DUYỆT KỊCH BẢN trước khi tạo media - ${unapproved.map((p) => `"${p.title}"`).join(", ")}.`,
+    );
+  }
 
   const check = await preflightForApproval(opts.batchId, {
     maxBatch: opts.maxBatch,
