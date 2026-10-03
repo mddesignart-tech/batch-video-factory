@@ -191,6 +191,11 @@ export interface FinalMixInput {
   /** Effects, each with the second it lands on. */
   sfx?: { path: string; atSec: number }[];
   settings?: Partial<AudioMixSettings>;
+  /**
+   * QĐ-125: narration level (1 = 100 %), loudness levelling, final fades.
+   * Local FFmpeg only - never a new TTS request. Absent = unchanged mix.
+   */
+  voice?: { gain: number; normalize: boolean; fadeSec: number; totalSec?: number };
 }
 
 export interface FinalMixResult {
@@ -239,11 +244,24 @@ export function buildFinalMixGraph(
   const parts: string[] = [];
   const toMix: string[] = [];
 
+  // QĐ-125: the project's narration level / levelling and the final fades.
+  // Absent (every legacy render) = no extra filter at all: the graph is
+  // byte-for-byte what it was.
+  const v = input.voice;
+  const voiceFx =
+    v && !opts.bedOnly
+      ? `${v.gain !== 1 ? `,volume=${Math.round(v.gain * 1000) / 1000}` : ""}${v.normalize ? ",loudnorm=I=-16:TP=-1.5:LRA=11" : ""}`
+      : "";
+  const fade =
+    v && v.fadeSec > 0 && !opts.bedOnly
+      ? `afade=t=in:d=${v.fadeSec}` + (v.totalSec && v.totalSec > v.fadeSec * 3 ? `,afade=t=out:st=${Math.round((v.totalSec - v.fadeSec) * 1000) / 1000}:d=${v.fadeSec}` : "")
+      : "";
+
   if (!hasMusic && sfx.length === 0) {
     // Nothing to mix. Pass the dialogue through rather than building a graph
     // that sums one input, which some ffmpeg builds treat as an error.
     return {
-      graph: `[0:a]aresample=${WORK_SAMPLE_RATE}[a]`,
+      graph: `[0:a]aresample=${WORK_SAMPLE_RATE}${voiceFx}${fade ? `,${fade}` : ""}[a]`,
       inputs: files,
       settings,
     };
@@ -256,7 +274,7 @@ export function buildFinalMixGraph(
   if (opts.bedOnly) {
     parts.push(`[0:a]aresample=${WORK_SAMPLE_RATE}[key]`);
   } else {
-    parts.push(`[0:a]aresample=${WORK_SAMPLE_RATE},asplit=2[voice][key]`);
+    parts.push(`[0:a]aresample=${WORK_SAMPLE_RATE}${voiceFx},asplit=2[voice][key]`);
     toMix.push("[voice]");
   }
 
@@ -301,8 +319,9 @@ export function buildFinalMixGraph(
 
   toMix.push("[ducked]");
   parts.push(
-    `${toMix.join("")}amix=inputs=${toMix.length}:duration=first:dropout_transition=0:normalize=0[a]`,
+    `${toMix.join("")}amix=inputs=${toMix.length}:duration=first:dropout_transition=0:normalize=0${fade ? "[mixed]" : "[a]"}`,
   );
+  if (fade) parts.push(`[mixed]${fade}[a]`);
 
   return { graph: parts.join(";"), inputs: files, settings };
 }

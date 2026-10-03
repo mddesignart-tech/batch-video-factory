@@ -83,7 +83,7 @@ export async function sceneReuseFacts(
     const lines = parseDialogueLines(scene.dialogue, scene.narration, sceneCharacters(scene).speaking);
     const entries: string[] = [];
     for (const line of lines) {
-      const settings = await voiceSettingsFor(line.speaker);
+      const settings = await voiceSettingsFor(line.speaker, scene.projectId);
       for (const m of voiceModels) {
         entries.push(
           `${mk(m)}|${line.lineNumber}|${voiceReuseKey({

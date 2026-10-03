@@ -205,21 +205,27 @@ describe("QA video: 5 cảnh dự kiến 5s, lời khác nhau", () => {
     const cues = parseSrt(fs.readFileSync(toAbsolute(project.subtitlePath!), "utf8"));
     const scenes = await prisma.scene.findMany({ where: { projectId }, orderBy: { sceneNumber: "asc" } });
     const voiced = scenes.filter((s) => s.voiceDurationActual !== null);
-    expect(cues).toHaveLength(voiced.length);
     let offset = 0;
     const starts: Record<number, number> = {};
     for (const s of scenes) {
       starts[s.sceneNumber] = offset;
       offset += s.finalDuration!;
     }
-    voiced.forEach((s, i) => {
-      const cue = cues[i]!;
+    // QĐ-125: a long caption is shown as consecutive screens (max 2 lines each),
+    // so a scene may own several cues. Together they are exactly its subtitle,
+    // inside the scene, in order, never overlapping.
+    let at = 0;
+    for (const s of voiced) {
       const start = starts[s.sceneNumber]!;
-      expect(cue.text).toBe(s.subtitle);
-      expect(cue.start).toBeGreaterThanOrEqual(start + 0.1);
-      expect(cue.end).toBeLessThanOrEqual(start + s.finalDuration! + 1e-6);
-      if (i > 0) expect(cue.start).toBeGreaterThan(cues[i - 1]!.end);
-    });
+      const mine: typeof cues = [];
+      while (at < cues.length && cues[at]!.start < start + s.finalDuration! - 1e-6) mine.push(cues[at++]!);
+      expect(mine.length).toBeGreaterThan(0);
+      expect(mine.map((c) => c.text.replace(/\n/g, " ")).join(" ")).toBe(s.subtitle);
+      expect(mine[0]!.start).toBeGreaterThanOrEqual(start + 0.1);
+      expect(mine.at(-1)!.end).toBeLessThanOrEqual(start + s.finalDuration! + 1e-6);
+    }
+    expect(at).toBe(cues.length);
+    for (let i = 1; i < cues.length; i++) expect(cues[i]!.start).toBeGreaterThanOrEqual(cues[i - 1]!.end - 1e-6);
   });
 });
 

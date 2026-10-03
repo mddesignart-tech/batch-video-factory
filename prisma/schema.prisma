@@ -484,6 +484,10 @@ model Project {
   contentBriefJson   String?
   /// Hook only - no music provider. Ducked under voice by the mixer when set.
   backgroundMusicAssetId String?
+  /// QĐ-125 VIDEO OUTPUT controls: subtitles (on/off, size, position, style,
+  /// auto-fit), narration / music / effect levels, narrator voice. JSON. NULL =
+  /// the defaults (domain/output-controls.ts). Local render only, except voice.
+  outputControlsJson String?
   /// When a person pressed DUYỆT KỊCH BẢN. Media for a multi-content project
   /// waits for it; a legacy project (contentType NULL) never needed it.
   scriptApprovedAt   DateTime?

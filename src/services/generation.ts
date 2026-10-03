@@ -1,3 +1,5 @@
+import { narratorOverride } from "./output-controls";
+import { isNarrator } from "@/domain/scene-characters";
 import { limitMessage, planReferenceSend, type SendCandidate } from "@/domain/reference";
 import { criticalPictureCount, sceneReferences, type UniversalReference } from "./reference-assets";
 import { referenceLimitFor, storedProfile, supportsDirectVideoReference } from "@/domain/video-model-profile";
@@ -2529,6 +2531,8 @@ function stripSpeakerLabel(line: string): string {
  */
 export async function voiceSettingsFor(
   speaker: string,
+  /** QĐ-125: the project whose own narrator voice (VIDEO OUTPUT) applies, if any. */
+  projectId?: string | null,
 ): Promise<{
   characterId: string | null;
   provider: string | null;
@@ -2547,7 +2551,7 @@ export async function voiceSettingsFor(
   // router picks a mock voice and the character's choice waits for real mode.
   const pin = !isMockMode();
 
-  return {
+  const base = {
     characterId: character?.id ?? null,
     // Null lets the router choose; a value pins it. Both are legitimate.
     provider: pin ? character?.voiceProvider || null : null,
@@ -2555,9 +2559,26 @@ export async function voiceSettingsFor(
     voiceId: character?.voiceId ?? "mock-male-us",
     instructions: character?.voiceInstructions ?? "",
     speed: character?.voiceSpeed ?? 1,
-    gender: character?.voiceGender === "female" ? "female" : "male",
-    accent: character?.voiceAccent === "UK" ? "UK" : "US",
+    gender: (character?.voiceGender === "female" ? "female" : "male") as "male" | "female",
+    accent: (character?.voiceAccent === "UK" ? "UK" : "US") as "US" | "UK",
   };
+  // GIỌNG THUYẾT MINH of this project (QĐ-125): only the narrator, only when
+  // set. It is part of the voice key, so it buys new speech only through the
+  // usual preview / price / confirm path - never on a subtitle or level change.
+  if (isNarrator(speaker)) {
+    const own = await narratorOverride(projectId);
+    if (own) {
+      return {
+        ...base,
+        provider: pin ? (own.provider ?? base.provider) : null,
+        model: pin ? (own.model ?? base.model) : null,
+        voiceId: own.voiceId ?? base.voiceId,
+        speed: own.speed ?? base.speed,
+        instructions: own.instructions ?? base.instructions,
+      };
+    }
+  }
+  return base;
 }
 
 /**
@@ -2606,7 +2627,7 @@ export async function generateSceneVoice(
   const written: string[] = [];
 
   for (const line of lines) {
-    const settings = await voiceSettingsFor(line.speaker);
+    const settings = await voiceSettingsFor(line.speaker, scene.projectId);
 
     // A line that is ALREADY this audio - same words, voice, instructions,
     // speed (and the pinned model, if any) - with its file on disk is handed
@@ -2965,7 +2986,7 @@ async function lineAssetMatches(sceneId: string, outputPath: string, reuseKey: s
  * come from here, so a changed line or a lost file is never priced at $0.
  */
 export async function existingVoiceLines(
-  scene: Pick<Scene, "dialogue" | "narration"> & SceneCharacterColumns & {
+  scene: Pick<Scene, "dialogue" | "narration"> & Partial<Pick<Scene, "projectId">> & SceneCharacterColumns & {
     dialogueLines: { lineNumber: number; status: string; text: string; voiceId: string; instructions: string; speed: number; provider: string; model: string; outputPath: string }[];
   },
 ): Promise<{ lines: (ParsedLine & { state: "DONE" | "MISSING_LOCAL_FILE" | "CHANGED" | "NONE" })[]; allDone: boolean }> {
@@ -2975,7 +2996,7 @@ export async function existingVoiceLines(
   for (const line of parsed) {
     let settings = settingsBySpeaker.get(line.speaker);
     if (!settings) {
-      settings = await voiceSettingsFor(line.speaker);
+      settings = await voiceSettingsFor(line.speaker, scene.projectId);
       settingsBySpeaker.set(line.speaker, settings);
     }
     const row = scene.dialogueLines.find((r) => r.lineNumber === line.lineNumber);
@@ -3040,7 +3061,7 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
   const rows = await prisma.dialogueLine.findMany({ where: { sceneId: scene.id } });
   const out: SceneVoiceLinePlan[] = [];
   for (const line of parsed) {
-    const settings = await voiceSettingsFor(line.speaker);
+    const settings = await voiceSettingsFor(line.speaker, scene.projectId);
     const row = rows.find((r) => r.lineNumber === line.lineNumber) ?? null;
     const base = {
       lineNumber: line.lineNumber,

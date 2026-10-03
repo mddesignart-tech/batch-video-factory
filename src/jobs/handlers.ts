@@ -17,6 +17,7 @@ import { renderMediaHashes, renderRecipeHash, sameRenderInput } from "@/services
 import { contentInfo } from "@/services/asset-content";
 import { pacingSummary, parseDurationMode } from "@/domain/scene-timing";
 import { deferJob } from "./queue";
+import { applyOutputControls } from "@/services/output-controls";
 
 /**
  * Job handlers.
@@ -211,6 +212,9 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
       spokenLines: spokenLines(s).map((l) => l.text),
     })),
   };
+
+  // QĐ-125 VIDEO OUTPUT: subtitles, levels, music, effects - all local, $0.
+  await applyOutputControls(project, active, request);
 
   // SAME_RENDER_INPUT (QĐ-113): a COMPLETED video whose recipe is unchanged and
   // whose MP4 is still the exact file that render produced is not rendered

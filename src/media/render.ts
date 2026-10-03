@@ -13,6 +13,7 @@ import {
   supportsSubtitleBurn,
 } from "./ffmpeg";
 import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
+import type { SubtitleLayout } from "@/domain/output-controls";
 import { renderSegmentCached } from "./segment-cache";
 import {
   DEFAULT_MIX,
@@ -152,6 +153,15 @@ export interface RenderRequest {
   fit?: FitMode;
   /** Subtitle distance from the bottom, % of height. Missing/null = automatic. */
   subtitleBottomPct?: number | null;
+  /** QĐ-125: subtitle size / place / style / auto-fit. Missing = the V1 layout. */
+  subtitleLayout?: SubtitleLayout;
+  /** QĐ-125: narration level, levelling and fades. Missing = the mix as before. */
+  voiceMix?: { gain: number; normalize: boolean; fadeSec: number };
+  /**
+   * QĐ-125: one effect per scene, placed at that scene's start on the FINAL
+   * clock (known only here, after voice-driven timing). Added to `sfx`.
+   */
+  sceneSfx?: { sceneNumber: number; path: string }[];
 }
 
 export interface FinalEncode {
@@ -544,6 +554,26 @@ async function buildSceneAudio(
   return { timeline, audioPath, loudness: rendered.loudness };
 }
 
+/**
+ * QĐ-125: each scene's effect lands just after that scene starts, on the final
+ * clock (scene lengths follow the voice, so this is only known here).
+ */
+function placedSceneSfx(
+  req: RenderRequest,
+  usable: { sceneNumber: number }[],
+  sceneDurations: (number | undefined)[],
+): { path: string; atSec: number }[] {
+  if (!req.sceneSfx?.length) return [];
+  const out: { path: string; atSec: number }[] = [];
+  let at = 0;
+  usable.forEach((scene, i) => {
+    const effect = req.sceneSfx!.find((e) => e.sceneNumber === scene.sceneNumber);
+    if (effect) out.push({ path: effect.path, atSec: Math.round((at + 0.05) * 1000) / 1000 });
+    at += sceneDurations[i] ?? 0;
+  });
+  return out;
+}
+
 export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   if (!ffmpegAvailable()) throw new FfmpegError(FFMPEG_MISSING_MESSAGE, "", []);
 
@@ -700,12 +730,13 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         }),
       );
 
-  const srt = buildSRT(cues);
+  const srt = buildSRT(cues, req.subtitleLayout);
   const ass = buildASS(cues, {
     width: req.target.width,
     height: req.target.height,
     highlightPhrase: req.highlightPhrase,
     bottomPct: req.subtitleBottomPct ?? null,
+    layout: req.subtitleLayout,
   });
   const srtPath = path.join(subsDir, "subtitles.srt");
   const assPath = path.join(subsDir, "subtitles.ass");
@@ -765,8 +796,11 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
       {
         dialoguePath: joinedDialogue,
         musicPath: req.musicPath && fs.existsSync(req.musicPath) ? req.musicPath : null,
-        sfx: (req.sfx ?? []).filter((s) => fs.existsSync(s.path)),
+        sfx: [...(req.sfx ?? []), ...placedSceneSfx(req, usable, sceneDurations)].filter((s) => fs.existsSync(s.path)),
         settings: req.mixSettings,
+        ...(req.voiceMix
+          ? { voice: { ...req.voiceMix, totalSec: sceneDurations.reduce((n, d) => n + (d ?? 0), 0) } }
+          : {}),
       },
       mixPath,
     );

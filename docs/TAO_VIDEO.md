@@ -41,3 +41,14 @@ bật/tắt, “Chỉ chọn tay”, “Tự định tuyến” (chỉ sau khi b
   xuất hiện trong lời/hình của cảnh. Nhân vật lấy từ trang Nhân vật (sửa ở đó).
 - Đổi ảnh của một tham chiếu chỉ làm các cảnh có nó cần ảnh mới; giọng và phụ đề giữ nguyên; luôn xem chi phí trước.
 - Mọi thao tác tham chiếu: **$0**. Chỉ tạo ảnh/video thật mới tốn phí.
+
+## Video output: phụ đề, giọng, nhạc, hiệu ứng
+Trang dự án → thẻ **Video output**:
+- **Phụ đề**: Bật/Tắt (tắt vẫn giữ file .srt), kích thước Nhỏ/Vừa/Lớn/Tùy chỉnh, vị trí Trên/Giữa/Dưới + kéo lên/xuống
+  (luôn tránh vùng nút của TikTok/Shorts/Reels), kiểu Trắng viền đen / Nền tối / Tối giản / Nổi bật, "Tự động vừa khung"
+  (tối đa 2 dòng, câu dài chia thành nhiều màn hình).
+- **Giọng thuyết minh**: chọn giọng, tốc độ, âm lượng lời đọc 0–200%, chuẩn hoá âm lượng. ▶ Nghe thử dùng lại giọng đã có
+  ($0); đổi giọng/tốc độ thì tool báo giá và chỉ tạo khi bạn xác nhận.
+- **Nhạc nền**: tải file MP3/WAV, âm lượng, tự hạ nhạc khi có lời.
+- **Hiệu ứng âm thanh**: bật/tắt, âm lượng (âm tạo tại máy từ gợi ý của cảnh: whoosh, ding, pop…).
+- **XEM TRƯỚC** một khung hình với phụ đề đúng cỡ/vị trí; **RENDER LẠI** áp dụng tất cả — chỉ xử lý tại máy, $0.

@@ -36,6 +36,8 @@ import { projectFormat } from "@/services/output-profile";
 import { VideoFormatCard } from "./video-format-card";
 import { ScriptReviewCard } from "./script-review-card";
 import { ReferencePanel } from "./reference-panel";
+import { VideoOutputCard } from "./video-output-card";
+import { controlsOf } from "@/domain/output-controls";
 import { listProjectReferences, referenceProblems, sceneReferenceIds } from "@/services/reference-assets";
 import { contentSummary } from "@/services/content-service";
 import { audienceOf, languageOf } from "@/domain/content-options";
@@ -114,6 +116,9 @@ export default async function ProjectDetailPage({
   const scriptDoc = content ? parseJson<ScriptDoc | null>(project.scriptJson, null) : null;
   // Tài sản tham chiếu (QĐ-124): read only here, $0.
   const [references, refProblems] = await Promise.all([listProjectReferences(id), referenceProblems(id)]);
+  const musicAsset = project.backgroundMusicAssetId
+    ? await prisma.asset.findUnique({ where: { id: project.backgroundMusicAssetId } })
+    : null;
   const referenceTitle =
     {
       STORY: "Nhân vật & đồ vật",
@@ -257,6 +262,15 @@ export default async function ProjectDetailPage({
                 />
               );
             })()
+          ) : null}
+
+          {project.scenes.length > 0 ? (
+            <VideoOutputCard
+              projectId={project.id}
+              initial={controlsOf(project)}
+              music={musicAsset ? { filename: musicAsset.originalFilename ?? "music", durationSec: musicAsset.durationSec } : null}
+              frame={{ width: format.profile.width, height: format.profile.height }}
+            />
           ) : null}
 
           {project.scenes.length > 0 ? (

@@ -9,6 +9,7 @@
  */
 
 import { subtitleSafeArea } from "@/domain/platform-profile";
+import { fitCaption, type SubtitleLayout } from "@/domain/output-controls";
 
 export interface SubtitleCue {
   startSeconds: number;
@@ -23,6 +24,11 @@ export interface SubtitleOptions {
   highlightPhrase?: string;
   /** Subtitle distance from the bottom, % of height (QĐ-121). Null/absent = automatic for the shape. */
   bottomPct?: number | null;
+  /**
+   * QĐ-125: size, place, style and auto-fit from the project's VIDEO OUTPUT
+   * controls. Absent = the V1 layout (kept for callers that never set one).
+   */
+  layout?: SubtitleLayout;
 }
 
 const MAX_CHARS_PER_LINE = 26;
@@ -205,7 +211,14 @@ function pad(value: number, width: number): string {
   return String(value).padStart(width, "0");
 }
 
-export function buildSRT(cues: SubtitleCue[]): string {
+export function buildSRT(cues: SubtitleCue[], layout?: SubtitleLayout): string {
+  if (layout) {
+    return (
+      fittedCues(cues, layout)
+        .map((cue, index) => `${index + 1}\n${srtTimestamp(cue.startSeconds)} --> ${srtTimestamp(cue.endSeconds)}\n${cue.lines.join("\n")}\n`)
+        .join("\n") + "\n"
+    );
+  }
   return (
     cues
       .map((cue, index) => {
@@ -257,10 +270,58 @@ function applyHighlight(text: string, phrase: string | undefined): string {
   );
 }
 
+/**
+ * QĐ-125: one caption as screens of at most N lines, time shared by length -
+ * a long sentence becomes consecutive screens, never a wall of text.
+ */
+export function fittedCues(cues: SubtitleCue[], layout: SubtitleLayout): (SubtitleCue & { lines: string[]; fontSize: number })[] {
+  const out: (SubtitleCue & { lines: string[]; fontSize: number })[] = [];
+  for (const cue of cues) {
+    const fit = fitCaption(cue.text, layout);
+    const total = fit.screens.reduce((n, sc) => n + Math.max(1, sc.join(" ").length), 0);
+    const span = cue.endSeconds - cue.startSeconds;
+    let at = cue.startSeconds;
+    fit.screens.forEach((screen, i) => {
+      const share = Math.max(1, screen.join(" ").length) / total;
+      const end = i === fit.screens.length - 1 ? cue.endSeconds : at + span * share;
+      out.push({ startSeconds: at, endSeconds: end, text: screen.join(" "), lines: screen, fontSize: fit.fontSize });
+      at = end;
+    });
+  }
+  return out;
+}
+
+function buildLayoutASS(cues: SubtitleCue[], layout: SubtitleLayout, options: SubtitleOptions): string {
+  const header = [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    // 2 = no automatic wrapping: the lines are exactly the ones fitted above.
+    "WrapStyle: 2",
+    "ScaledBorderAndShadow: yes",
+    "YCbCr Matrix: TV.709",
+    `PlayResX: ${options.width}`,
+    `PlayResY: ${options.height}`,
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: Default,${layout.font},${layout.fontSize},${layout.primaryColour},${layout.primaryColour},${layout.outlineColour},${layout.backColour},${layout.bold ? -1 : 0},0,0,0,100,100,0,0,${layout.borderStyle},${layout.outline},${layout.shadow},${layout.alignment},${layout.marginL},${layout.marginR},${layout.marginV},1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  ].join("\n");
+  const events = fittedCues(cues, layout).map((cue) => {
+    const size = cue.fontSize !== layout.fontSize ? `{\\fs${cue.fontSize}}` : "";
+    const text = size + applyHighlight(escapeAssText(cue.lines.join("\n")), options.highlightPhrase);
+    return `Dialogue: 0,${assTimestamp(cue.startSeconds)},${assTimestamp(cue.endSeconds)},Default,,0,0,0,,${text}`;
+  });
+  return `${header}\n${events.join("\n")}\n`;
+}
+
 export function buildASS(
   cues: SubtitleCue[],
   options: SubtitleOptions,
 ): string {
+  if (options.layout) return buildLayoutASS(cues, options.layout, options);
   const { width, height, highlightPhrase } = options;
   // Scale the type to the frame so a 1080x1920 export and a preview render look
   // the same. ~7.8% of frame height reads well on a phone.

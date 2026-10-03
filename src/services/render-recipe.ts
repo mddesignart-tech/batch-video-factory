@@ -45,6 +45,10 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
     // the defaults, so a video nobody touched keeps its recipe.
     fit: req.fit && req.fit !== "AUTO" ? req.fit : undefined,
     subtitleBottomPct: req.subtitleBottomPct ?? undefined,
+    // QĐ-125 VIDEO OUTPUT: any subtitle / level change is a new local render.
+    subtitleLayout: req.subtitleLayout ?? undefined,
+    voiceMix: req.voiceMix ?? undefined,
+    sceneSfx: req.sceneSfx?.length ? req.sceneSfx.map((e) => ({ n: e.sceneNumber, sha: content(e.path) })) : undefined,
     highlightPhrase: req.highlightPhrase ?? "",
     music: content(req.musicPath ?? null),
     sfx: (req.sfx ?? []).map((e) => ({ sha: content(e.path), atSec: e.atSec })),

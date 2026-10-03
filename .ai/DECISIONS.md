@@ -3718,3 +3718,34 @@ LOGO / STYLE (`domain/reference.ts`, `services/reference-assets.ts`).
 - Mock provider có `mockRequestLog` (chỉ để test đọc yêu cầu đã gửi).
 
 Test: `tests/reference-assets.test.ts` (10).
+
+## QĐ-125 — VIDEO OUTPUT: phụ đề, âm thanh, giọng thuyết minh (2026-10-03, $0, không POST trả phí)
+
+Yêu cầu: `.ai/OUTPUT_CONTROLS_SPEC.md`. Lỗi thật: phụ đề cỡ 7,8% chiều cao (≈150 px trên 1920), tối đa 3 dòng × 26 ký tự
+→ khối chữ tới ~28% màn hình, che sản phẩm/nhân vật.
+
+- Cột mới `Project.outputControlsJson` (migration `20261005000000_output_controls`, chỉ thêm). NULL = mặc định
+  (`domain/output-controls.ts`): phụ đề Vừa = 6% CẠNH NGẮN (65 px ở 1080×1920, như nhau cho 9:16/16:9/1:1/4:5), tối đa 2
+  dòng/màn hình, khối chữ ≤ 15% chiều cao, tự vừa khung (thu chữ tới 80% rồi chia câu dài thành nhiều màn hình theo thời
+  gian — không cắt chữ), dưới cùng nhưng trên vùng UI nền tảng (9:16: đáy 20%, phải 16%). Dự án cũ cũng nhận phụ đề mới;
+  âm thanh của dự án cũ giữ nguyên (không SFX, không fade, lời 100%) — đồ thị trộn byte-for-byte như cũ khi không đặt gì.
+- Phụ đề: bật/tắt (tắt = không burn, .ass/.srt vẫn ghi), Nhỏ/Vừa/Lớn/Tùy chỉnh, Trên/Giữa/Dưới + dịch ±20% (kẹp trong
+  vùng an toàn), 4 kiểu (viền đen / hộp nền tối / tối giản / nổi bật vàng), Nâng cao (font, đậm, màu, viền, bóng, độ đậm
+  nền, độ rộng, số dòng, hiện vùng an toàn). Không có "khoảng cách dòng" (libass/ASS không hỗ trợ) — không làm.
+- Vùng an toàn theo chủ thể: hệ thống KHÔNG có metadata focal point/khuôn mặt; không xây AI vision. Bảo vệ bằng giới hạn
+  chiều cao khối chữ + vị trí mặc định dưới.
+- Âm thanh (FFmpeg tại máy): âm lượng lời 0–200% (`volume`), chuẩn hoá lời (`loudnorm`), fade 0,3 s, nhạc nền (tải file
+  lên → Asset IMPORTED kind audio → `Project.backgroundMusicAssetId`; 0–100%; tự hạ khi có lời = sidechain duck 12 dB hoặc
+  tắt), SFX bật/tắt + âm lượng. PHÁT HIỆN: trước đây job render KHÔNG BAO GIỜ truyền nhạc nền hay SFX vào bộ trộn (bộ trộn
+  hỗ trợ nhưng không có nguồn). Nay nối vào; SFX là âm tổng hợp tại máy từ gợi ý cảnh (`media/sfx-library.ts`: whoosh,
+  ding, chime, pop, impact, engine; gợi ý không có công thức — vd "animal sound" — bị bỏ qua, không giả).
+- Mọi thiết lập trên vào `renderRecipe` → đổi = render lại tại máy ($0); dự án đã xong về `media_ready`.
+- Giọng thuyết minh theo dự án: override cho người nói `Narrator` (giọng, model, tốc độ, hướng dẫn) trong
+  `voiceSettingsFor(speaker, projectId)`; nằm trong khoá giọng nên chỉ đổi giọng/tốc độ mới cần TTS mới, qua đường nghe
+  thử → báo giá → xác nhận (QĐ-117). Tốc độ là tham số TTS (không atempo).
+- Xem trước: 1 khung hình PNG đúng kích thước nền tảng, ảnh cảnh thật + phụ đề mẫu đúng cỡ/vị trí/kiểu (+ khung vùng an
+  toàn), FFmpeg, $0.
+- UI: thẻ "Video output" trên trang dự án (PHỤ ĐỀ / GIỌNG THUYẾT MINH / NHẠC NỀN / HIỆU ỨNG ÂM THANH, Nâng cao, XEM TRƯỚC,
+  RENDER LẠI).
+
+Test: `tests/output-controls.test.ts` (13).
