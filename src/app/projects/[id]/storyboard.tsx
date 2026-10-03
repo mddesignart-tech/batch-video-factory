@@ -660,7 +660,7 @@ export function Storyboard({
             </ActionForm>
 
             <p className="mt-4 text-[11px] text-ink-600">
-              Dự án: {projectId.slice(0, 8)} · Thành ngữ: {idiomPhrase}
+              Dự án: {projectId.slice(0, 8)} · Nội dung: {idiomPhrase}
             </p>
           </div>
         </div>

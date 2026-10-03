@@ -20,11 +20,13 @@ import {
   ListChecks,
   Library,
   Rocket,
+  WandSparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** Vietnamese admin navigation, per the product spec. */
 const NAV_ITEMS = [
+  { href: "/create", label: "Tạo video", icon: WandSparkles },
   { href: "/workspace", label: "Làm việc hằng ngày", icon: Rocket },
   { href: "/", label: "Tổng quan", icon: LayoutDashboard },
   { href: "/idioms", label: "Thành ngữ", icon: Sparkles },

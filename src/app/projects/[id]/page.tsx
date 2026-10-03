@@ -34,6 +34,11 @@ import { isNeedsSelection, splitNeedsSelection } from "@/domain/video-selection"
 import { BudgetProblemBox, VideoBudgetCard } from "@/components/video-budget";
 import { projectFormat } from "@/services/output-profile";
 import { VideoFormatCard } from "./video-format-card";
+import { ScriptReviewCard } from "./script-review-card";
+import { contentSummary } from "@/services/content-service";
+import { audienceOf, languageOf } from "@/domain/content-options";
+import { spokenLines } from "@/domain/scene-subtitles";
+import type { ScriptDoc } from "@/domain/script";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +106,10 @@ export default async function ProjectDetailPage({
   const budget = await videoBudget(id);
   const format = await projectFormat(id);
   const projectBudgetProblem = budgetProblem(project.errorMessage);
+  // Multi-content project: the script preview + DUYỆT KỊCH BẢN. A legacy idiom
+  // project (contentType NULL) shows exactly what it always did.
+  const content = project.contentType ? contentSummary(project) : null;
+  const scriptDoc = content ? parseJson<ScriptDoc | null>(project.scriptJson, null) : null;
 
   return (
     <>
@@ -165,6 +174,41 @@ export default async function ProjectDetailPage({
             targetDuration={project.targetDuration}
             title={project.title}
           />
+
+          {content && scriptDoc && project.scenes.length > 0 ? (
+            <ScriptReviewCard
+              projectId={project.id}
+              title={project.title}
+              hook={scriptDoc.hook}
+              templateName={content.templateName}
+              formatLabel={content.formatLabel}
+              languageLabel={languageOf(content.language).label}
+              audienceLabel={audienceOf(content.audience).label}
+              durationSeconds={project.targetDuration}
+              approved={content.approved}
+              needsFactReview={scriptDoc.needsFactReview === true}
+              aiFacts={(scriptDoc.facts ?? []).filter((f) => f.origin === "AI_GENERATED").map((f) => f.text)}
+              canRewrite={["draft", "script_ready", "needs_review", "failed"].includes(project.status)}
+              scenes={project.scenes
+                .filter((s) => !s.skipped)
+                .map((s) => {
+                  const doc = scriptDoc.scenes.find((d) => d.sceneNumber === s.sceneNumber);
+                  return {
+                    sceneNumber: s.sceneNumber,
+                    beatLabel: doc?.beatLabel ?? "",
+                    duration: s.duration,
+                    speech: spokenLines(s)
+                      .map((l) => (l.speaker && l.speaker !== "Narrator" ? `${l.speaker}: ${l.text}` : l.text))
+                      .join("\n"),
+                    subtitle: s.subtitle,
+                    visual: s.visualDescription,
+                    usesOwnPhoto: s.imageSource === "IMPORTED",
+                    motion: s.motionMode,
+                    soundEffect: s.soundEffect,
+                  };
+                })}
+            />
+          ) : null}
 
           {project.scenes.length === 0 ? (
             <Alert tone="info" title="Dự án chưa có kịch bản">
@@ -377,8 +421,14 @@ export default async function ProjectDetailPage({
               <CardTitle>Thông tin dự án</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5 text-xs text-ink-400">
-              <InfoRow label="Nghĩa thật" value={project.idiom.meaning} />
-              <InfoRow label="Ví dụ" value={project.idiom.exampleSentence} />
+              {content ? (
+                <InfoRow label="Loại video" value={`${content.templateName} · ${content.formatLabel}`} />
+              ) : (
+                <>
+                  <InfoRow label="Nghĩa thật" value={project.idiom.meaning} />
+                  <InfoRow label="Ví dụ" value={project.idiom.exampleSentence} />
+                </>
+              )}
               <InfoRow
                 label="Phong cách"
                 value={project.stylePreset?.name ?? "Mặc định"}

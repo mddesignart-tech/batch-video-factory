@@ -56,7 +56,10 @@ export default async function IdiomsPage({
   const params = await searchParams;
   const q = params.q?.trim() ?? "";
 
+  // The Thành ngữ collection of the Content Library only: a product review or
+  // a story made by the multi-content engine has its own row, not an idiom.
   const where = {
+    contentType: "ENGLISH_IDIOM",
     ...(q
       ? {
           OR: [
@@ -77,8 +80,8 @@ export default async function IdiomsPage({
       orderBy: [{ status: "asc" }, { phrase: "asc" }],
       take: 300,
     }),
-    prisma.idiom.count(),
-    prisma.idiom.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.idiom.count({ where: { contentType: "ENGLISH_IDIOM" } }),
+    prisma.idiom.groupBy({ by: ["status"], where: { contentType: "ENGLISH_IDIOM" }, _count: { _all: true } }),
   ]);
 
   const countOf = (status: string) =>

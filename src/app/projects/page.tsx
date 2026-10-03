@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   Badge,
+  Button,
   Card,
   CardContent,
   CardHeader,
@@ -66,7 +67,12 @@ export default async function ProjectsPage({
     <>
       <PageHeader
         title="Dự án video"
-        description="Mỗi dự án là một video ngắn dựa trên một thành ngữ."
+        description="Mọi video: review sản phẩm, kể chuyện, kiến thức, thành ngữ… Form bên dưới tạo video thành ngữ từ thư viện."
+        actions={
+          <Link href="/create">
+            <Button variant="primary">TẠO VIDEO (mọi loại)</Button>
+          </Link>
+        }
       />
 
       <NewProjectForm
