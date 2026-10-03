@@ -1,5 +1,6 @@
 import { generationAspectFor, type OutputProfile } from "@/domain/platform-profile";
 import { needsScriptApproval } from "@/domain/content-legacy";
+import { criticalPictureCount, sceneReferences } from "./reference-assets";
 import type { Project } from "@prisma/client";
 import type { QualityMode, RouterStrategy } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
@@ -311,7 +312,12 @@ export async function buildPlannedScenes(
   for (const scene of scenes) {
     voiceDone.set(scene.id, scene.dialogueLines.length > 0 && (await existingVoiceLines(scene)).allDone);
   }
+  const required = new Map<string, number>();
+  for (const scene of scenes) {
+    required.set(scene.id, criticalPictureCount(await sceneReferences(scene), scene.referenceOverride));
+  }
   return scenes.map((scene) => ({
+    requiredReferenceImages: required.get(scene.id) ?? 0,
     reuseFacts: reuse.get(scene.id) ?? null,
     sceneNumber: scene.sceneNumber,
     duration: scene.duration,

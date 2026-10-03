@@ -110,6 +110,8 @@ export function VideoAiAdmin({ rows }: { rows: VideoModelRow[] }) {
                       <Badge>Ảnh tham chiếu</Badge>
                     ) : null}
                     {r.profile.supportedDurations.length ? <Badge>≤{Math.max(...r.profile.supportedDurations)}s</Badge> : null}
+                    <Badge>{r.profile.maxReferenceImages ?? 0} ảnh tham chiếu</Badge>
+                    {r.profile.directReference ? <Badge tone="info">Gửi tham chiếu trực tiếp</Badge> : null}
                   </div>
                   {r.profile.inferred ? <p className="mt-1 text-[10px] text-ink-500">(suy ra từ cột cũ)</p> : null}
                 </Td>

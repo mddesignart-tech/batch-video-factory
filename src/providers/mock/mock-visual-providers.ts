@@ -144,6 +144,7 @@ export class MockImageProvider implements ImageProvider {
   }
 
   async createImage(req: ImageRequest): Promise<ProviderJob> {
+    mockRequestLog.image.push(req);
     const key = `${req.sceneId}:${req.model}:${req.prompt}`;
     const started = Date.now();
     return register({
@@ -189,6 +190,13 @@ export class MockImageProvider implements ImageProvider {
 
 // ------------------------------------------------------------------ video ---
 
+/**
+ * What the mock providers were asked for, in order. Lets a test prove which
+ * keyframe / reference pictures a request carried. Mock only; never read by
+ * the app.
+ */
+export const mockRequestLog: { image: ImageRequest[]; video: VideoRequest[] } = { image: [], video: [] };
+
 export class MockVideoProvider implements VideoProvider {
   getName(): string {
     return "mock";
@@ -206,6 +214,7 @@ export class MockVideoProvider implements VideoProvider {
   }
 
   async createVideo(req: VideoRequest): Promise<ProviderJob> {
+    mockRequestLog.video.push(req);
     const key = `${req.sceneId}:${req.model}`;
     const started = Date.now();
     return register({

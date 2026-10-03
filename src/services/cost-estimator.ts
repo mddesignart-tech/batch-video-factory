@@ -35,6 +35,8 @@ export interface PlannedSceneInput {
   complexity: Complexity;
   spendPriority: SpendPriority;
   characterCount: number;
+  /** QĐ-124: CRITICAL reference pictures the image must carry (0 = none, every legacy scene). */
+  requiredReferenceImages?: number;
   /** Spoken text for this scene (dialogue + narration). */
   speechText: string;
   manualImageProvider?: string | null;
@@ -601,6 +603,7 @@ export function planScene(opts: {
           spendPriority: scene.spendPriority,
           durationSeconds: scene.duration,
           characterCount: scene.characterCount,
+          requiredReferenceImages: type === "image" ? scene.requiredReferenceImages : undefined,
           consistencyRequired: type === "image" || type === "video",
           needs1080p: type === "video" ? needs1080p : false,
           frameAspect: type === "video" ? frameAspect : undefined,
@@ -631,6 +634,7 @@ export function planScene(opts: {
         spendPriority: scene.spendPriority,
         durationSeconds: scene.duration,
         characterCount: scene.characterCount,
+        requiredReferenceImages: type === "image" ? scene.requiredReferenceImages : undefined,
         // Characters must look the same in every scene of every video, so the
         // image and video stages always demand reference support.
         consistencyRequired: type === "image" || type === "video",

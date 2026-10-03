@@ -34,6 +34,15 @@ import { cn } from "@/lib/utils";
  *
  * Model, provider, resolution, routing and FFmpeg never appear here.
  */
+/** What the uploaded pictures are, said in the template's own words (QĐ-124). */
+const REFERENCE_LABEL: Partial<Record<string, string>> = {
+  PRODUCT_REVIEW: "Sản phẩm tham chiếu",
+  ADVERTISEMENT: "Sản phẩm / logo tham chiếu",
+  TOY_WORLD: "Đồ chơi tham chiếu",
+  ANIMAL_FACT: "Con vật / mascot tham chiếu",
+  STORY: "Nhân vật & đồ vật",
+};
+
 export function CreateVideoWizard({ presets }: { presets: { id: string; name: string; slug: string }[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -214,18 +223,37 @@ export function CreateVideoWizard({ presets }: { presets: { id: string; name: st
                 </Field>
               ) : null}
               {source === "ASSETS" || product || template.sources.includes("ASSETS") ? (
-                <Field
-                  label={source === "ASSETS" ? "Ảnh của bạn" : "Ảnh của bạn (không bắt buộc)"}
-                  hint="Ảnh vào Thư viện asset và được dùng nguyên bản (không vẽ lại bằng AI), chi phí ảnh $0."
-                >
-                  <Input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    multiple
-                    onChange={(e) => setFiles(Array.from(e.currentTarget.files ?? []))}
-                  />
-                  {files.length > 0 ? <p className="mt-1 text-xs text-ink-400">{files.length} ảnh đã chọn</p> : null}
-                </Field>
+                <div className="space-y-2 rounded-lg border border-ink-800 p-3">
+                  <Field
+                    label={`${REFERENCE_LABEL[template.id] ?? "Ảnh của bạn"}${source === "ASSETS" ? "" : " (không bắt buộc)"}`}
+                    hint="Nhiều ảnh của CÙNG một thứ (mặt trước, mặt bên, hộp…). Ảnh vào Thư viện asset, được dùng nguyên bản và giữ đúng hình ở mọi cảnh. Chi phí $0."
+                  >
+                    <Input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      multiple
+                      onChange={(e) => setFiles(Array.from(e.currentTarget.files ?? []))}
+                    />
+                    {files.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {files.map((f) => (
+                          <img key={f.name} src={URL.createObjectURL(f)} alt={f.name} className="h-14 w-14 rounded border border-ink-700 object-cover" />
+                        ))}
+                      </div>
+                    ) : null}
+                  </Field>
+                  {files.length > 0 && !product ? (
+                    <Field label="Tên (để tool nhận ra trong kịch bản)">
+                      <Input name="referenceName" placeholder="Ví dụ: Xe tải vàng của Ben, Mèo Mun" />
+                    </Field>
+                  ) : null}
+                  {files.length > 0 ? (
+                    <label className="flex items-center gap-2 text-xs text-ink-300">
+                      <input type="checkbox" name="useReferenceThroughout" defaultChecked={product} key={template.id} />
+                      {product ? "Dùng sản phẩm này xuyên suốt video" : "Xuất hiện xuyên suốt video"}
+                    </label>
+                  ) : null}
+                </div>
               ) : null}
               {product || template.category === "ADS" ? (
                 <Field label="Kêu gọi hành động (không bắt buộc)" hint="Số điện thoại, website, Zalo… chép đúng như bạn ghi.">

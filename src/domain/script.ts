@@ -52,6 +52,8 @@ const BaseSceneSchema = z
     motionHint: z.enum(["LOCAL_MOTION", "VIDEO_AI", "AUTO"]).optional(),
     /** Asset Library ids of the person's own pictures this scene should show. */
     assetIds: z.array(z.string()).optional(),
+    /** QĐ-124 reference intent: ReferenceAsset ids (product, toy…) in this scene. */
+    referenceIds: z.array(z.string()).optional(),
   })
   .merge(CharacterListsSchema);
 

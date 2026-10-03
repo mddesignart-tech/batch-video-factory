@@ -30,6 +30,10 @@ put its id in "assetIds" and describe the picture as shown as-is - never ask an
 image model to redraw a real product:
 {{userAssets}}
 
+REFERENCES (things that must look identical wherever they appear). For every
+scene, list the ids of the ones it shows in "referenceIds":
+{{references}}
+
 CHARACTERS (exact names; keep their look identical in every scene):
 {{characters}}
 Narration is spoken by "{{narrator}}", a voice only: put "{{narrator}}" in
@@ -82,6 +86,7 @@ Return ONE valid JSON object and nothing else. No markdown fence, no commentary.
       "videoPrompt": "string",
       "motionHint": "LOCAL_MOTION | VIDEO_AI | AUTO",
       "assetIds": [],
+      "referenceIds": [],
       "complexity": "LOW | MEDIUM | HIGH",
       "spendPriority": "LOW | NORMAL | HIGH",
       "charactersPresent": ["string"],

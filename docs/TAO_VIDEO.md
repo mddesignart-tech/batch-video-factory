@@ -31,3 +31,13 @@ Sau đó, ở trang dự án, thẻ **Kịch bản** cho xem tiêu đề, hook, 
 **Mô hình AI → Video AI (Nâng cao)**: xem provider, model, khả năng, tỷ lệ hỗ trợ, giá, chế độ định tuyến, benchmark;
 bật/tắt, “Chỉ chọn tay”, “Tự định tuyến” (chỉ sau khi benchmark đạt), “Ngừng dùng”, “Đặt mặc định”, sửa hồ sơ khả năng,
 **Kiểm tra kết nối** (chỉ đọc, không tạo video, không tốn phí).
+
+## Tài sản tham chiếu (nhân vật, sản phẩm, đồ chơi, con vật, logo, phong cách)
+- Ở bước tạo video, ảnh bạn tải lên (nhiều góc của CÙNG một thứ) tự trở thành **tham chiếu**: Review sản phẩm → "Sản phẩm
+  tham chiếu" (mặc định dùng xuyên suốt video), Đồ chơi → "Đồ chơi tham chiếu", Động vật → "Con vật / mascot", Kể chuyện →
+  "Nhân vật & đồ vật".
+- Trang dự án → thẻ **Tài sản tham chiếu**: THÊM THAM CHIẾU (tải ảnh, đặt tên, chọn loại), đổi ảnh chính, thêm ảnh,
+  bật/tắt, "Xuyên suốt video", và bảng **Tham chiếu trong từng cảnh** để thêm/bỏ. "Tự động gợi ý theo cảnh" gắn theo tên
+  xuất hiện trong lời/hình của cảnh. Nhân vật lấy từ trang Nhân vật (sửa ở đó).
+- Đổi ảnh của một tham chiếu chỉ làm các cảnh có nó cần ảnh mới; giọng và phụ đề giữ nguyên; luôn xem chi phí trước.
+- Mọi thao tác tham chiếu: **$0**. Chỉ tạo ảnh/video thật mới tốn phí.

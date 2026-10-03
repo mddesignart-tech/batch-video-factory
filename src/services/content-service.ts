@@ -33,6 +33,8 @@ import { getTextProvider } from "@/providers/registry";
 import type { ContentScriptRequest, ScriptRequest } from "@/providers/types";
 import { resolveContentSource, type ContentSourceInput } from "./content-source";
 import { importSceneImage, storeImportedImage } from "./imported-image";
+import { autoAssignReferences, createReference, projectReferenceAssets, setSceneReferences } from "./reference-assets";
+import type { ReferenceType } from "@/domain/reference";
 import { persistScript, selectTextModel } from "./project-service";
 import { guardedTextCall, scriptHashFor, textCallContext, withDerivedRouting } from "./script-service";
 
@@ -83,6 +85,14 @@ export interface CreateContentProjectInput extends ContentSourceInput {
   cta?: string;
   /** The person's own pictures. Stored in the Asset Library, cost $0. */
   uploads?: { bytes: Buffer; filename: string }[];
+  /**
+   * QĐ-124: the uploaded pictures are ONE thing to keep identical across scenes
+   * (the reviewed product, Ben's yellow truck, the cat). Name shown to the
+   * person; defaults to the subject name / topic.
+   */
+  referenceName?: string;
+  /** "Dùng … này xuyên suốt video" - default ON for a product. */
+  useReferenceThroughout?: boolean;
   /** Write the script right away (default). Tests can create first, write later. */
   writeScript?: boolean;
 }
@@ -201,6 +211,22 @@ export async function createContentProject(input: CreateContentProjectInput): Pr
   }
   if (assetIds.length > 0) await updateBrief(project.id, { assetIds });
 
+  // The uploads are pictures of ONE thing that must stay the same in every
+  // scene: a Universal Reference ($0, no provider). Which kind follows the
+  // template; a template without a natural subject keeps them as plain photos.
+  const refType = REFERENCE_TYPE_FOR[template.id];
+  if (assetIds.length > 0 && refType) {
+    await createReference({
+      projectId: project.id,
+      type: refType,
+      name: (input.referenceName?.trim() || input.subjectName?.trim() || topic).slice(0, 120),
+      description: input.facts?.map((f) => f.text).join("; ").slice(0, 500) ?? "",
+      isPrimary: true,
+      useThroughout: input.useReferenceThroughout ?? refType === "PRODUCT",
+      assetIds,
+    });
+  }
+
   await logger.info({
     event: "project.content_created",
     projectId: project.id,
@@ -210,6 +236,16 @@ export async function createContentProject(input: CreateContentProjectInput): Pr
   if (input.writeScript !== false) await generateContentProjectScript(project.id);
   return prisma.project.findUniqueOrThrow({ where: { id: project.id } });
 }
+
+/** Which reference the uploads become, by template. Absent = plain photos only. */
+const REFERENCE_TYPE_FOR: Partial<Record<string, ReferenceType>> = {
+  PRODUCT_REVIEW: "PRODUCT",
+  ADVERTISEMENT: "PRODUCT",
+  TOY_WORLD: "TOY",
+  ANIMAL_FACT: "ANIMAL",
+  STORY: "OBJECT",
+  CUSTOM: "OBJECT",
+};
 
 interface ContentBrief {
   idea: string;
@@ -278,6 +314,7 @@ export async function generateContentProjectScript(projectId: string): Promise<S
     ? await prisma.asset.findMany({ where: { id: { in: brief.assetIds }, projectId, source: "IMPORTED" } })
     : [];
   const userAssets = assets.map((a) => ({ id: a.id, label: a.originalFilename ?? a.id.slice(0, 8) }));
+  const references = (await projectReferenceAssets(projectId)).filter((r) => r.enabled);
 
   const stylePrompt = [project.stylePreset?.positivePrompt, project.stylePreset?.lightingStyle, project.stylePreset?.visualTone]
     .filter(Boolean)
@@ -303,6 +340,9 @@ export async function generateContentProjectScript(projectId: string): Promise<S
     userAssets: userAssets.length ? userAssets.map((a) => `- ${a.id}: ${a.label}`).join("\n") : "(none)",
     characters: cast.length ? cast.map((c) => `- ${c.name} (${c.personality}): ${c.visualPrompt}`).join("\n") : "(no on-screen characters needed)",
     narrator: NARRATOR_NAME,
+    references: references.length
+      ? references.map((r) => `- ${r.id}: ${r.type} "${r.name}"${r.useThroughout ? " (in every scene)" : ""}`).join("\n")
+      : "(none)",
     stylePrompt,
     sceneCount: beats.length,
     structure: beats
@@ -339,6 +379,7 @@ export async function generateContentProjectScript(projectId: string): Promise<S
     facts: brief.facts,
     cta: brief.cta,
     userAssets,
+    references: references.map((r) => ({ id: r.id, type: r.type, name: r.name, useThroughout: r.useThroughout })),
     characters: cast.map((c) => ({ name: c.name, personality: c.personality, visualPrompt: c.visualPrompt })),
     narrator: NARRATOR_NAME,
     stylePrompt,
@@ -364,6 +405,9 @@ export async function generateContentProjectScript(projectId: string): Promise<S
   const script = withDerivedRouting(normaliseContentScript(raw, request));
   await persistScript(projectId, script);
   await applyContentScenePlan(projectId, script, request);
+  // Reference intent the writer returned, then deterministic auto-assignment
+  // for every scene it left empty. Visible and editable on the storyboard.
+  await autoAssignReferences(projectId, { onlyEmpty: true });
 
   await prisma.project.update({
     where: { id: projectId },
@@ -400,6 +444,7 @@ export function normaliseContentScript(script: ScriptDoc, req: ContentScriptRequ
     beatLabel: s.beatLabel ?? req.beats[i]?.label,
     motionHint: s.motionHint ?? req.beats[i]?.motion ?? "AUTO",
     assetIds: (s.assetIds ?? []).filter((id) => known.has(id)),
+    referenceIds: (s.referenceIds ?? []).filter((id) => (req.references ?? []).some((r) => r.id === id)),
   }));
   if (known.size > 0 && scenes.every((s) => s.assetIds.length === 0)) {
     const ids = [...known];
@@ -442,7 +487,12 @@ async function applyContentScenePlan(projectId: string, script: ScriptDoc, req: 
     if (!scene) continue;
     const assetId = doc.assetIds?.[0];
     const local = Boolean(assetId) || doc.motionHint === "LOCAL_MOTION";
-    await prisma.scene.update({ where: { id: scene.id }, data: { motionMode: local ? "LOCAL_MOTION" : "AUTO" } });
+    // Instruction AND stored decision together (as the storyboard editor
+    // writes them): the pipeline and the estimate read motionSource.
+    await prisma.scene.update({
+      where: { id: scene.id },
+      data: local ? { motionMode: "LOCAL_MOTION", motionSource: "LOCAL_MOTION" } : { motionMode: "AUTO" },
+    });
     if (assetId && req.userAssets.some((a) => a.id === assetId)) {
       const asset = await prisma.asset.findUnique({ where: { id: assetId } });
       if (!asset || !fs.existsSync(toAbsolute(asset.filePath))) continue;
@@ -453,6 +503,8 @@ async function applyContentScenePlan(projectId: string, script: ScriptDoc, req: 
         via: "content-upload",
       });
     }
+    // Reference intent from the writer (ids already checked in normalise).
+    if (doc.referenceIds?.length) await setSceneReferences(scene.id, doc.referenceIds);
   }
 }
 

@@ -1,4 +1,6 @@
-import { storedProfile } from "@/domain/video-model-profile";
+import { limitMessage, planReferenceSend, type SendCandidate } from "@/domain/reference";
+import { criticalPictureCount, sceneReferences, type UniversalReference } from "./reference-assets";
+import { referenceLimitFor, storedProfile, supportsDirectVideoReference } from "@/domain/video-model-profile";
 import fs from "node:fs";
 import path from "node:path";
 import type { Asset, ModelRegistry, Project, Scene } from "@prisma/client";
@@ -130,6 +132,8 @@ interface SceneContext {
    * than re-queried at each spend site, where the two could drift apart.
    */
   batchId: string | null;
+  /** QĐ-124: CRITICAL reference pictures this scene's image must carry. 0 for every legacy scene. */
+  requiredReferenceImages: number;
 }
 
 async function loadContext(sceneId: string): Promise<SceneContext> {
@@ -154,6 +158,7 @@ async function loadContext(sceneId: string): Promise<SceneContext> {
     availableProviders,
     budgetRemaining: Math.max(0, round(project.maxBudget - spent)),
     batchId: batchAuth?.batchId ?? null,
+    requiredReferenceImages: criticalPictureCount(await sceneReferences(scene), scene.referenceOverride),
   };
 }
 
@@ -223,13 +228,17 @@ function routeFor(
     // The frame clips are MADE for (QĐ-121): a model of the other orientation is not capable.
     frameAspect: type === "video" ? project.aspectRatio : undefined,
     contentType: type === "video" ? project.contentType : undefined,
+    requiredReferenceImages: type === "image" ? ctx.requiredReferenceImages : undefined,
+    // A scene that must keep a CRITICAL reference never goes text-to-video: it
+    // animates the keyframe that carries the reference (QĐ-124).
     needsReferenceImage:
       type === "video" &&
-      shouldGenerateKeyframe(
-        project.qualityMode as QualityMode,
-        scene.complexity as "LOW" | "MEDIUM" | "HIGH",
-        characterCount,
-      ),
+      (ctx.requiredReferenceImages > 0 ||
+        shouldGenerateKeyframe(
+          project.qualityMode as QualityMode,
+          scene.complexity as "LOW" | "MEDIUM" | "HIGH",
+          characterCount,
+        )),
     // Whether a keyframe EXISTS, not whether we would like one. Veo bills 8
     // seconds instead of 4 when an image is attached, so the estimate has to
     // follow the file on disk rather than the preference.
@@ -1152,7 +1161,7 @@ export async function generateSceneImage(
   // same-scene check: a keyed image whose inputs changed (prompt, references,
   // size, seed) is no longer this scene's picture, and must not be handed back.
   const target = targetForAspect(project.aspectRatio);
-  const shot = await buildSceneImageRequest(scene, project.stylePresetId);
+  let shot = await buildSceneImageRequest(scene, project.stylePresetId);
   const seed = shot.characters.length === 1 ? (shot.characters[0]?.seed ?? undefined) : undefined;
   const keyFor = (provider: string, model: string) =>
     imageReuseKey({
@@ -1245,6 +1254,19 @@ export async function generateSceneImage(
     }
   }
   const decision = routeImage(ctx);
+  // QĐ-124: the chosen model may take fewer reference pictures than the default
+  // cap. Re-plan for ITS limit - a CRITICAL picture that no longer fits stops
+  // here (REFERENCE_LIMIT, nothing bought) unless the person confirmed
+  // "continue without references"; anything else is described in words and
+  // reported. A scene without references is never rebuilt.
+  const chosenModel = ctx.models.find((m) => m.provider === decision.provider && m.modelId === decision.modelId);
+  const modelCap = chosenModel ? Math.min(MAX_REFERENCES_SENT, referenceLimitFor(chosenModel)) : MAX_REFERENCES_SENT;
+  if (shot.references?.length && modelCap < shot.referenceImages.length) {
+    shot = await buildSceneImageRequest(scene, project.stylePresetId, modelCap);
+  }
+  for (const note of shot.referenceWarnings ?? []) {
+    await logger.warn({ event: "scene.reference_warning", projectId: project.id, sceneId: scene.id, message: `Cảnh ${scene.sceneNumber}: ${note}` });
+  }
   const outputPath = path.join(
     projectSubdir(project.id, "images"),
     uuidFilename(".png"),
@@ -1389,6 +1411,14 @@ export interface SceneImageRequest {
    * single image is bought, which is the cheapest moment to fix a script.
    */
   contradictions: ImageContradiction[];
+  /**
+   * QĐ-124: the scene's universal references (product, toy, logo, style…) and
+   * what happened to each. Empty for every scene without one - those requests
+   * are byte-for-byte what they were before.
+   */
+  references?: { id: string; name: string; type: string; priority: string; sent: boolean }[];
+  /** Friendly notes ("Model này chỉ hỗ trợ N ảnh tham chiếu."). Never silent. */
+  referenceWarnings?: string[];
 }
 
 /**
@@ -1414,7 +1444,8 @@ export async function buildSceneImageRequest(
     | "charactersPresentJson"
     | "speakingCharactersJson"
     | "primaryCharactersJson"
-  >,
+  > &
+    Partial<Pick<Scene, "projectId" | "referenceIdsJson" | "referenceOverride" | "sceneNumber">>,
   stylePresetId: string | null,
   /** How many reference images the provider will accept. */
   referenceLimit = MAX_REFERENCES_SENT,
@@ -1528,6 +1559,29 @@ export async function buildSceneImageRequest(
   // Only approved references are ever sent. An unapproved master would quietly
   // become the thing every later scene is matched against.
   const withMaster = characters.filter((c) => c.primaryReference !== null);
+
+  // QĐ-124: a scene that shows a product / toy / animal / logo / style. Only
+  // then does anything below change; a scene without one returns exactly the
+  // request it always did (same prompt, same pictures, same reuse key).
+  const universal =
+    scene.projectId && scene.referenceIdsJson && scene.referenceIdsJson !== "[]"
+      ? await sceneReferences({ projectId: scene.projectId, referenceIdsJson: scene.referenceIdsJson })
+      : [];
+  if (universal.length > 0) {
+    return withUniversalReferences({
+      scene,
+      prompt,
+      negativePrompt: buildNegativePrompt(characters),
+      characters,
+      withMaster,
+      universal,
+      referenceLimit,
+      repaired,
+      trimmed,
+      contradictions: resolved.contradictions,
+    });
+  }
+
   const sent = withMaster.slice(0, referenceLimit);
   const dropped = withMaster.slice(referenceLimit);
 
@@ -1546,6 +1600,123 @@ export async function buildSceneImageRequest(
     droppedByLimit: dropped.map((c) => c.name),
     trimmedCharacters: trimmed,
     contradictions: resolved.contradictions,
+  };
+}
+
+/**
+ * QĐ-124 strategy B: the scene's reference pictures for a video model that
+ * declares it can take them besides the keyframe. Others get nothing extra -
+ * they rely on the keyframe (strategy A), which already carries the references.
+ */
+async function directVideoReferences(
+  ctx: SceneContext,
+  decision: { provider: string; modelId: string },
+): Promise<{ referenceImages?: string[] }> {
+  const model = ctx.models.find((m) => m.provider === decision.provider && m.modelId === decision.modelId);
+  if (!model || !supportsDirectVideoReference(model)) return {};
+  const refs = await sceneReferences(ctx.scene);
+  const plan = planReferenceSend(
+    refs.map((r, i) => {
+      const main = r.images.find((img) => img.primary);
+      return { key: r.id, name: r.name, type: r.type, priority: r.priority, isPrimary: r.isPrimary, imagePath: main?.exists ? toAbsolute(main.path) : null, order: i };
+    }),
+    referenceLimitFor(model),
+  );
+  return plan.sent.length ? { referenceImages: plan.sent.map((c) => c.imagePath as string) } : {};
+}
+
+/**
+ * QĐ-124: the request for a scene that shows universal references.
+ *
+ * Characters keep their own order and stay IMPORTANT; the scene's references
+ * join them by priority (CRITICAL first) and type rank. What does not fit the
+ * provider's cap is described in words AND reported; a CRITICAL picture that
+ * does not fit stops the scene (unless the person confirmed "continue without
+ * references") - it is never dropped silently. Logo and style pictures are
+ * never sent to the generative model: they shape the prompt instead.
+ */
+function withUniversalReferences(input: {
+  scene: Partial<Pick<Scene, "sceneNumber" | "referenceOverride">>;
+  prompt: string;
+  negativePrompt: string;
+  characters: CharacterSheet[];
+  withMaster: CharacterSheet[];
+  universal: UniversalReference[];
+  referenceLimit: number;
+  repaired: string[];
+  trimmed: string[];
+  contradictions: ImageContradiction[];
+}): SceneImageRequest {
+  const candidates: SendCandidate[] = [
+    ...input.withMaster.map((c, i) => ({
+      key: `character:${c.name}`,
+      name: c.name,
+      type: "CHARACTER" as const,
+      priority: "IMPORTANT" as const,
+      isPrimary: i === 0,
+      imagePath: referenceAbsolutePath(c.primaryReference as string),
+      order: i,
+    })),
+    ...input.universal.map((r, i) => {
+      const main = r.images.find((img) => img.primary);
+      return {
+        key: r.id,
+        name: r.name,
+        type: r.type,
+        priority: r.priority,
+        isPrimary: r.isPrimary,
+        imagePath: main && main.exists ? toAbsolute(main.path) : null,
+        order: 100 + i,
+      };
+    }),
+  ];
+  const plan = planReferenceSend(candidates, input.referenceLimit);
+  const overridden = input.scene.referenceOverride === "NO_REFERENCES_CONFIRMED";
+  if (plan.criticalDropped.length > 0 && !overridden) {
+    throw new GenerationError(
+      `REFERENCE_LIMIT: cảnh ${input.scene.sceneNumber ?? "?"} cần giữ đúng ${plan.criticalDropped.map((c) => `"${c.name}"`).join(", ")}. ` +
+        `${limitMessage(plan.limit)} Hãy CHỌN MODEL KHÁC, DÙNG LOCAL MOTION, hoặc xác nhận TIẾP TỤC KHÔNG DÙNG THAM CHIẾU.`,
+      "image",
+      "reference",
+      false,
+    );
+  }
+  const sentKeys = new Set(plan.sent.map((c) => c.key));
+  const lines = input.universal.map((r) => {
+    const sent = sentKeys.has(r.id);
+    const what = r.description ? `: ${r.description}` : "";
+    switch (r.type) {
+      case "LOGO":
+        return `Leave a clean area for the "${r.name}" logo, added later as the real file. Do not draw any logo, brand mark or lettering${what}.`;
+      case "STYLE":
+        return `Visual style reference "${r.name}"${what}. Match its palette, lighting and mood.`;
+      default:
+        return (
+          `${sent ? "Attached reference picture" : "Reference"} "${r.name}" (${r.type.toLowerCase()})${what}. ` +
+          `Keep exactly the same shape, colours, materials, logo and label in every shot. Never replace it with a different ${r.type.toLowerCase()}.`
+        );
+    }
+  });
+  const warnings: string[] = [];
+  if (plan.droppedByLimit.length > 0) {
+    warnings.push(`${limitMessage(plan.limit)} ${plan.droppedByLimit.map((c) => c.name).join(", ")} được giữ bằng mô tả.`);
+  }
+  if (overridden && plan.criticalDropped.length > 0) {
+    warnings.push("Bạn đã chọn tiếp tục không dùng ảnh tham chiếu cho cảnh này.");
+  }
+  return {
+    prompt: [input.prompt, ...lines].join("\n"),
+    negativePrompt: input.negativePrompt,
+    referenceImages: plan.sent.map((c) => c.imagePath as string),
+    characters: input.characters,
+    referencedCharacters: plan.sent.filter((c) => c.type === "CHARACTER").map((c) => c.name),
+    unreferencedCharacters: input.characters.filter((c) => c.primaryReference === null).map((c) => c.name),
+    repairedCharacters: input.repaired,
+    droppedByLimit: plan.droppedByLimit.map((c) => c.name),
+    trimmedCharacters: input.trimmed,
+    contradictions: input.contradictions,
+    references: input.universal.map((r) => ({ id: r.id, name: r.name, type: r.type, priority: r.priority, sent: sentKeys.has(r.id) })),
+    referenceWarnings: warnings,
   };
 }
 
@@ -2298,6 +2469,7 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
           height: target.height,
           fps: target.fps,
           referenceImagePath: keyframe,
+          ...(await directVideoReferences(ctx, d)),
           outputPath,
         }),
       poll: (id) => provider.getJobStatus(id),

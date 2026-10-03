@@ -3687,3 +3687,34 @@ bản / ảnh / URL-gated / storyboard / thư viện thành ngữ) → ngôn ng�
   "Kiểm tra kết nối" chỉ đọc miễn phí (Runway GET organization, OpenAI GET /models). UI: Mô hình AI → Video AI (Nâng cao).
 
 Test: `content-registry` 12, `multi-content` 14, `video-provider-system` 14.
+
+## QĐ-124 — Universal Reference Asset System (2026-10-03, $0, không POST trả phí)
+
+Yêu cầu: `.ai/REFERENCE_SPEC.md`. Một hệ tham chiếu cho mọi content type: CHARACTER / PRODUCT / OBJECT / TOY / ANIMAL /
+LOGO / STYLE (`domain/reference.ts`, `services/reference-assets.ts`).
+
+- Dữ liệu (migration `20261004000000_reference_assets`, chỉ thêm): bảng `ReferenceAsset` (thực thể; project-scoped; tên,
+  mô tả, ảnh chính `assetId`, `priority` CRITICAL/IMPORTANT/OPTIONAL, `useThroughout`, `version`), `Asset.referenceAssetId`
+  (ảnh của nó vẫn là Asset IMPORTED — không có kho asset thứ hai), `Scene.referenceIdsJson` (mặc định "[]"),
+  `Scene.referenceOverride` (chỉ người dùng xác nhận "tiếp tục không dùng tham chiếu").
+- Nhân vật: Character Bible + `CharacterReference` giữ nguyên, chỉ được ÁNH XẠ vào giao diện chung khi đọc.
+- Ảnh tải lên ở Review sản phẩm / Quảng cáo / Đồ chơi / Động vật / Kể chuyện / Custom → MỘT tham chiếu (PRODUCT mặc định
+  CRITICAL + xuyên suốt). Kịch bản trả `referenceIds` theo cảnh; cảnh còn trống được gắn tự động, tất định (tên/alias
+  khớp nguyên từ, bỏ dấu; xuyên suốt; ảnh khung là ảnh của tham chiếu). Sửa được trên panel.
+- Ảnh: cảnh KHÔNG có tham chiếu dựng yêu cầu y như cũ (cùng prompt, cùng ảnh, cùng khoá reuse). Cảnh có tham chiếu: gửi
+  theo ưu tiên (CRITICAL → sản phẩm/nhân vật chính → nhân vật → đồ vật/đồ chơi/động vật), cắt theo giới hạn của model
+  ĐÃ CHỌN (`referenceLimitFor`: hồ sơ `maxReferenceImages`, mặc định 3 nếu model hỗ trợ tham chiếu, 0 nếu không); LOGO và
+  STYLE không bao giờ gửi làm ảnh (chỉ vào prompt; logo để chừa chỗ — overlay logo thật lúc render CHƯA làm). Ảnh vượt
+  giới hạn → mô tả bằng chữ + cảnh báo; CRITICAL vượt giới hạn → `REFERENCE_LIMIT`, không mua (trừ khi người dùng xác nhận).
+- Router: `requiredReferenceImages` (số ảnh CRITICAL) loại model ảnh không nhận đủ (tự động và chọn tay, kèm lý do).
+  Video: cảnh có tham chiếu CRITICAL luôn image-to-video từ keyframe (không text-to-video); chiến lược B (gửi tham chiếu
+  trực tiếp) chỉ khi hồ sơ model khai `directReference` — chưa adapter nào khai. Sản phẩm/logo CRITICAL → LOCAL_MOTION.
+- Đổi ảnh/mô tả tham chiếu → `version`+1, chỉ cảnh có tham chiếu đó mất ảnh/clip GENERATED (giữ Asset + sổ chi phí); cảnh
+  dùng ảnh nhập của chính tham chiếu được thay ảnh chính mới ($0). Giọng/phụ đề không đổi. Dự án đã xong quay về
+  `script_ready` để PREFLIGHT báo giá trước khi mua.
+- Preflight: tham chiếu bị xoá/tắt/mất file → BLOCKED (`REFERENCE_MISSING_LOCAL_FILE`), không tự tạo lại.
+- Sửa lỗi QĐ-123: cảnh gợi ý LOCAL_MOTION chỉ ghi `motionMode`, thiếu `motionSource` → dự toán/chạy vẫn có thể mua Video AI.
+  Nay ghi cả hai (như trình sửa Storyboard).
+- Mock provider có `mockRequestLog` (chỉ để test đọc yêu cầu đã gửi).
+
+Test: `tests/reference-assets.test.ts` (10).

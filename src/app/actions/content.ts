@@ -31,6 +31,7 @@ const CreateContentInput = z.object({
   /** One fact per line, typed by the person (USER_PROVIDED). */
   factsText: z.string().max(5000).optional(),
   cta: z.string().max(300).optional(),
+  referenceName: z.string().max(120).optional(),
   language: z.string().default("vi"),
   bilingualMode: z.string().optional(),
   audience: z.string().optional(),
@@ -79,6 +80,9 @@ export async function createContentVideo(formData: FormData): Promise<ActionResu
         .filter(Boolean)
         .map((text) => ({ text, origin: "USER_PROVIDED" as const })),
       cta: d.cta,
+      referenceName: d.referenceName,
+      // An unchecked box sends nothing: OFF. A checked one sends "on".
+      useReferenceThroughout: formData.get("useReferenceThroughout") === "on",
       language: d.language,
       bilingualMode: d.bilingualMode,
       audience: d.audience,

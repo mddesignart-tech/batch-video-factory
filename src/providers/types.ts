@@ -144,6 +144,8 @@ export interface ContentScriptRequest {
   cta: string;
   /** The person's own pictures, already in the Asset Library. */
   userAssets: { id: string; label: string }[];
+  /** QĐ-124: things that must look the same in every scene they appear in. */
+  references?: { id: string; type: string; name: string; useThroughout: boolean }[];
   characters: { name: string; personality: string; visualPrompt: string }[];
   /** Voice-only speaker of narration. */
   narrator: string;
@@ -234,6 +236,12 @@ export interface VideoRequest {
   seed?: number;
   /** Image-to-video keyframe, when the chosen model supports one. */
   referenceImagePath?: string;
+  /**
+   * QĐ-124, strategy B: reference pictures besides the keyframe (product,
+   * character…). Only sent to an adapter whose capability profile declares
+   * `directReference`; every other adapter never receives it.
+   */
+  referenceImages?: string[];
   outputPath: string;
 }
 

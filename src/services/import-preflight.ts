@@ -1,3 +1,4 @@
+import { referenceProblems } from "./reference-assets";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { round } from "@/lib/utils";
@@ -893,9 +894,15 @@ export async function preflightImportedBatch(
     // because a finished video is finished regardless of what its estimate says
     // now, and a failed one needs its failure read rather than its forecast.
     let blockedReason: string | null = null;
+    let referenceIssues: Awaited<ReturnType<typeof referenceProblems>> = [];
     let lifecycle: ImportVideoLifecycle;
     if (project.status === "completed") {
       lifecycle = "COMPLETED";
+    } else if ((referenceIssues = await referenceProblems(project.id)).length > 0) {
+      // QĐ-124: a reference a scene must show is gone (file deleted, reference
+      // removed or switched off). Never re-made on its own - a person re-uploads.
+      lifecycle = "BLOCKED";
+      blockedReason = referenceIssues.map((p) => p.message).join(" ");
     } else if (badVoices.has(project.id)) {
       // NEEDS_ATTENTION: replacing the voice is a paid TTS request - a person
       // decides; no plan, run or resume may buy it on its own.

@@ -49,6 +49,14 @@ export const VideoModelProfileSchema = z.object({
   imageToVideo: z.boolean().optional(),
   referenceImage: z.boolean().optional(),
   characterReference: z.boolean().optional(),
+  /** QĐ-124: several reference pictures in one request. */
+  multipleReferences: z.boolean().optional(),
+  /** QĐ-124: keeps a product's shape / label from a reference picture. */
+  productReference: z.boolean().optional(),
+  /** QĐ-124: how many reference pictures one request may carry. */
+  maxReferenceImages: z.number().int().min(0).max(16).optional(),
+  /** QĐ-124, video: the adapter can send reference pictures besides the keyframe. */
+  directReference: z.boolean().optional(),
   /** Price as the vendor states it (credits), next to the $ price column. */
   credits: z.number().nonnegative().optional(),
   billingUnit: z.string().optional(),
@@ -69,6 +77,31 @@ export interface ProfileColumns {
   maxDuration: number;
   lifecycle: string;
   enabled: boolean;
+}
+
+/** Default when nothing says otherwise: the cap the image client has always used. */
+export const DEFAULT_REFERENCE_LIMIT = 3;
+
+/**
+ * How many reference pictures this model takes (image or video row). An explicit
+ * profile wins; otherwise a model that supports references takes the long
+ * standing default, and one that does not takes none. Never assumed equal for
+ * every model.
+ */
+export function referenceLimitFor(model: {
+  capabilityProfileJson?: string | null;
+  supportsReferenceImage: boolean;
+  supportsCharacterReference: boolean;
+}): number {
+  const stored = storedProfile(model.capabilityProfileJson);
+  if (stored?.maxReferenceImages !== undefined) return stored.maxReferenceImages;
+  if (stored?.referenceImage === false && stored?.characterReference === false) return 0;
+  return model.supportsReferenceImage || model.supportsCharacterReference ? DEFAULT_REFERENCE_LIMIT : 0;
+}
+
+/** Video only: may this adapter send references besides the keyframe? */
+export function supportsDirectVideoReference(model: { capabilityProfileJson?: string | null }): boolean {
+  return storedProfile(model.capabilityProfileJson)?.directReference === true;
 }
 
 /** The stored profile, or null when none / unreadable (never throws on a page). */
@@ -101,6 +134,10 @@ export function effectiveProfile(model: ProfileColumns): VideoModelProfile & { i
     imageToVideo: stored?.imageToVideo ?? model.supportsImageToVideo,
     referenceImage: stored?.referenceImage ?? model.supportsReferenceImage,
     characterReference: stored?.characterReference ?? model.supportsCharacterReference,
+    multipleReferences: stored?.multipleReferences,
+    productReference: stored?.productReference,
+    maxReferenceImages: referenceLimitFor(model),
+    directReference: stored?.directReference,
     credits: stored?.credits,
     billingUnit: stored?.billingUnit,
     quality: stored?.quality ?? {},

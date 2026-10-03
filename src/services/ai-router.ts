@@ -1,4 +1,5 @@
-import { contentQuality, profileAspectMismatch, profileDurationMismatch } from "@/domain/video-model-profile";
+import { contentQuality, profileAspectMismatch, profileDurationMismatch, referenceLimitFor } from "@/domain/video-model-profile";
+import { limitMessage } from "@/domain/reference";
 import { orientationOf, viShape } from "@/domain/platform-profile";
 import type { ModelRegistry } from "@prisma/client";
 import type {
@@ -54,6 +55,13 @@ export interface RouteContext {
    * (domain/video-model-profile); otherwise it changes nothing.
    */
   contentType?: string | null;
+  /**
+   * QĐ-124: how many CRITICAL reference pictures this scene must send (a
+   * reviewed product, a recurring toy…). A model that takes fewer is not
+   * capable - auto or pinned. 0 / undefined = no requirement (every legacy
+   * scene), and the person can lift it per scene ("tiếp tục không dùng tham chiếu").
+   */
+  requiredReferenceImages?: number;
   needs1080p: boolean;
   needsReferenceImage: boolean;
   /**
@@ -260,6 +268,9 @@ export function explainIncapable(model: ModelRegistry, ctx: RouteContext): strin
       return `cảnh có ${ctx.characterCount} nhân vật cần giữ nhất quán nhưng model không nhận ảnh tham chiếu`;
     }
   }
+  if (ctx.type === "image" && (ctx.requiredReferenceImages ?? 0) > referenceLimitFor(model)) {
+    return `cảnh cần ${ctx.requiredReferenceImages} ảnh tham chiếu bắt buộc. ${limitMessage(referenceLimitFor(model))}`;
+  }
   return "không đáp ứng yêu cầu của cảnh";
 }
 
@@ -322,6 +333,10 @@ export function isCapable(model: ModelRegistry, ctx: RouteContext): boolean {
     ) {
       return false;
     }
+  }
+
+  if (ctx.type === "image" && (ctx.requiredReferenceImages ?? 0) > referenceLimitFor(model)) {
+    return false;
   }
 
   if (ctx.type === "image" && ctx.consistencyRequired) {

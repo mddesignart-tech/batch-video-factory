@@ -35,6 +35,8 @@ import { BudgetProblemBox, VideoBudgetCard } from "@/components/video-budget";
 import { projectFormat } from "@/services/output-profile";
 import { VideoFormatCard } from "./video-format-card";
 import { ScriptReviewCard } from "./script-review-card";
+import { ReferencePanel } from "./reference-panel";
+import { listProjectReferences, referenceProblems, sceneReferenceIds } from "@/services/reference-assets";
 import { contentSummary } from "@/services/content-service";
 import { audienceOf, languageOf } from "@/domain/content-options";
 import { spokenLines } from "@/domain/scene-subtitles";
@@ -110,6 +112,16 @@ export default async function ProjectDetailPage({
   // project (contentType NULL) shows exactly what it always did.
   const content = project.contentType ? contentSummary(project) : null;
   const scriptDoc = content ? parseJson<ScriptDoc | null>(project.scriptJson, null) : null;
+  // Tài sản tham chiếu (QĐ-124): read only here, $0.
+  const [references, refProblems] = await Promise.all([listProjectReferences(id), referenceProblems(id)]);
+  const referenceTitle =
+    {
+      STORY: "Nhân vật & đồ vật",
+      TOY_WORLD: "Đồ chơi tham chiếu",
+      ANIMAL_FACT: "Con vật / mascot tham chiếu",
+      PRODUCT_REVIEW: "Sản phẩm tham chiếu",
+      ADVERTISEMENT: "Sản phẩm tham chiếu",
+    }[project.contentType ?? ""] ?? "Tài sản tham chiếu";
 
   return (
     <>
@@ -245,6 +257,37 @@ export default async function ProjectDetailPage({
                 />
               );
             })()
+          ) : null}
+
+          {project.scenes.length > 0 ? (
+            <ReferencePanel
+              projectId={project.id}
+              title={referenceTitle}
+              references={references.map((r) => ({
+                id: r.id,
+                type: r.type,
+                name: r.name,
+                priority: r.priority,
+                enabled: r.enabled,
+                useThroughout: r.useThroughout,
+                version: r.version,
+                source: r.source,
+                images: r.images,
+              }))}
+              scenes={project.scenes
+                .filter((s) => !s.skipped)
+                .map((s) => ({
+                  id: s.id,
+                  sceneNumber: s.sceneNumber,
+                  referenceIds: sceneReferenceIds(s),
+                  characters: sceneCharacters(s).present,
+                  withoutReferences: s.referenceOverride === "NO_REFERENCES_CONFIRMED",
+                  referenceProblem:
+                    s.errorMessage && /REFERENCE_LIMIT/.test(s.errorMessage)
+                      ? "Model này không hỗ trợ đủ tài sản tham chiếu của cảnh."
+                      : (refProblems.find((p) => p.sceneNumber === s.sceneNumber)?.message ?? null),
+                }))}
+            />
           ) : null}
 
           {project.scenes.length > 0 ? (

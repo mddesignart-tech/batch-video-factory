@@ -649,6 +649,12 @@ model Scene {
   providerFlagsJson String  @default("[]")
 
   errorMessage String?
+  /// QĐ-124: ReferenceAsset ids this scene shows (product, toy, logo…). Characters
+  /// stay in the character lists above. "[]" on every scene made before it.
+  referenceIdsJson  String  @default("[]")
+  /// NO_REFERENCES_CONFIRMED = the person chose "tiếp tục không dùng tham chiếu"
+  /// for a model that cannot take them. Null = references are required.
+  referenceOverride String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -713,6 +719,9 @@ model Asset {
   /// {"references": [sha...]} for a picture, {"media": [sha...]} for a render.
   /// Feeds the dependency view; "{}" when unknown.
   inputsJson        String    @default("{}")
+  /// Universal reference system (QĐ-124): this picture is one of the images of
+  /// a ReferenceAsset (front, side, box…). The file stays an ordinary Asset.
+  referenceAssetId  String?
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   scene   Scene?  @relation(fields: [sceneId], references: [id], onDelete: Cascade)
@@ -720,6 +729,7 @@ model Asset {
   @@index([projectId, kind])
   @@index([reuseKey])
   @@index([sha256])
+  @@index([referenceAssetId])
 }
 
 // ------------------------------------------------------------------- jobs ---
@@ -1151,4 +1161,37 @@ model Setting {
   key       String   @id
   valueJson String
   updatedAt DateTime @updatedAt
+}
+
+/// UNIVERSAL REFERENCE ASSET (QĐ-124): one thing that must look the same in every
+/// scene - a product, a toy, a prop, an animal, a logo, a visual style. Its
+/// pictures are ordinary Asset rows (`Asset.referenceAssetId`), so this is not a
+/// second asset store. Characters keep CharacterReference and are mapped into
+/// the same view when read (services/reference-assets.ts), never copied.
+model ReferenceAsset {
+  id            String   @id @default(uuid())
+  /// Project-scoped. Null is reserved for a future shared library.
+  projectId     String?
+  /// CHARACTER | PRODUCT | OBJECT | TOY | ANIMAL | LOGO | STYLE
+  referenceType String
+  name          String
+  description   String   @default("")
+  /// The main picture (Asset id). Null until a picture is added.
+  assetId       String?
+  /// The main thing of its type in the project (the reviewed product).
+  isPrimary     Boolean  @default(false)
+  /// CRITICAL | IMPORTANT | OPTIONAL
+  priority      String   @default("IMPORTANT")
+  enabled       Boolean  @default(true)
+  /// Shown in every scene unless removed there ("Dùng xuyên suốt video").
+  useThroughout Boolean  @default(false)
+  characterId   String?
+  tagsJson      String   @default("[]")
+  notes         String   @default("")
+  /// Bumped when its pictures change; scene assets record the version they used.
+  version       Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([projectId, referenceType])
 }

@@ -246,6 +246,10 @@ export function writeMockContentScript(req: ContentScriptRequest): ScriptDoc {
       beatLabel: beat.label,
       motionHint: assetIds.length > 0 ? "LOCAL_MOTION" : beat.motion,
       assetIds,
+      // Reference intent: what is used throughout, plus what this scene names.
+      referenceIds: (req.references ?? [])
+        .filter((r) => r.useThroughout || `${line.narration} ${visual}`.toLowerCase().includes(r.name.toLowerCase()))
+        .map((r) => r.id),
     } as SceneDoc;
   });
 
