@@ -3658,3 +3658,32 @@ Nhập storyboard: người nói = mọi nhân vật trong cast có nhãn "Tên:
 nhập mới. Giọng vẫn theo từng câu (khoá reuse theo câu): sửa một câu chỉ tạo lại đúng câu đó.
 
 Test: `tests/multi-speaker-dialogue.test.ts` (4 test; 2 test đỏ trên code cũ đúng chỗ).
+
+## QĐ-123 — Multi-Content Video Engine + hệ thống nhà cung cấp Video AI mở rộng (2026-10-03, $0, không POST trả phí)
+
+Yêu cầu: `.ai/MULTI_CONTENT_SPEC.md`. Tool không còn bắt buộc Thành ngữ: chọn loại video → nguồn (ý tưởng / dán văn
+bản / ảnh / URL-gated / storyboard / thư viện thành ngữ) → ngôn ngữ, thời lượng, nền tảng → TẠO KỊCH BẢN → DUYỆT → media.
+
+- Không làm `Project.idiomId` nullable (~108 chỗ đọc). Bảng `Idiom` = mục Content Library, cột `contentType` (mặc định
+  ENGLISH_IDIOM); mỗi dự án đa nội dung có MỘT dòng riêng (`status: "content"`, không lọt vào chọn thành ngữ / lô).
+- Migration `20261003000000_multi_content` chỉ thêm cột. Project cũ `contentType = NULL` ⇒ đọc là ENGLISH_IDIOM
+  (`domain/content-legacy.ts`), không ghi ngược, không cần DUYỆT KỊCH BẢN. Thử trên bản sao DB production: số liệu y hệt.
+- Một registry (`domain/content-templates.ts`): 15 template / 9 nhóm, mỗi template có cấu trúc beat, luật, mặc định,
+  `promptVersion` (vd `product-review-v1`, lưu ở `Project.templateVersion`). Thành ngữ = template `LEGACY_IDIOM` dùng
+  nguyên bộ viết cũ + `prompts/script.txt`. Các template khác dùng `prompts/content-script.txt`.
+- Scene planner theo thời lượng + đối tượng (15s≈3–4, 30s≈5–7, 60s≈10–12 cảnh), không ép 6 cảnh.
+- Người dẫn chuyện `Narrator` = giọng, không bao giờ được vẽ (`isNarrator` trong `sceneCharacters` / `SceneSchema`);
+  tạo tự động với giọng của nhân vật có sẵn, tắt khỏi cast.
+- Ảnh thật của người dùng → Asset Library (IMPORTED, $0) → gắn vào beat `prefersUserAsset` → `motionMode LOCAL_MOTION`.
+  Gợi ý VIDEO_AI của template chỉ thành `AUTO` (router + LOW_AUTO + duyệt quyết định), không bao giờ là lệnh mua.
+- Sự thật có nguồn gốc SOURCE_FACT / USER_PROVIDED / AI_GENERATED; template factual tự viết nội dung ⇒ `needsFactReview`.
+- Cổng tiền: chỉ có cuộc gọi TEXT (qua `guardedTextCall` — tách ra từ `generateScript`, cùng spend gate/ledger).
+  Media chặn bởi `SCRIPT_NOT_APPROVED` ở `startMediaGeneration` và `approveAndRun` cho tới khi DUYỆT KỊCH BẢN.
+- URL: `services/content-source.ts` có resolver URL nhưng `available: false` (chưa có extractor; không scrape).
+- Video AI: `providers/video-adapters.ts` (một dòng/nhà cung cấp, thay if/else), `ModelRegistry.capabilityProfileJson`
+  (`domain/video-model-profile.ts`): tỷ lệ/thời lượng chỉ THU HẸP khi có danh sách; điểm benchmark theo loại nội dung chỉ
+  tính khi có. Hồ sơ NULL = định tuyến y như cũ. Routing mode AUTO_OK/PIN_ONLY/DEPRECATED/DISABLED ánh xạ lên lifecycle;
+  AUTO_OK cần BENCHMARK_VERIFIED + giá > 0 và không bao giờ nới LOW_AUTO. Model mới phát hiện: TẮT + PIN_ONLY + giá 0.
+  "Kiểm tra kết nối" chỉ đọc miễn phí (Runway GET organization, OpenAI GET /models). UI: Mô hình AI → Video AI (Nâng cao).
+
+Test: `content-registry` 12, `multi-content` 14, `video-provider-system` 14.
