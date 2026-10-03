@@ -32,6 +32,11 @@ model Idiom {
   region          String    @default("General")
   notes           String    @default("")
   status          String    @default("unused")
+  /// Multi-content engine: which CONTENT LIBRARY collection this row belongs to.
+  /// The 133 idioms are the ENGLISH_IDIOM collection; a project made from a
+  /// prompt / pasted text gets one row of its own type, so `Project.idiomId`
+  /// (required, read in ~100 places) never has to become nullable.
+  contentType     String    @default("ENGLISH_IDIOM")
   timesUsed       Int       @default(0)
   lastUsedAt      DateTime?
   createdAt       DateTime  @default(now())
@@ -42,6 +47,7 @@ model Idiom {
   @@index([status])
   @@index([category])
   @@index([difficulty])
+  @@index([contentType])
 }
 
 /// The canonical identity of a recurring character.
@@ -269,6 +275,11 @@ model ModelRegistry {
   speedRating                Int       @default(5)
   consistencyRating          Int       @default(5)
   historicalSuccessRate      Float     @default(1)
+  /// Extensible provider system: supported aspect ratios / durations /
+  /// resolutions, per-content quality scores, credits/billing unit, default
+  /// flag. JSON (domain/video-model-profile.ts). NULL = inferred from the
+  /// columns above and the size suffix, exactly as before - no routing change.
+  capabilityProfileJson      String?
   /// Where this model is in its life, as an operator-controlled fact.
   ///
   /// ACTIVE      the router may choose it automatically
@@ -451,6 +462,31 @@ model Project {
   /// back behind the person's back. `aspectRatio` stays the shape the pictures
   /// and clips are MADE in; this is the shape the video is RENDERED in.
   outputProfileJson String?
+  /// Multi-content engine. NULL on every project made before it existed; such a
+  /// project reads as ENGLISH_IDIOM (domain/content-legacy.ts) and is never
+  /// rewritten behind the person's back.
+  contentType        String?
+  /// Template id + prompt version that wrote the script ("product-review-v1").
+  contentTemplateId  String?
+  templateVersion    String?
+  /// PROMPT | TEXT | URL | ASSETS | STORYBOARD | IDIOM
+  contentSourceType  String?
+  sourceText         String?
+  sourceUrl          String?
+  audience           String?
+  tone               String?
+  /// NARRATION | DIALOGUE | MIXED | NO_VOICE
+  voiceMode          String?
+  /// Only for bilingual projects (vi+en): EN_VOICE_VI_SUB | VI_EXPLAIN_EN_EXAMPLE | ALTERNATING | BILINGUAL_SUB
+  bilingualMode      String?
+  /// The brief: product facts with provenance (SOURCE_FACT / USER_PROVIDED /
+  /// AI_GENERATED), CTA, brand, user asset ids, free-form idea. JSON.
+  contentBriefJson   String?
+  /// Hook only - no music provider. Ducked under voice by the mixer when set.
+  backgroundMusicAssetId String?
+  /// When a person pressed DUYỆT KỊCH BẢN. Media for a multi-content project
+  /// waits for it; a legacy project (contentType NULL) never needed it.
+  scriptApprovedAt   DateTime?
   /// When the executor last started / finished this video (queue view).
   runStartedAt      DateTime?
   runFinishedAt     DateTime?
