@@ -78,7 +78,7 @@ export async function rerenderAction(projectId: string): Promise<ActionResult> {
   try {
     await requeueRender(projectId);
     revalidatePath(`/projects/${projectId}`);
-    return { ok: true, message: "Đang render lại tại máy - không gọi API, $0." };
+    return { ok: true, message: "Đang render lại tại máy · $0 API (không gọi Text, Image, Video, Voice API)." };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

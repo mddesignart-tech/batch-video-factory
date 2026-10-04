@@ -3749,3 +3749,23 @@ Yêu cầu: `.ai/OUTPUT_CONTROLS_SPEC.md`. Lỗi thật: phụ đề cỡ 7,8% c
   RENDER LẠI).
 
 Test: `tests/output-controls.test.ts` (13).
+
+## QĐ-126 — Phụ đề đồng nhất cỡ chữ toàn video (2026-10-04)
+
+Lỗi thật: cùng video 9:16, "My socks?" to còn `Max: "A little bird told me it is your..."` nhỏ hẳn, 2 dòng. Chọn
+Lớn còn tệ hơn.
+- NGUYÊN NHÂN GỐC: `fitCaption` (QĐ-125) xét TỪNG câu riêng: câu nào quá `maxLines` dòng là thu chữ TRƯỚC (0,92 → 0,85
+  → 0,80) rồi mới chia màn hình, và ghi `{\fs}` riêng vào từng dòng ASS. Câu dài/có nhãn "Max:" + ngoặc kép → 80% cỡ
+  gốc; câu ngắn → 100%. Cỡ Lớn hẹp số ký tự/dòng hơn nên càng nhiều câu bị thu. Không phải do cảnh lưu style riêng
+  (Scene không có trường style phụ đề), không phải đường render khác (một đường duy nhất `applyOutputControls` →
+  `buildASS`), xem trước và render cuối đã dùng cùng `subtitleLayout` + `buildASS`.
+- SỬA (`domain/output-controls.ts`): thứ tự mới 1) xuống tối đa 2 dòng ở CỠ GỐC (cân dòng, tránh "dòng dài / một từ");
+  2) câu vẫn dài → chia nhiều màn hình theo thời gian của chính câu đó (ưu tiên ngắt sau dấu câu, nhãn "Max:" không
+  bị tách); chỉ thử thu 95%/90% nếu nhờ vậy câu nằm gọn MỘT màn hình; 3) thu thêm chỉ khi một từ dài hơn cả dòng.
+  `MIN_AUTO_FIT_SCALE = 0.85` (trước 0,80). Thực tế: mọi câu trong 90–100% cỡ gốc.
+- `SubtitleLayout.fitRules = "wrap-split-shrink-v2"` vào công thức render → video cũ render lại tại máy ($0).
+- Bật/tắt phụ đề, Nhỏ/Vừa/Lớn/Tùy chỉnh, vị trí, kiểu, dự án cũ mặc định BẬT: đã có từ QĐ-125, giữ nguyên. UI ghi rõ
+  "RENDER LẠI · $0 API", mọi cảnh dùng chung một kiểu (không có ghi đè theo cảnh).
+- Không chạm voice / parser nhiều người nói / TTS. Không migration.
+
+Test: `tests/subtitle-consistency.test.ts` (13).

@@ -136,6 +136,8 @@ const SIZE_FACTOR: Record<Exclude<SubtitleSize, "CUSTOM">, number> = { SMALL: 0.
 export interface SubtitleLayout {
   fontSize: number;
   minFontSize: number;
+  /** Which fitting rules made the captions; part of the render recipe. */
+  fitRules: string;
   outline: number;
   shadow: number;
   /** ASS alignment: 2 bottom, 5 middle, 8 top (all centred). */
@@ -232,7 +234,8 @@ export function subtitleLayout(c: OutputControls["subtitles"], width: number, he
 
   return {
     fontSize,
-    minFontSize: Math.round(fontSize * 0.8),
+    minFontSize: Math.round(fontSize * MIN_AUTO_FIT_SCALE),
+    fitRules: SUBTITLE_FIT_RULES,
     outline: box ? Math.max(4, Math.round(fontSize * 0.18)) : outline,
     shadow: box ? 0 : shadow,
     alignment,
@@ -253,48 +256,134 @@ export function subtitleLayout(c: OutputControls["subtitles"], width: number, he
 }
 
 /**
- * Break one caption into screens of at most `maxLines` lines. With auto-fit a
- * long sentence first gets a slightly smaller font (down to 80 %), then is
- * shown as consecutive screens over the same time - it is never cut, and
- * never grows into a wall of text.
+ * The smallest auto-fit may ever make a caption, × the project's base size.
+ * Every caption of a video is within this of every other: auto-fit only stops
+ * overflow, it never makes one scene read 50 px and the next 90 px.
+ */
+export const MIN_AUTO_FIT_SCALE = 0.85;
+/** A mild shrink is tried only to keep a caption on one screen instead of splitting it. */
+const AVOID_SPLIT_SCALES = [0.95, 0.9] as const;
+/** Bump when the fitting rules change, so an unchanged project still re-renders (render recipe). */
+export const SUBTITLE_FIT_RULES = "wrap-split-shrink-v2";
+
+function wrapWords(words: string[], perLine: number): string[] {
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (next.length > perLine && cur) {
+      lines.push(cur);
+      cur = w;
+    } else cur = next;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/** Greedy wrap, then even the lines out ("long line / one word" reads badly). */
+function balancedWrap(words: string[], perLine: number): string[] {
+  const greedy = wrapWords(words, perLine);
+  if (greedy.length !== 2) return greedy;
+  let best = greedy;
+  let bestLongest = Math.max(...greedy.map((l) => l.length));
+  for (let i = 1; i < words.length; i += 1) {
+    const a = words.slice(0, i).join(" ");
+    const b = words.slice(i).join(" ");
+    const longest = Math.max(a.length, b.length);
+    if (longest <= perLine && longest < bestLongest) {
+      best = [a, b];
+      bestLongest = longest;
+    }
+  }
+  return best;
+}
+
+/** A word that ends a phrase - the natural place to start a new screen. A leading "Max:" label is not one. */
+const endsPhrase = (word: string, index: number) => /[.,!?;…:"”)]$/.test(word) && !(index === 0 && /:$/.test(word));
+
+/**
+ * Split words into `count` screens of similar length, preferring to break
+ * after punctuation. Pure word boundaries, nothing is dropped or reordered.
+ */
+function splitScreens(words: string[], count: number): string[][] {
+  if (count <= 1) return [words];
+  const lengths = words.map((w) => w.length + 1);
+  const total = lengths.reduce((n, l) => n + l, 0);
+  const groups: string[][] = [];
+  let start = 0;
+  let acc = 0;
+  for (let k = 1; k < count; k += 1) {
+    const target = (total * k) / count;
+    let bestIndex = -1;
+    let bestScore = Infinity;
+    let running = acc;
+    // Leave at least one word for each screen still to come.
+    for (let i = start; i < words.length - (count - k); i += 1) {
+      running += lengths[i]!;
+      const score = Math.abs(running - target) - (endsPhrase(words[i]!, i) ? total / count / 3 : 0);
+      if (score < bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+    if (bestIndex < start) bestIndex = start;
+    groups.push(words.slice(start, bestIndex + 1));
+    for (let i = start; i <= bestIndex; i += 1) acc += lengths[i]!;
+    start = bestIndex + 1;
+  }
+  groups.push(words.slice(start));
+  return groups.filter((g) => g.length > 0);
+}
+
+/**
+ * Break one caption into screens of at most `maxLines` lines, keeping the
+ * project's base size. In this order (QĐ-126):
+ *   1. wrap onto up to `maxLines` lines at the BASE size;
+ *   2. a long caption becomes consecutive screens over the same time, split
+ *      at punctuation where possible (only a 5–10 % shrink is tried first, and
+ *      only if it keeps the caption on ONE screen);
+ *   3. shrink further only for a single word wider than a line - never below
+ *      MIN_AUTO_FIT_SCALE.
+ * Short and long captions, and "Speaker: line" captions, therefore read at the
+ * same size. It is never cut, and never grows into a wall of text.
  */
 export function fitCaption(text: string, layout: SubtitleLayout): { fontSize: number; screens: string[][] } {
   const words = text.split(/\s+/).filter(Boolean);
-  const wrap = (perLine: number) => {
-    const lines: string[] = [];
-    let cur = "";
-    for (const w of words) {
-      const next = cur ? `${cur} ${w}` : w;
-      if (next.length > perLine && cur) {
-        lines.push(cur);
-        cur = w;
-      } else cur = next;
-    }
-    if (cur) lines.push(cur);
-    return lines;
-  };
+  const minSize = Math.max(layout.minFontSize, Math.round(layout.fontSize * MIN_AUTO_FIT_SCALE));
+  const perLineAt = (size: number) => Math.max(1, Math.floor((layout.charsPerLine * layout.fontSize) / size));
+  const linesPerScreenAt = (size: number) => Math.max(1, Math.min(layout.maxLines, Math.floor(layout.maxBlockHeight / (size * 1.25)) || 1));
+
   let fontSize = layout.fontSize;
-  let perLine = layout.charsPerLine;
-  let lines = wrap(perLine);
-  if (layout.autoFit && lines.length > layout.maxLines) {
-    // Shrink gently first.
-    for (const scale of [0.92, 0.85, 0.8]) {
-      const size = Math.max(layout.minFontSize, Math.round(layout.fontSize * scale));
-      // From the ORIGINAL line length every time - never compounded across steps.
-      const per = Math.floor((layout.charsPerLine * layout.fontSize) / size);
-      const attempt = wrap(per);
-      fontSize = size;
-      perLine = per;
-      lines = attempt;
-      if (attempt.length <= layout.maxLines) break;
+  if (layout.autoFit) {
+    // A single word wider than a line: the one case shrinking is the only way.
+    const longestWord = Math.max(0, ...words.map((w) => w.length));
+    if (longestWord > perLineAt(fontSize)) {
+      fontSize = Math.max(minSize, Math.round((layout.fontSize * layout.charsPerLine) / longestWord));
     }
   }
-  // Never taller than the cap: lines that fit the block, in screens.
-  const lineHeight = fontSize * 1.25;
-  const linesPerScreen = Math.max(1, Math.min(layout.maxLines, Math.floor(layout.maxBlockHeight / lineHeight) || 1));
-  const screens: string[][] = [];
-  for (let i = 0; i < lines.length; i += linesPerScreen) screens.push(lines.slice(i, i + linesPerScreen));
-  return { fontSize, screens: screens.length ? screens : [[]] };
+
+  const fitsOneScreen = (size: number) => wrapWords(words, perLineAt(size)).length <= linesPerScreenAt(size);
+  if (layout.autoFit && !fitsOneScreen(fontSize)) {
+    for (const scale of AVOID_SPLIT_SCALES) {
+      const size = Math.max(minSize, Math.round(layout.fontSize * scale));
+      if (size < fontSize && fitsOneScreen(size)) {
+        fontSize = size;
+        break;
+      }
+    }
+  }
+
+  const perLine = perLineAt(fontSize);
+  const linesPerScreen = linesPerScreenAt(fontSize);
+  const lineCount = wrapWords(words, perLine).length;
+  let count = Math.max(1, Math.ceil(lineCount / linesPerScreen));
+  for (; count <= Math.max(1, words.length); count += 1) {
+    const groups = splitScreens(words, count);
+    const screens = groups.map((g) => balancedWrap(g, perLine));
+    if (screens.every((s) => s.length <= linesPerScreen)) return { fontSize, screens: screens.length ? screens : [[]] };
+  }
+  // Unreachable in practice (one word per screen always fits); keep a safe answer.
+  return { fontSize, screens: words.length ? words.map((w) => [w]) : [[]] };
 }
 
 /** True when two controls differ only in what the local render does (always, except voice). */

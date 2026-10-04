@@ -15,6 +15,7 @@ import {
   type NarratorInfo,
 } from "@/app/actions/output-controls";
 import {
+  MIN_AUTO_FIT_SCALE,
   SUBTITLE_POSITIONS,
   SUBTITLE_SIZES,
   SUBTITLE_STYLES,
@@ -159,9 +160,13 @@ export function VideoOutputCard({
                   Tự động vừa khung
                 </label>
               </Field>
+              <p className="text-[11px] text-ink-500 sm:col-span-3">
+                Mọi cảnh dùng chung một cỡ và kiểu phụ đề của dự án (không cảnh nào ghi đè riêng). Câu dài: xuống 2 dòng → chia thành nhiều đoạn
+                theo thời gian lời nói → chỉ thu nhỏ nhẹ (tối đa {Math.round((1 - MIN_AUTO_FIT_SCALE) * 100)}%).
+              </p>
             </div>
           ) : (
-            <p className="text-xs text-ink-500">Video sẽ không có chữ trên hình. Phụ đề vẫn được giữ và vẫn xuất file .srt.</p>
+            <p className="text-xs text-ink-500">Video sẽ không có chữ trên hình. Phụ đề và lời thoại vẫn được giữ nguyên, vẫn xuất file .srt; bật lại bất cứ lúc nào ($0).</p>
           )}
         </section>
 
@@ -373,9 +378,9 @@ export function VideoOutputCard({
               })
             }
           >
-            <RefreshCw className="h-3.5 w-3.5" /> RENDER LẠI
+            <RefreshCw className="h-3.5 w-3.5" /> RENDER LẠI · $0 API
           </Button>
-          <span className="text-xs text-ink-500">Phụ đề, âm lượng, nhạc, hiệu ứng: chỉ xử lý tại máy, $0.</span>
+          <span className="text-xs text-ink-500">Render lại tại máy · $0 API (phụ đề, âm lượng, nhạc, hiệu ứng; không tạo lại giọng, ảnh, video).</span>
         </div>
         {msg ? <Alert tone={msg.ok ? "ok" : "danger"} title={msg.text} /> : null}
         {preview ? (
