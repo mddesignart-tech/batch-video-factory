@@ -20,6 +20,14 @@ import {
   type ContentType,
 } from "@/domain/content-templates";
 import { projectContent } from "@/domain/content-legacy";
+import {
+  TONE_HINTS,
+  applyCreativeStructure,
+  creativeStylePrompt,
+  paceFactor,
+  storedCreativeJson,
+  type StoredCreativeStyle,
+} from "@/domain/creative-style";
 import { planScenes } from "@/domain/scene-planner";
 import { NARRATOR_NAME } from "@/domain/scene-characters";
 import type { ScriptDoc } from "@/domain/script";
@@ -95,6 +103,8 @@ export interface CreateContentProjectInput extends ContentSourceInput {
   useReferenceThroughout?: boolean;
   /** Write the script right away (default). Tests can create first, write later. */
   writeScript?: boolean;
+  /** QĐ-127 PHONG CÁCH SÁNG TẠO. Absent / all "Tự động" = the template's creative defaults. */
+  creativeStyle?: Partial<StoredCreativeStyle> | null;
 }
 
 /** The voice-only narrator, created once with the voice of an existing character. */
@@ -188,7 +198,8 @@ export async function createContentProject(input: CreateContentProjectInput): Pr
       sourceText: resolved.sourceText || null,
       sourceUrl: resolved.sourceUrl,
       audience: audienceOf(input.audience ?? template.defaultAudience).id,
-      tone: toneOf(input.tone ?? template.defaultTone).id,
+      tone: toneOf(input.creativeStyle?.tone ?? input.tone ?? template.defaultTone).id,
+      creativeStyleJson: storedCreativeJson(input.creativeStyle),
       voiceMode,
       bilingualMode,
       contentBriefJson: JSON.stringify({ idea: resolved.idea, facts: resolved.facts, cta: input.cta?.trim() ?? "", subjectName: input.subjectName?.trim() ?? "", assetIds: [] }),
@@ -300,7 +311,15 @@ export async function generateContentProjectScript(projectId: string): Promise<S
   const brief = contentBriefOf(project);
   const audience = audienceOf(content.audience);
   const lang = languageOf(content.language);
-  const beats = planScenes({ format: content.format, durationSeconds: project.targetDuration, audience: audience.id });
+  // QĐ-127 Creative Style: the structure (reaction, escalation, payoff,
+  // emotional moment...), the pace and the writer's instructions all follow it.
+  const style = content.creative;
+  const styledFormat = { ...content.format, beats: applyCreativeStructure(content.format.beats, style, template.creative, template.factual) };
+  const beats = planScenes({ format: styledFormat, durationSeconds: project.targetDuration, audience: audience.id, paceFactor: paceFactor(style) });
+  // The version that writes THIS script (a rewrite of an older project moves it forward).
+  const templateVersion = template.promptVersion;
+  const creativeBlock = creativeStylePrompt(style, { factual: template.factual, storyGags: template.creative.storyGags });
+  const maxSentenceWords = Math.max(5, Math.round(audience.maxSentenceWords * Math.min(1.15, paceFactor(style))));
 
   await ensureNarrator();
   const wantsCast =
@@ -321,16 +340,17 @@ export async function generateContentProjectScript(projectId: string): Promise<S
     .join(", ");
 
   const rules = [...template.sceneRules, ...template.visualRules, ...template.voiceRules, ...template.ctaRules, ...template.safetyRules];
-  const systemPrompt = await buildPrompt("content-script", {
+  let systemPrompt = await buildPrompt("content-script", {
     templateName: template.name,
     templateId: project.contentTemplateId ?? template.id,
-    templateVersion: content.templateVersion,
+    templateVersion,
     durationSeconds: project.targetDuration,
     languageName: lang.promptName,
     bilingualRule: project.bilingualMode ? (BILINGUAL_RULE[project.bilingualMode] ?? "") : "",
     audienceHint: audience.promptHint,
-    maxSentenceWords: audience.maxSentenceWords,
-    toneHint: toneOf(content.tone).promptHint || template.tone,
+    maxSentenceWords,
+    toneHint: TONE_HINTS[style.tone]?.hint || toneOf(content.tone).promptHint || template.tone,
+    creativeStyle: creativeBlock,
     voiceModeRule: VOICE_MODE_RULE[content.voiceMode] ?? VOICE_MODE_RULE.NARRATION,
     subject: brief.subjectName || "(none)",
     idea: brief.idea || "(none)",
@@ -353,15 +373,17 @@ export async function generateContentProjectScript(projectId: string): Promise<S
       ? "- Any fact you add that is NOT in the source or the facts list: list it in \"facts\" with origin AI_GENERATED and set \"needsFactReview\": true. Never present it as a specification."
       : "",
   });
+  // An operator's edited prompt without {{creativeStyle}} still gets the block.
+  if (!systemPrompt.includes(creativeBlock)) systemPrompt = `${systemPrompt}\n\n${creativeBlock}`;
 
   const request: ContentScriptRequest = {
     contentType: content.contentType,
     templateId: project.contentTemplateId ?? template.id,
-    templateVersion: content.templateVersion,
+    templateVersion,
     templateName: template.name,
     language: lang.code,
     audience: audience.id,
-    tone: content.tone,
+    tone: style.tone,
     voiceMode: content.voiceMode,
     bilingualMode: project.bilingualMode,
     durationSeconds: project.targetDuration,
@@ -384,6 +406,7 @@ export async function generateContentProjectScript(projectId: string): Promise<S
     narrator: NARRATOR_NAME,
     stylePrompt,
     factual: template.factual,
+    creative: style,
     model: "",
     systemPrompt,
   };
@@ -418,6 +441,7 @@ export async function generateContentProjectScript(projectId: string): Promise<S
       status: "script_ready",
       scriptApprovedAt: null,
       errorMessage: null,
+      templateVersion,
     },
   });
   await prisma.idiom.update({ where: { id: project.idiomId }, data: { phrase: script.idiom.slice(0, 200) } });
@@ -469,6 +493,7 @@ export function normaliseContentScript(script: ScriptDoc, req: ContentScriptRequ
     templateId: req.templateId,
     templateVersion: req.templateVersion,
     language: req.language,
+    ...(req.creative ? { creativeStyle: { ...req.creative } } : {}),
   };
 }
 

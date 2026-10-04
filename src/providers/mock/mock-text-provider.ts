@@ -177,7 +177,7 @@ export class MockTextProvider implements TextProvider {
     const leo = req.characters[1]?.name ?? "Leo";
     const idiom = req.idiom;
 
-    const beats = BEATS.slice(0, req.targetDuration < 22 ? 5 : 6);
+    const beats = req.creative ? idiomBeatsFor(req.creative) : BEATS.slice(0, req.targetDuration < 22 ? 5 : 6);
     const shareTotal = beats.reduce((sum, b) => sum + b.share, 0);
 
     const scenes: SceneDoc[] = beats.map((beat, index) => {
@@ -338,6 +338,30 @@ function freeUsage(startedAt: number): ProviderUsage {
   };
 }
 
+// ------------------------------------------------------- creative (QĐ-127) ---
+
+const CREATIVE_BEATS: Record<string, Beat> = {
+  reaction: { role: "reaction", share: 0.12, complexity: "MEDIUM", spendPriority: "NORMAL", camera: "snap zoom to a reaction close-up", sfx: "pop" },
+  gag: { role: "gag", share: 0.14, complexity: "HIGH", spendPriority: "NORMAL", camera: "wide reveal, quick cut", sfx: "boing" },
+  payoff: { role: "payoff", share: 0.12, complexity: "MEDIUM", spendPriority: "HIGH", camera: "freeze-frame reaction close-up", sfx: "ding" },
+};
+
+/**
+ * The idiom structure a chosen creative style asks for (the same shapes the
+ * prompt describes in idiomStructureHint). Comedy 0 explains without gags;
+ * comedy 4+ adds a visual gag, a reaction and a final payoff.
+ */
+export function idiomBeatsFor(style: NonNullable<ScriptRequest["creative"]>): Beat[] {
+  const by = (role: string) => BEATS.find((b) => b.role === role) ?? CREATIVE_BEATS[role]!;
+  let roles: string[];
+  if (style.comedyLevel <= 1) roles = style.comedyLevel === 1 ? ["hook", "literal", "meaning", "example"] : ["hook", "meaning", "example"];
+  else if (style.comedyLevel <= 3) roles = ["hook", "literal", "escalation", "punchline", "meaning", "example"];
+  else roles = ["hook", "literal", "gag", "escalation", "reaction", "meaning", "example", "payoff"];
+  if (style.punchlineMode === "NONE") roles = roles.filter((r) => r !== "punchline" && r !== "payoff");
+  if (style.punchlineMode === "REQUIRED" && !roles.includes("payoff")) roles = [...roles.filter((r) => r !== "punchline"), "payoff"];
+  return roles.map(by);
+}
+
 // ----------------------------------------------------------------- helpers ---
 
 export function pickAngle(idiom: string, avoid: string[]): Angle {
@@ -399,6 +423,30 @@ function beatContent(role: string, ctx: BeatContext): BeatContent {
         narration: "",
         subtitle: `"That is NOT what I meant!"`,
         action: `${leo} facepalms while ${max} grins proudly.`,
+      };
+    case "gag":
+      return {
+        visual: `Visual gag: ${literal} - shown as one absurd, harmless cartoon picture.`,
+        dialogue: `${max}: "Is this... how it works?"`,
+        narration: "",
+        subtitle: "Is this... how it works?",
+        action: `${max} proudly presents the absurd result.`,
+      };
+    case "reaction":
+      return {
+        visual: `Close-up of ${leo}'s huge shocked reaction, eyes wide, jaw dropped.`,
+        dialogue: `${leo}: "WHAT are you doing?!"`,
+        narration: "",
+        subtitle: "WHAT are you doing?!",
+        action: `${leo} freezes, then slowly shakes his head.`,
+      };
+    case "payoff":
+      return {
+        visual: `${max} and ${leo} side by side; ${max} finally gets it and grins.`,
+        dialogue: `${max}: "Ohh... so I did NOT need ${angle.props}!"`,
+        narration: "",
+        subtitle: `"So I did NOT need ${shorten(angle.props, 30)}!"`,
+        action: `${leo} laughs; ${max} hides ${angle.props} behind his back.`,
       };
     case "meaning":
       return {

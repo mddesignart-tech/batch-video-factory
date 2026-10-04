@@ -37,6 +37,8 @@ export function ScriptReviewCard(props: {
   needsFactReview: boolean;
   aiFacts: string[];
   canRewrite: boolean;
+  /** QĐ-127: the creative style this script was written with. */
+  styleBadges?: { label: string; value: string }[];
   scenes: ScriptReviewScene[];
 }) {
   const router = useRouter();
@@ -68,6 +70,15 @@ export function ScriptReviewCard(props: {
         <div>
           <p className="text-base font-semibold text-ink-100">{props.title}</p>
           <p className="text-sm text-ink-300">Hook: {props.hook}</p>
+          {props.styleBadges?.length ? (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {props.styleBadges.map((b) => (
+                <Badge key={b.label} tone="brand">
+                  {b.label}: {b.value}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {props.needsFactReview ? (

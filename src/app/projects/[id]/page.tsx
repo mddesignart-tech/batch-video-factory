@@ -43,6 +43,10 @@ import { contentSummary } from "@/services/content-service";
 import { audienceOf, languageOf } from "@/domain/content-options";
 import { spokenLines } from "@/domain/scene-subtitles";
 import type { ScriptDoc } from "@/domain/script";
+import { CreativeStyleCard } from "./creative-style-card";
+import { projectContent } from "@/domain/content-legacy";
+import { creativeBadges, parseCreativeStyle, type EffectiveCreativeStyle } from "@/domain/creative-style";
+import { REWRITABLE_STATUSES } from "@/services/creative-style";
 
 export const dynamic = "force-dynamic";
 
@@ -114,6 +118,13 @@ export default async function ProjectDetailPage({
   // project (contentType NULL) shows exactly what it always did.
   const content = project.contentType ? contentSummary(project) : null;
   const scriptDoc = content ? parseJson<ScriptDoc | null>(project.scriptJson, null) : null;
+  // QĐ-127 PHONG CÁCH SÁNG TẠO: what the CURRENT script was written with (the
+  // style stored on the script), else the project's style in effect.
+  const effectiveContent = projectContent(project);
+  const writtenStyle = parseJson<ScriptDoc | null>(project.scriptJson, null)?.creativeStyle as EffectiveCreativeStyle | undefined;
+  const styleBadges = creativeBadges(writtenStyle ?? effectiveContent.creative);
+  const canRewriteScript = (REWRITABLE_STATUSES as readonly string[]).includes(project.status);
+  const hasMedia = project.scenes.some((s) => s.imagePath || s.videoPath || s.audioPath);
   // Tài sản tham chiếu (QĐ-124): read only here, $0.
   const [references, refProblems] = await Promise.all([listProjectReferences(id), referenceProblems(id)]);
   const musicAsset = project.backgroundMusicAssetId
@@ -192,6 +203,17 @@ export default async function ProjectDetailPage({
             title={project.title}
           />
 
+          {project.scriptJson ? (
+            <CreativeStyleCard
+              projectId={project.id}
+              creative={effectiveContent.template.creative}
+              initial={parseCreativeStyle(project.creativeStyleJson)}
+              writtenWith={styleBadges}
+              canRewrite={canRewriteScript}
+              mediaExists={hasMedia}
+            />
+          ) : null}
+
           {content && scriptDoc && project.scenes.length > 0 ? (
             <ScriptReviewCard
               projectId={project.id}
@@ -205,7 +227,8 @@ export default async function ProjectDetailPage({
               approved={content.approved}
               needsFactReview={scriptDoc.needsFactReview === true}
               aiFacts={(scriptDoc.facts ?? []).filter((f) => f.origin === "AI_GENERATED").map((f) => f.text)}
-              canRewrite={["draft", "script_ready", "needs_review", "failed"].includes(project.status)}
+              canRewrite={canRewriteScript}
+              styleBadges={styleBadges}
               scenes={project.scenes
                 .filter((s) => !s.skipped)
                 .map((s) => {

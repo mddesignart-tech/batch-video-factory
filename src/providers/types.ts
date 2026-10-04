@@ -1,5 +1,6 @@
 import type { ProviderStatus } from "@/domain/enums";
 import type { ScriptDoc, QualityReport, ScriptScore } from "@/domain/script";
+import type { EffectiveCreativeStyle } from "@/domain/creative-style";
 
 /**
  * Provider contracts.
@@ -97,6 +98,8 @@ export interface ScriptRequest {
   characters: { name: string; personality: string; visualPrompt: string }[];
   /** Angles already used for this idiom, so the provider picks a new one. */
   avoidAngles: string[];
+  /** QĐ-127: chosen creative style. Absent = the original idiom writer, unchanged. */
+  creative?: EffectiveCreativeStyle;
   model: string;
   /**
    * The fully rendered template from prompts/script.txt. Real providers send
@@ -152,6 +155,8 @@ export interface ContentScriptRequest {
   stylePrompt: string;
   /** Whether a factual template must flag what it adds on its own. */
   factual: boolean;
+  /** QĐ-127: the creative style in effect. The structure is already in `beats`. */
+  creative?: EffectiveCreativeStyle;
   model: string;
   systemPrompt: string;
 }

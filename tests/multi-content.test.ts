@@ -75,7 +75,7 @@ describe("PROMPT → storyboard", () => {
       language: "vi",
     });
     expect(project.contentType).toBe("AI_REVIEW");
-    expect(project.templateVersion).toBe("ai-review-v1");
+    expect(project.templateVersion).toBe("ai-review-v2");
     expect(project.status).toBe("script_ready");
     expect(project.scriptApprovedAt).toBeNull();
     expect(scenes.length).toBeGreaterThanOrEqual(5);
@@ -133,7 +133,12 @@ describe("PROMPT → storyboard", () => {
     const know = await make({ contentType: "KNOWLEDGE", idea: "Vì sao bầu trời màu xanh?", durationSeconds: 45 });
     expect(know.roles).toEqual(expect.arrayContaining(["hook", "question", "explain", "example", "conclusion"]));
     const ad = await make({ contentType: "ADVERTISEMENT", idea: "In bạt giá tốt", cta: "Gọi 0900 000 000", durationSeconds: 15 });
-    expect(ad.scenes.map((s) => s.narration).join(" ")).not.toMatch(/\d{3,}.*\d{3,}/); // no invented phone numbers in body
+    // No invented phone numbers in the body; the contact scene says exactly the one given (QĐ-127: a fast ad keeps it).
+    const body = ad.scenes.filter((_, i) => !["contact", "cta"].includes(ad.roles[i] ?? "")).map((s) => s.narration).join(" ");
+    expect(body).not.toMatch(/\d{3,}.*\d{3,}/);
+    for (const s of ad.scenes.filter((_, i) => ["contact", "cta"].includes(ad.roles[i] ?? ""))) {
+      for (const n of s.narration.match(/\d[\d ]{6,}\d/g) ?? []) expect("Gọi 0900 000 000").toContain(n);
+    }
   });
 
   it("URL: kiến trúc có, nhưng chưa đọc link tự động → báo rõ, không tạo dự án nửa vời", async () => {

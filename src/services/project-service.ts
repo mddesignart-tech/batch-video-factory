@@ -28,6 +28,8 @@ import {
   type ProjectEstimate,
 } from "./cost-estimator";
 import { generateScript, recordConcept } from "./script-service";
+import { IDIOM_CREATIVE_PROMPT_VERSION, parseCreativeStyle, resolveCreativeStyle, storedCreativeJson, type StoredCreativeStyle } from "@/domain/creative-style";
+import { templateOf } from "@/domain/content-templates";
 import { availableProviderNames } from "./provider-health";
 import { existingVoiceLines, speechTextFor } from "./generation";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
@@ -60,6 +62,8 @@ export interface CreateProjectInput {
    * before (no profile stored; it is inferred).
    */
   outputProfile?: OutputProfile;
+  /** QĐ-127 PHONG CÁCH SÁNG TẠO. Absent / "Tự động" = the original idiom writer. */
+  creativeStyle?: Partial<StoredCreativeStyle> | null;
 }
 
 export async function createProjectForIdiom(
@@ -88,6 +92,8 @@ export async function createProjectForIdiom(
         : (preset?.aspectRatio ?? "9:16"),
       outputProfileJson: input.outputProfile ? JSON.stringify(input.outputProfile) : null,
       maxBudget: round(input.maxBudget ?? settings.defaultMaxBudget),
+      // QĐ-127: null when left on "Tự động" - the original writer, unchanged.
+      creativeStyleJson: storedCreativeJson(input.creativeStyle),
     },
   });
 
@@ -187,6 +193,10 @@ export async function generateProjectScript(projectId: string): Promise<ScriptDo
     .filter(Boolean)
     .join(", ");
 
+  // QĐ-127: only a style the person CHOSE changes the idiom writer.
+  const stored = parseCreativeStyle(project.creativeStyleJson);
+  const creative = stored ? resolveCreativeStyle(templateOf("ENGLISH_IDIOM").creative, stored) : undefined;
+
   const { script, score, rewritten, duplicateAvoided } = await generateScript({
     idiomId: project.idiomId,
     idiom: project.idiom.phrase,
@@ -202,8 +212,11 @@ export async function generateProjectScript(projectId: string): Promise<ScriptDo
     })),
     ...(await selectTextModel(project.qualityMode as QualityMode)),
     projectId: project.id,
+    ...(creative ? { creative } : {}),
   });
 
+  // The style the script was written with travels on the script (badges).
+  if (creative) script.creativeStyle = { ...creative };
   await persistScript(project.id, script);
 
   const { angleKeyFor, scriptHashFor } = await import("./script-service");
@@ -216,6 +229,8 @@ export async function generateProjectScript(projectId: string): Promise<ScriptDo
       angleKey: angleKeyFor(script),
       scriptScoreJson: JSON.stringify({ ...score, rewritten, duplicateAvoided }),
       status: "script_ready",
+      // Traceable: which idiom prompt wrote THIS script (null = idiom-v1, as always).
+      ...(creative ? { templateVersion: IDIOM_CREATIVE_PROMPT_VERSION } : {}),
     },
   });
   await recordConcept(project.idiomId, project.id, script);

@@ -16,6 +16,8 @@ import {
 } from "@/components/ui";
 import { createProject } from "@/app/actions/projects";
 import { PlatformPicker } from "@/components/platform-picker";
+import { CreativeStylePicker } from "@/components/creative-style-picker";
+import { templateOf } from "@/domain/content-templates";
 import {
   QUALITY_MODES,
   ROUTER_STRATEGIES,
@@ -166,6 +168,15 @@ export function NewProjectForm({
                 defaultValue={10}
               />
             </Field>
+          </div>
+
+          <div className="mt-4 space-y-2 rounded-lg border border-ink-800 p-3">
+            <p className="text-sm font-semibold text-ink-100">PHONG CÁCH SÁNG TẠO</p>
+            <p className="text-[11px] text-ink-500">
+              Để &quot;Tự động&quot; = cách viết thành ngữ như trước (hiểu nhầm nghĩa đen → tình huống hài → nghĩa thật → ví dụ).
+              Hài 0–1: giải thích rõ, ít gag. Hài 4–5: thêm gag hình ảnh, cường điệu, phản ứng và punchline cuối.
+            </p>
+            <CreativeStylePicker creative={templateOf("ENGLISH_IDIOM").creative} />
           </div>
 
           <input type="hidden" name="generateScript" value="true" />

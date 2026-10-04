@@ -83,13 +83,20 @@ export function audienceOf(id: string | null | undefined): AudienceOption {
 
 export const TONES = [
   { id: "AUTO", label: "Tự động", promptHint: "" },
-  { id: "FUN", label: "Vui vẻ", promptHint: "fun, light-hearted, a little humour" },
   { id: "NATURAL", label: "Tự nhiên", promptHint: "natural and conversational" },
   { id: "PROFESSIONAL", label: "Chuyên nghiệp", promptHint: "professional, trustworthy, calm" },
-  { id: "ENERGETIC", label: "Năng động", promptHint: "energetic, fast-paced, upbeat" },
-  { id: "GENTLE", label: "Nhẹ nhàng", promptHint: "gentle, soft, soothing" },
+  // QĐ-127: Creative Style Engine tones. Ids of the first eight never change (stored on projects).
+  { id: "FRIENDLY", label: "Thân thiện", promptHint: "friendly and warm, like talking to a friend" },
   { id: "EDUCATIONAL", label: "Giáo dục", promptHint: "educational, clear explanations" },
+  { id: "PLAYFUL", label: "Tinh nghịch", promptHint: "playful, light, cheeky" },
+  { id: "FUN", label: "Hài hước / vui vẻ", promptHint: "fun, light-hearted, a little humour" },
   { id: "DRAMATIC", label: "Kịch tính", promptHint: "dramatic, suspenseful, strong reveals" },
+  { id: "EMOTIONAL", label: "Cảm xúc", promptHint: "emotional, heartfelt" },
+  { id: "MYSTERIOUS", label: "Bí ẩn", promptHint: "mysterious, intriguing, slow reveal" },
+  { id: "PREMIUM", label: "Sang trọng", promptHint: "premium, elegant, refined" },
+  { id: "DOCUMENTARY", label: "Documentary", promptHint: "documentary narrator, observational and factual" },
+  { id: "ENERGETIC", label: "Năng động", promptHint: "energetic, fast-paced, upbeat" },
+  { id: "GENTLE", label: "Nhẹ nhàng / bình tĩnh", promptHint: "gentle, soft, soothing" },
 ] as const;
 export type ToneId = (typeof TONES)[number]["id"];
 

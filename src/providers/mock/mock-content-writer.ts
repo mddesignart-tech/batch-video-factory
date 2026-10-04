@@ -95,6 +95,14 @@ const SFX: Record<string, string> = {
   animal: "animal sound",
   ending: "soft chime",
   word: "pop",
+  // QĐ-127 creative beats.
+  reaction: "pop",
+  escalation: "whoosh",
+  gag: "boing",
+  payoff: "ding",
+  punchline: "record scratch",
+  moment: "soft piano",
+  climax: "soft impact",
 };
 
 interface Line {
@@ -115,6 +123,20 @@ const T = {
     recap: (t: string) => `Tóm lại: đó là những điều đáng nhớ về ${t}.`,
     ending: (t: string) => `Và đó là câu chuyện về ${t}. Hẹn gặp lại!`,
     story: (n: number, t: string) => `Rồi điều thú vị thứ ${n} xảy ra trong hành trình ${t}.`,
+    funnyHook: (t: string) => `Khoan đã… ${t}?! Không thể tin nổi luôn á!`,
+    wittyHook: (t: string) => `Bạn nghĩ mình đã biết hết về ${t}? Thử xem nào!`,
+    proHook: (t: string) => `${t}: những điều quan trọng bạn nên biết.`,
+    mysteryHook: (t: string) => `Có một bí mật về ${t} mà ít ai để ý…`,
+    warmHook: (t: string) => `Có một câu chuyện nhỏ về ${t}, rất dễ thương.`,
+    reaction: (lvl: number) => (lvl >= 5 ? "KHÔNG THỂ NÀO! Ai mà ngờ được chứ?!" : lvl >= 4 ? "Ôi trời ơi! Thật luôn hả?!" : "Ồ! Cái này hay đấy!"),
+    escalation: (t: string) => `Và mọi chuyện càng lúc càng to hơn… ${t} khiến cả nhà ngã ngửa!`,
+    gag: () => "Và rồi… đúng là không ai ngờ tới cảnh này!",
+    payoff: (t: string, funny: boolean) => (funny ? `Bài học hôm nay: đừng bao giờ coi thường ${t}! 😂` : `Đó chính là điều đáng nhớ nhất về ${t}.`),
+    moment: (t: string) => `Và đúng lúc ấy, một khoảnh khắc ấm áp khiến ai cũng lặng đi vì ${t}.`,
+    climax: (t: string) => `Mọi thứ căng như dây đàn… rồi sự thật về ${t} lộ ra.`,
+    touchingEnding: (t: string) => `Và từ hôm đó, ${t} mãi là một kỷ niệm thật ấm áp.`,
+    proPoint: (n: number, t: string) => `Điểm ${n}: thông tin đáng chú ý về ${t}.`,
+    playfulPoint: (n: number, t: string) => `Điểm ${n} nè: ${t} còn có điều này thú vị lắm!`,
   },
   en: {
     hook: (t: string) => `Ever wondered about ${t}? Let's see!`,
@@ -127,6 +149,20 @@ const T = {
     recap: (t: string) => `So that's what to remember about ${t}.`,
     ending: (t: string) => `And that's the story of ${t}. See you next time!`,
     story: (n: number, t: string) => `Then something new happens on the ${t} adventure, part ${n}.`,
+    funnyHook: (t: string) => `Wait… ${t}?! You will NOT believe this!`,
+    wittyHook: (t: string) => `Think you know everything about ${t}? Let's check!`,
+    proHook: (t: string) => `${t}: the key things you should know.`,
+    mysteryHook: (t: string) => `There is a secret about ${t} that most people miss…`,
+    warmHook: (t: string) => `Here is a small, sweet story about ${t}.`,
+    reaction: (lvl: number) => (lvl >= 5 ? "NO WAY! Nobody saw that coming!" : lvl >= 4 ? "Oh my gosh! Seriously?!" : "Oh! Now that's nice!"),
+    escalation: (t: string) => `And it gets bigger and bigger… ${t} leaves everyone speechless!`,
+    gag: () => "And then… nobody expected THIS!",
+    payoff: (t: string, funny: boolean) => (funny ? `Lesson of the day: never underestimate ${t}! 😂` : `That's the one thing to remember about ${t}.`),
+    moment: (t: string) => `And right then, a warm moment about ${t} makes everyone go quiet.`,
+    climax: (t: string) => `The tension rises… and then the truth about ${t} comes out.`,
+    touchingEnding: (t: string) => `And from that day on, ${t} became a warm memory.`,
+    proPoint: (n: number, t: string) => `Point ${n}: a notable detail about ${t}.`,
+    playfulPoint: (n: number, t: string) => `Point ${n}: ${t} has another fun surprise!`,
   },
 };
 
@@ -142,10 +178,28 @@ export function writeMockContentScript(req: ContentScriptRequest): ScriptDoc {
   const topic = topicOf(req);
   const beats = req.beats;
   const speakingNames = req.characters.map((c) => c.name);
+  // QĐ-127: the creative style. Absent (old callers) = the neutral wording as before.
+  const style = req.creative;
+  const comedy = style?.comedyLevel ?? 0;
+  const formal = style ? ["PROFESSIONAL", "PREMIUM", "DOCUMENTARY"].includes(style.tone) : false;
+  const playful = style ? comedy >= 2 || ["PLAYFUL", "FUN", "FRIENDLY"].includes(style.tone) : false;
+  const hookLine = (topic: string): string => {
+    if (!style) return t.hook(topic);
+    if (comedy >= 4) return t.funnyHook(topic);
+    if (comedy >= 2) return t.wittyHook(topic);
+    if (style.emotionStyle === "SUSPENSE" || style.tone === "MYSTERIOUS") return t.mysteryHook(topic);
+    if (style.emotionStyle === "TOUCHING" || style.emotionStyle === "WARM" || style.tone === "EMOTIONAL") return t.warmHook(topic);
+    if (formal) return t.proHook(topic);
+    return t.hook(topic);
+  };
+  const pointLine = (n: number, topic: string) => (formal ? t.proPoint(n, topic) : playful ? t.playfulPoint(n, topic) : t.point(n, topic));
 
   // Which beats carry pasted text: everything except the hook and closing beats.
   const closing = new Set(["cta", "contact", "recap", "ending", "for-who", "verdict", "conclusion"]);
-  const bodyIdx = beats.map((b, i) => (b.role === "hook" || closing.has(b.role) ? -1 : i)).filter((i) => i >= 0);
+  // Creative beats (QĐ-127) carry style, never pasted text or facts - so the
+  // source is never lost to a reaction or a punchline.
+  const creativeOnly = new Set(["reaction", "escalation", "gag", "payoff", "moment", "climax"]);
+  const bodyIdx = beats.map((b, i) => (b.role === "hook" || closing.has(b.role) || creativeOnly.has(b.role) ? -1 : i)).filter((i) => i >= 0);
   const charsBudget = Math.max(60, Math.round(req.durationSeconds * 14));
   const sourceChunks = req.sourceText.trim()
     ? spread(keySentences(req.sourceText, charsBudget), Math.max(1, bodyIdx.length))
@@ -168,7 +222,24 @@ export function writeMockContentScript(req: ContentScriptRequest): ScriptDoc {
     const fromFacts = factBeats.indexOf(i) >= 0 ? (factChunks[factBeats.indexOf(i)] ?? []) : [];
 
     if (beat.role === "hook") {
-      line = { narration: t.hook(topic), dialogue: "", visual: `Eye-catching opening shot about ${topic}, bold and clear` };
+      line = {
+        narration: hookLine(topic),
+        dialogue: "",
+        visual: comedy >= 3 ? `Exaggerated comic opening about ${topic}: wide eyes, snap zoom` : `Eye-catching opening shot about ${topic}, bold and clear`,
+      };
+    } else if (beat.role === "reaction") {
+      // Wording and expression only: never a new claim about the subject.
+      line = { narration: t.reaction(comedy), dialogue: "", visual: `Big funny reaction close-up about ${topic}; ${topic} itself shown exactly as before` };
+    } else if (beat.role === "escalation") {
+      line = { narration: t.escalation(topic), dialogue: "", visual: `The situation with ${topic} escalates - bigger, sillier, harmless cartoon chaos` };
+    } else if (beat.role === "gag") {
+      line = { narration: t.gag(), dialogue: "", visual: `Visual gag: an unexpected, silly picture involving ${topic}` };
+    } else if (beat.role === "payoff" || (beat.role === "punchline" && style)) {
+      line = { narration: t.payoff(topic, comedy >= 2 && !req.factual), dialogue: "", visual: `Punchline beat: freeze-frame reaction with ${topic}` };
+    } else if (beat.role === "moment") {
+      line = { narration: t.moment(topic), dialogue: "", visual: `Soft, warm close-up: the emotional moment of ${topic}` };
+    } else if (beat.role === "climax") {
+      line = { narration: t.climax(topic), dialogue: "", visual: `Tense, dramatic shot: the turning point of ${topic}` };
     } else if (fromSource.length > 0) {
       line = { narration: fromSource.join(" "), dialogue: "", visual: `Illustration of: ${fromSource[0]!.slice(0, 120)}` };
     } else if (fromFacts.length > 0) {
@@ -178,7 +249,8 @@ export function writeMockContentScript(req: ContentScriptRequest): ScriptDoc {
     } else if (beat.role === "recap" || beat.role === "conclusion" || beat.role === "verdict") {
       line = { narration: t.recap(topic), dialogue: "", visual: `Summary card about ${topic}` };
     } else if (beat.role === "ending" || beat.role === "sleep" || beat.role === "cliffhanger") {
-      line = { narration: t.ending(topic), dialogue: "", visual: `Warm closing scene of ${topic}` };
+      const touching = style?.emotionStyle === "TOUCHING" || style?.emotionStyle === "WARM";
+      line = { narration: touching ? t.touchingEnding(topic) : t.ending(topic), dialogue: "", visual: `Warm closing scene of ${topic}` };
     } else if (beat.role === "for-who") {
       line = { narration: t.forWho(topic), dialogue: "", visual: `People who would enjoy ${topic}` };
     } else if (beat.role === "con" || beat.role === "limits" || beat.role === "pros-cons") {
@@ -190,7 +262,7 @@ export function writeMockContentScript(req: ContentScriptRequest): ScriptDoc {
       line = { narration: t.story(pointNo, topic), dialogue: "", visual: `${beat.label} scene: ${topic}, clear action` };
     } else {
       pointNo += 1;
-      line = { narration: t.point(pointNo, topic), dialogue: "", visual: `${beat.label}: ${topic}` };
+      line = { narration: pointLine(pointNo, topic), dialogue: "", visual: `${beat.label}: ${topic}` };
     }
 
     // Who speaks. Narration is read by the voice-only narrator; DIALOGUE /
@@ -220,7 +292,8 @@ export function writeMockContentScript(req: ContentScriptRequest): ScriptDoc {
     // The person's own pictures go to the beats that prefer them, in turn.
     const assetIds = beat.prefersUserAsset && assets.length > 0 ? [assets[assetTurn++ % assets.length]!.id] : [];
     const visual = assetIds.length > 0 ? `The user's own photo (${assets.find((a) => a.id === assetIds[0])?.label ?? "photo"}) shown as-is` : line.visual;
-    const camera = beat.motion === "LOCAL_MOTION" ? "slow push-in" : "gentle tracking shot";
+    const gagBeat = ["reaction", "escalation", "gag", "payoff", "punchline"].includes(beat.role);
+    const camera = comedy >= 3 && gagBeat ? "snap zoom to a reaction close-up, quick cut" : beat.motion === "LOCAL_MOTION" ? "slow push-in" : "gentle tracking shot";
     const action = beat.motion === "LOCAL_MOTION" ? "subtle movement" : "natural motion";
     const drawn = req.characters.filter((c) => present.includes(c.name));
 

@@ -27,10 +27,11 @@ export interface PlannedBeat extends BeatSpec {
   durationSeconds: number;
 }
 
-export function sceneCountFor(durationSeconds: number, audienceId?: string | null): number {
+export function sceneCountFor(durationSeconds: number, audienceId?: string | null, paceFactor = 1): number {
   const audience = audienceOf(audienceId);
-  // Longer videos breathe a little more per scene.
-  const avg = audience.avgSceneSeconds + (durationSeconds >= 45 ? 0.5 : 0);
+  // Longer videos breathe a little more per scene. Pacing (QĐ-127): a fast
+  // video cuts more often, a slow one lets each scene breathe.
+  const avg = (audience.avgSceneSeconds + (durationSeconds >= 45 ? 0.5 : 0)) * paceFactor;
   const floor = Math.max(3, Math.ceil(durationSeconds / PLAN_MAX_SCENE_SECONDS));
   const ceiling = Math.max(floor, Math.min(PLAN_MAX_SCENES, Math.floor(durationSeconds / PLAN_MIN_SCENE_SECONDS)));
   return Math.min(ceiling, Math.max(floor, Math.round(durationSeconds / avg)));
@@ -42,8 +43,10 @@ export function planScenes(input: {
   audience?: string | null;
   /** Override the heuristic (the person asked for N scenes). */
   sceneCount?: number;
+  /** Creative pacing: × seconds per scene (1 = as before). */
+  paceFactor?: number;
 }): PlannedBeat[] {
-  const count = Math.max(1, Math.min(PLAN_MAX_SCENES, input.sceneCount ?? sceneCountFor(input.durationSeconds, input.audience)));
+  const count = Math.max(1, Math.min(PLAN_MAX_SCENES, input.sceneCount ?? sceneCountFor(input.durationSeconds, input.audience, input.paceFactor ?? 1)));
   let beats: BeatSpec[] = [...input.format.beats];
 
   // Too many beats: drop optional ones from the end, then the lightest middle ones.
@@ -57,8 +60,12 @@ export function planScenes(input: {
       beats = beats.slice(0, count);
       break;
     }
-    let lightest = 1;
-    for (let i = 1; i < beats.length - 1; i++) if (beats[i]!.weight < beats[lightest]!.weight) lightest = i;
+    // The style's own beats (reaction, payoff...) are what the person asked
+    // for: a template beat is trimmed before them, unless only they are left.
+    const middle = beats.map((b, i) => ({ b, i })).slice(1, -1);
+    const candidates = middle.some(({ b }) => !b.pinned) ? middle.filter(({ b }) => !b.pinned) : middle;
+    let lightest = candidates[0]!.i;
+    for (const { b, i } of candidates) if (b.weight < beats[lightest]!.weight) lightest = i;
     beats.splice(lightest, 1);
   }
 

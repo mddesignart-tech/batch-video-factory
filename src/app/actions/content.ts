@@ -13,6 +13,20 @@ import {
 } from "@/services/content-service";
 import { IMPORT_MAX_BYTES } from "@/services/imported-image";
 import type { ActionResult } from "./idioms";
+import { CreativeStyleSchema, type StoredCreativeStyle } from "@/domain/creative-style";
+import { saveCreativeStyle } from "@/services/creative-style";
+import { generateProjectScript } from "@/services/project-service";
+
+/** The picker's hidden JSON field; anything unreadable = "Tự động". */
+function parseCreativeField(raw: FormDataEntryValue | null): Partial<StoredCreativeStyle> | null {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const parsed = CreativeStyleSchema.partial().safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * TẠO VIDEO (multi-content engine). Free: writes the script (mock text in
@@ -88,6 +102,7 @@ export async function createContentVideo(formData: FormData): Promise<ActionResu
       audience: d.audience,
       tone: d.tone,
       voiceMode: d.voiceMode,
+      creativeStyle: parseCreativeField(formData.get("creativeStyle")),
       durationSeconds: d.durationSeconds,
       stylePresetId: d.stylePresetId || undefined,
       outputProfile: checked.profile,
@@ -115,6 +130,39 @@ export async function rewriteContentScriptAction(projectId: string): Promise<Act
     const script = await generateContentProjectScript(projectId);
     revalidatePath(`/projects/${projectId}`);
     return { ok: true, message: `Đã viết lại kịch bản: ${script.scenes.length} cảnh. Hãy xem lại rồi duyệt.` };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/** PHONG CÁCH SÁNG TẠO: store the choice only - no script, no media ($0). */
+export async function saveCreativeStyleAction(
+  projectId: string,
+  style: Partial<StoredCreativeStyle> | null,
+): Promise<ActionResult & { canRewrite?: boolean }> {
+  try {
+    const parsed = style ? CreativeStyleSchema.partial().safeParse(style) : null;
+    if (parsed && !parsed.success) return { ok: false, message: "Phong cách không hợp lệ." };
+    const r = await saveCreativeStyle(projectId, parsed ? parsed.data : null);
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, message: r.message, canRewrite: r.canRewrite };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/**
+ * VIẾT LẠI KỊCH BẢN with the saved style - any project (content template or
+ * idiom). One text call (free in Mock Mode); never an image, clip or voice.
+ */
+export async function rewriteWithStyleAction(projectId: string): Promise<ActionResult> {
+  try {
+    const script = await generateProjectScript(projectId);
+    revalidatePath(`/projects/${projectId}`);
+    return {
+      ok: true,
+      message: `Đã viết lại kịch bản theo phong cách mới: ${script.scenes.length} cảnh. Chưa tạo ảnh, giọng hay video - hãy xem lại rồi duyệt.`,
+    };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

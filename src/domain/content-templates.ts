@@ -18,6 +18,7 @@
  */
 
 import type { VoiceMode } from "./content-options";
+import type { CreativeFields, TemplateCreative } from "./creative-style";
 
 export const CONTENT_CATEGORIES = [
   { id: "ENGLISH", label: "Học tiếng Anh", icon: "📚", hint: "Thành ngữ, từ vựng, hội thoại, ngữ pháp…" },
@@ -81,6 +82,8 @@ export interface BeatSpec {
   repeatable?: boolean;
   /** This beat should show the person's own uploaded asset if there is one. */
   prefersUserAsset?: boolean;
+  /** Added by the creative style (QĐ-127): the planner trims template beats first. */
+  pinned?: boolean;
 }
 
 export interface TemplateFormat {
@@ -125,7 +128,21 @@ export interface ContentTemplate {
   sources: readonly ("PROMPT" | "TEXT" | "ASSETS" | "URL" | "IDIOM" | "STORYBOARD")[];
   /** Placeholder for the big idea box. */
   ideaPlaceholder: string;
+  /**
+   * Creative Style Engine (QĐ-127): this template's defaults and what Simple
+   * Mode shows. The engine itself is shared by every template.
+   */
+  creative: TemplateCreative;
 }
+
+// --------------------------------------------------------------- creative ---
+
+const SIMPLE_FIELDS = ["preset", "comedyLevel", "pacingStyle", "emotionStyle", "punchlineMode"] as const;
+const ALL_FIELDS = ["preset", "tone", "comedyLevel", "comedyStyles", "pacingStyle", "punchlineMode", "emotionStyle", "energyLevel"] as const;
+const creative = (
+  defaults: CreativeFields,
+  extra: Partial<Omit<TemplateCreative, "defaults">> = {},
+): TemplateCreative => ({ defaults, simpleFields: SIMPLE_FIELDS, storyGags: false, ...extra });
 
 // ------------------------------------------------------------------ beats ---
 
@@ -170,6 +187,10 @@ const ENGLISH_BASE = {
   safetyRules: COMMON_SAFETY,
   factual: false,
   sources: ENGLISH_SOURCES,
+  creative: creative(
+    { tone: "FUN", comedyLevel: 2, comedyStyles: ["SITUATIONAL"], pacingStyle: "MEDIUM", punchlineMode: "AUTO", emotionStyle: "JOYFUL", energyLevel: 3 },
+    { storyGags: true },
+  ),
 };
 
 export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
@@ -200,6 +221,10 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     sceneRules: ["HOOK → literal situation → funny mistake → real meaning → example → recap."],
     // The 133-idiom library and the original writer, unchanged.
     sources: ["IDIOM", "STORYBOARD"],
+    creative: creative(
+      { tone: "PLAYFUL", comedyLevel: 3, comedyStyles: ["LITERAL", "REACTION", "ESCALATION"], pacingStyle: "FAST", punchlineMode: "PREFERRED", emotionStyle: "SURPRISE", energyLevel: 4 },
+      { storyGags: true },
+    ),
     ideaPlaceholder: "Ví dụ: “Break a leg” cho người mới học",
   },
   {
@@ -207,7 +232,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     id: "ENGLISH_VOCAB",
     name: "Từ vựng",
     description: "Một nhóm từ theo chủ đề, mỗi từ một cảnh có hình minh hoạ và câu ví dụ.",
-    promptVersion: "english-vocab-v1",
+    promptVersion: "english-vocab-v2",
     formats: [
       {
         id: "word-list",
@@ -227,7 +252,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     id: "ENGLISH_CONVERSATION",
     name: "Hội thoại",
     description: "Hai nhân vật nói chuyện trong một tình huống đời thường, kèm giải thích câu quan trọng.",
-    promptVersion: "english-conversation-v1",
+    promptVersion: "english-conversation-v2",
     defaultVoiceMode: "DIALOGUE",
     formats: [
       {
@@ -249,7 +274,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     id: "ENGLISH_GRAMMAR",
     name: "Mẹo ngữ pháp",
     description: "Một điểm ngữ pháp: lỗi hay gặp → quy tắc → ví dụ đúng.",
-    promptVersion: "english-grammar-v1",
+    promptVersion: "english-grammar-v2",
     defaultVoiceMode: "NARRATION",
     formats: [
       {
@@ -271,7 +296,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     id: "ENGLISH_PRONUNCIATION",
     name: "Mẹo phát âm",
     description: "Âm khó, cách đặt miệng, từ ví dụ, luyện theo.",
-    promptVersion: "english-pronunciation-v1",
+    promptVersion: "english-pronunciation-v2",
     defaultVoiceMode: "NARRATION",
     formats: [
       {
@@ -293,7 +318,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     id: "ENGLISH_MISTAKES",
     name: "Lỗi thường gặp",
     description: "Câu sai người Việt hay nói → câu đúng → vì sao.",
-    promptVersion: "english-mistakes-v1",
+    promptVersion: "english-mistakes-v2",
     defaultVoiceMode: "NARRATION",
     formats: [
       {
@@ -314,7 +339,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     id: "ENGLISH_MINI_STORY",
     name: "Truyện ngắn tiếng Anh",
     description: "Một câu chuyện rất ngắn bằng tiếng Anh đơn giản, có từ mới.",
-    promptVersion: "english-mini-story-v1",
+    promptVersion: "english-mini-story-v2",
     defaultLanguage: "en",
     defaultVoiceMode: "NARRATION",
     formats: [
@@ -338,7 +363,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     name: "Review sản phẩm",
     description: "Giới thiệu sản phẩm dựa trên thông tin thật bạn cung cấp; ưu tiên ảnh thật của sản phẩm.",
     engine: "CONTENT",
-    promptVersion: "product-review-v1",
+    promptVersion: "product-review-v2",
     defaultDuration: 30,
     defaultAudience: "ADULTS",
     defaultLanguage: "vi",
@@ -381,6 +406,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     factual: true,
     sources: ["PROMPT", "TEXT", "ASSETS", "URL"],
     ideaPlaceholder: "Tên sản phẩm + mô tả, thông số, ưu/nhược điểm bạn biết…",
+    creative: creative({ tone: "NATURAL", comedyLevel: 1, comedyStyles: [], pacingStyle: "MEDIUM", punchlineMode: "AUTO", emotionStyle: "TRUST", energyLevel: 2 }),
   },
   {
     id: "AI_REVIEW",
@@ -388,7 +414,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     name: "Review công cụ AI",
     description: "AI này làm gì → 3 tính năng → demo → ưu / hạn chế → phù hợp với ai.",
     engine: "CONTENT",
-    promptVersion: "ai-review-v1",
+    promptVersion: "ai-review-v2",
     defaultDuration: 45,
     defaultAudience: "ADULTS",
     defaultLanguage: "vi",
@@ -420,6 +446,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     factual: true,
     sources: ["PROMPT", "TEXT", "ASSETS", "URL"],
     ideaPlaceholder: "Ví dụ: Giới thiệu 5 lợi ích của ChatGPT cho cửa hàng nhỏ",
+    creative: creative({ tone: "ENERGETIC", comedyLevel: 1, comedyStyles: [], pacingStyle: "MEDIUM", punchlineMode: "AUTO", emotionStyle: "CURIOUS", energyLevel: 3 }),
   },
   {
     id: "TOY_WORLD",
@@ -427,7 +454,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     name: "Thế giới đồ chơi",
     description: "Câu chuyện vui với xe cộ, robot, tàu hỏa, mô hình đồ chơi.",
     engine: "CONTENT",
-    promptVersion: "toy-world-v1",
+    promptVersion: "toy-world-v2",
     defaultDuration: 30,
     defaultAudience: "KIDS",
     defaultLanguage: "vi",
@@ -456,6 +483,10 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     factual: false,
     sources: ["PROMPT", "TEXT", "ASSETS"],
     ideaPlaceholder: "Ví dụ: Xe tải đồ chơi khám phá công trường",
+    creative: creative(
+      { tone: "FUN", comedyLevel: 3, comedyStyles: ["VISUAL_GAG", "ESCALATION", "CUTE"], pacingStyle: "FAST", punchlineMode: "PREFERRED", emotionStyle: "JOYFUL", energyLevel: 4 },
+      { storyGags: true, storyArc: true },
+    ),
   },
   {
     id: "ANIMAL_FACT",
@@ -463,7 +494,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     name: "Động vật",
     description: "Sự thật thú vị, mini documentary, câu chuyện, đoán con vật, top 5.",
     engine: "CONTENT",
-    promptVersion: "animal-facts-v1",
+    promptVersion: "animal-facts-v2",
     defaultDuration: 30,
     defaultAudience: "GENERAL",
     defaultLanguage: "vi",
@@ -488,6 +519,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     factual: true,
     sources: ["PROMPT", "TEXT", "ASSETS"],
     ideaPlaceholder: "Ví dụ: 5 sự thật thú vị về chim cánh cụt",
+    creative: creative({ tone: "EDUCATIONAL", comedyLevel: 2, comedyStyles: ["CUTE", "REACTION"], pacingStyle: "MEDIUM", punchlineMode: "AUTO", emotionStyle: "CURIOUS", energyLevel: 3 }),
   },
   {
     id: "STORY",
@@ -495,7 +527,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     name: "Kể chuyện",
     description: "Truyện ngắn, giáo dục, phiêu lưu, hài, cảm động, ru ngủ, nhiều tập.",
     engine: "CONTENT",
-    promptVersion: "story-v1",
+    promptVersion: "story-v2",
     defaultDuration: 45,
     defaultAudience: "KIDS",
     defaultLanguage: "vi",
@@ -523,6 +555,10 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     factual: false,
     sources: ["PROMPT", "TEXT", "ASSETS"],
     ideaPlaceholder: "Ví dụ: Chú thỏ nhỏ học cách chia sẻ",
+    creative: creative(
+      { tone: "GENTLE", comedyLevel: 1, comedyStyles: ["CUTE"], pacingStyle: "MEDIUM", punchlineMode: "AUTO", emotionStyle: "WARM", energyLevel: 2 },
+      { storyGags: true, storyArc: true },
+    ),
   },
   {
     id: "KNOWLEDGE",
@@ -530,7 +566,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     name: "Kiến thức",
     description: "Khoa học, lịch sử, công nghệ, mẹo vặt, giải thích khái niệm.",
     engine: "CONTENT",
-    promptVersion: "knowledge-v1",
+    promptVersion: "knowledge-v2",
     defaultDuration: 45,
     defaultAudience: "GENERAL",
     defaultLanguage: "vi",
@@ -560,6 +596,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     factual: true,
     sources: ["PROMPT", "TEXT", "ASSETS", "URL"],
     ideaPlaceholder: "Ví dụ: Vì sao bầu trời màu xanh?",
+    creative: creative({ tone: "EDUCATIONAL", comedyLevel: 1, comedyStyles: [], pacingStyle: "MEDIUM", punchlineMode: "AUTO", emotionStyle: "CURIOUS", energyLevel: 2 }),
   },
   {
     id: "ADVERTISEMENT",
@@ -567,7 +604,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     name: "Quảng cáo",
     description: "Giới thiệu dịch vụ, sản phẩm, menu, in ấn, sự kiện, sale, cửa hàng địa phương.",
     engine: "CONTENT",
-    promptVersion: "advertisement-v1",
+    promptVersion: "advertisement-v2",
     defaultDuration: 15,
     defaultAudience: "GENERAL",
     defaultLanguage: "vi",
@@ -597,6 +634,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     factual: true,
     sources: ["PROMPT", "TEXT", "ASSETS"],
     ideaPlaceholder: "Ví dụ: In ấn Mind Decor – in bạt, standee, giao nhanh trong ngày",
+    creative: creative({ tone: "ENERGETIC", comedyLevel: 1, comedyStyles: [], pacingStyle: "FAST", punchlineMode: "AUTO", emotionStyle: "EXCITED", energyLevel: 4 }),
   },
   {
     id: "CUSTOM",
@@ -604,7 +642,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     name: "Tự do",
     description: "Bất kỳ ý tưởng nào. Không ép theo cấu trúc thành ngữ.",
     engine: "CONTENT",
-    promptVersion: "custom-v1",
+    promptVersion: "custom-v2",
     defaultDuration: 30,
     defaultAudience: "GENERAL",
     defaultLanguage: "vi",
@@ -631,6 +669,10 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     factual: false,
     sources: ["PROMPT", "TEXT", "ASSETS"],
     ideaPlaceholder: "Ví dụ: Làm video 45 giây về…",
+    creative: creative(
+      { tone: "NATURAL", comedyLevel: 0, comedyStyles: [], pacingStyle: "AUTO", punchlineMode: "AUTO", emotionStyle: "AUTO", energyLevel: 3 },
+      { storyGags: true, storyArc: true, simpleFields: ALL_FIELDS },
+    ),
   },
 ];
 
@@ -674,6 +716,10 @@ export function validateRegistry(): string[] {
       if (f.beats.length === 0) problems.push(`${t.id}:${f.id}: không có beat`);
       if (f.beats.every((b) => b.optional)) problems.push(`${t.id}:${f.id}: mọi beat đều optional`);
     }
+    const d = t.creative.defaults;
+    if (d.comedyLevel < 0 || d.comedyLevel > 5) problems.push(`${t.id}: comedyLevel ngoài 0..5`);
+    if (d.energyLevel < 1 || d.energyLevel > 5) problems.push(`${t.id}: energyLevel ngoài 1..5`);
+    if (t.factual && t.creative.storyGags) problems.push(`${t.id}: nội dung factual không được bật gag tình huống`);
   }
   for (const id of CONTENT_TYPES) if (!ids.has(id)) problems.push(`thiếu template ${id}`);
   for (const c of CONTENT_CATEGORIES) {

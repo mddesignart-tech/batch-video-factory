@@ -19,6 +19,7 @@ import {
   type ContentType,
   type TemplateFormat,
 } from "./content-templates";
+import { parseCreativeStyle, resolveCreativeStyle, type EffectiveCreativeStyle } from "./creative-style";
 
 export interface ProjectContentColumns {
   contentType?: string | null;
@@ -30,6 +31,7 @@ export interface ProjectContentColumns {
   voiceMode?: string | null;
   language?: string | null;
   scriptApprovedAt?: Date | null;
+  creativeStyleJson?: string | null;
 }
 
 export interface ProjectContent {
@@ -44,6 +46,8 @@ export interface ProjectContent {
   language: string;
   /** Made before the engine existed (every content column NULL). */
   legacy: boolean;
+  /** QĐ-127: the creative style in effect (inferred from the template when none was chosen). */
+  creative: EffectiveCreativeStyle;
 }
 
 export function projectContent(project: ProjectContentColumns): ProjectContent {
@@ -62,6 +66,7 @@ export function projectContent(project: ProjectContentColumns): ProjectContent {
     voiceMode: (project.voiceMode as VoiceMode | null) ?? template.defaultVoiceMode,
     language: project.language ?? template.defaultLanguage,
     legacy,
+    creative: resolveCreativeStyle(template.creative, parseCreativeStyle(project.creativeStyleJson), project.tone),
   };
 }
 

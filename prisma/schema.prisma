@@ -488,6 +488,10 @@ model Project {
   /// auto-fit), narration / music / effect levels, narrator voice. JSON. NULL =
   /// the defaults (domain/output-controls.ts). Local render only, except voice.
   outputControlsJson String?
+  /// QĐ-127 CREATIVE STYLE: preset, comedy level / styles, pacing, punchline,
+  /// emotion, energy (domain/creative-style.ts). JSON. NULL = inferred from the
+  /// content template; an old script is never rewritten because of it.
+  creativeStyleJson String?
   /// When a person pressed DUYỆT KỊCH BẢN. Media for a multi-content project
   /// waits for it; a legacy project (contentType NULL) never needed it.
   scriptApprovedAt   DateTime?

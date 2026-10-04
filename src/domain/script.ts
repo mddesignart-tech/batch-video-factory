@@ -146,6 +146,12 @@ export const ScriptSchema = z.object({
     .optional(),
   /** Factual content the writer produced on its own - a person should check it. */
   needsFactReview: z.boolean().optional(),
+  /**
+   * QĐ-127: the creative style this script was WRITTEN with (preset, comedy,
+   * pacing, punchline, emotion...). Shown as badges; a later style change does
+   * not pretend the old script follows it.
+   */
+  creativeStyle: z.record(z.string(), z.unknown()).optional(),
 });
 export type ScriptDoc = z.infer<typeof ScriptSchema>;
 

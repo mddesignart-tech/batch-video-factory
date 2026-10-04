@@ -11,6 +11,8 @@ AUDIENCE: {{audienceHint}}. Longest sentence: {{maxSentenceWords}} words.
 TONE: {{toneHint}}
 VOICE MODE: {{voiceModeRule}}
 
+{{creativeStyle}}
+
 SUBJECT (product / brand / tool name, exactly as typed): {{subject}}
 
 THE PERSON'S IDEA:

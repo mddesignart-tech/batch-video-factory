@@ -10,6 +10,7 @@ import { sha256 } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { buildPrompt } from "@/lib/prompts";
+import { creativeStylePrompt, idiomStructureHint, type EffectiveCreativeStyle } from "@/domain/creative-style";
 import { getTextProvider } from "@/providers/registry";
 import { ProviderError, type ProviderUsage, type ScriptRequest } from "@/providers/types";
 import { assertCanSpend } from "./spend-guard";
@@ -237,6 +238,11 @@ export interface GenerateScriptOptions {
   provider: string;
   model: string;
   projectId?: string;
+  /**
+   * QĐ-127: the person's creative style for this idiom video. Absent = the
+   * original writer, prompt byte for byte ("idiom-v1").
+   */
+  creative?: EffectiveCreativeStyle;
 }
 
 /**
@@ -253,7 +259,7 @@ export async function generateScript(
 
   // Rendered here, not inside the provider: the template is operator-editable
   // content, and every text provider should send the same instructions.
-  const systemPrompt = await buildPrompt("script", {
+  const basePrompt = await buildPrompt("script", {
     idiom: opts.idiom,
     meaning: opts.meaning,
     literalMeaning: opts.literalMeaning,
@@ -267,6 +273,10 @@ export async function generateScript(
       avoidAngles.length > 0 ? avoidAngles.join(", ") : "(none yet)",
   });
 
+  const systemPrompt = opts.creative
+    ? [basePrompt, creativeStylePrompt(opts.creative, { factual: false, storyGags: true }), idiomStructureHint(opts.creative)].join("\n\n")
+    : basePrompt;
+
   const request: ScriptRequest = {
     idiom: opts.idiom,
     meaning: opts.meaning,
@@ -278,6 +288,7 @@ export async function generateScript(
     avoidAngles,
     model: opts.model,
     systemPrompt,
+    ...(opts.creative ? { creative: opts.creative } : {}),
   };
 
   const started = Date.now();

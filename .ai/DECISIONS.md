@@ -3769,3 +3769,27 @@ Lớn còn tệ hơn.
 - Không chạm voice / parser nhiều người nói / TTS. Không migration.
 
 Test: `tests/subtitle-consistency.test.ts` (13).
+
+## QĐ-127 — Creative Style Engine dùng chung (2026-10-04)
+
+Nâng "mức độ hài / phong cách" thành một engine chung cho MỌI content template (không hệ riêng từng chủ đề).
+- `domain/creative-style.ts`: preset (14), tone, comedyLevel 0..5, comedyStyles[], pacingStyle, punchlineMode, emotionStyle,
+  energyLevel. Preset chỉ map về field. `resolveCreativeStyle` = mặc định template → preset → field người dùng đổi.
+- Style đổi THẬT kịch bản: `applyCreativeStructure` thêm/bớt beat (reaction, escalation, gag, payoff, moment, climax; hài
+  0 bỏ gag), hook theo tone/hài, CTA theo tone; `paceFactor` đổi số cảnh; `creativeStylePrompt` vào prompt
+  (`{{creativeStyle}}` trong content-script.txt, tự nối thêm nếu prompt do người vận hành sửa thiếu placeholder).
+  Beat của style được ghim (`pinned`) — bộ lập cảnh cắt beat template trước.
+- Factual (product/AI/animal/knowledge/ads): `storyGags=false` → không gag tình huống bịa; hài chỉ ở lời/hook/phản
+  ứng/camera; prompt luôn có "FACTUALITY > REFERENCE > STYLE" và cấm bịa tính năng/giá/thông số/trải nghiệm/hành vi.
+- Template registry: `creative` (defaults + simpleFields) cho từng template; promptVersion nội dung lên `-v2`.
+  Thành ngữ: bộ viết cũ; "Tự động" (NULL) = prompt byte-for-byte `idiom-v1`; chọn style → thêm khối style + cấu trúc
+  theo mức hài, `templateVersion = idiom-v2`.
+- Dữ liệu: cột `Project.creativeStyleJson` (migration `20261006000000_creative_style`, chỉ thêm). NULL = suy ra từ
+  template; tone vẫn ở cột `tone` (thêm FRIENDLY, PLAYFUL, EMOTIONAL, MYSTERIOUS, PREMIUM, DOCUMENTARY).
+- UI: PHONG CÁCH SÁNG TẠO ở bước 3 TẠO VIDEO + form thành ngữ (Simple: preset, hài, nhịp, cảm xúc, punchline;
+  Nâng cao: kiểu hài, năng lượng, tone); thẻ "Phong cách sáng tạo" trên trang dự án (badge theo kịch bản hiện tại,
+  Lưu, VIẾT LẠI KỊCH BẢN); badge trên thẻ Kịch bản.
+- Viết lại: chỉ text (1 lời gọi Text, mock $0), xoá duyệt; không ảnh/giọng/video. Dự án đã bắt đầu media: chỉ lưu
+  style + thông báo "media cũ vẫn được giữ"; VIẾT LẠI vẫn khoá (MEDIA_STARTED) như trước.
+
+Test: `tests/creative-style.test.ts` (15).

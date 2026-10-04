@@ -6,6 +6,7 @@ import { useMemo, useState, useTransition } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { Alert, Button, Card, CardContent, Field, Input, Select, Textarea } from "@/components/ui";
 import { PlatformPicker } from "@/components/platform-picker";
+import { CreativeStylePicker } from "@/components/creative-style-picker";
 import { createContentVideo } from "@/app/actions/content";
 import {
   CONTENT_CATEGORIES,
@@ -19,7 +20,6 @@ import {
   CONTENT_SOURCE_TYPES,
   DURATION_CHOICES,
   LANGUAGES,
-  TONES,
   VOICE_MODES,
 } from "@/domain/content-options";
 import { cn } from "@/lib/utils";
@@ -316,6 +316,15 @@ export function CreateVideoWizard({ presets }: { presets: { id: string; name: st
             </Field>
           </div>
 
+          <div className="mt-4 space-y-2 rounded-lg border border-ink-800 p-3">
+            <p className="text-sm font-semibold text-ink-100">PHONG CÁCH SÁNG TẠO</p>
+            <p className="text-[11px] text-ink-500">
+              Quyết định cách kể: mức độ hài, nhịp, cảm xúc, punchline. Không cần viết prompt. Với nội dung thật (sản phẩm, kiến
+              thức, động vật), hài chỉ đổi cách nói - không bao giờ đổi sự thật.
+            </p>
+            <CreativeStylePicker key={`cs-${template.id}`} creative={template.creative} />
+          </div>
+
           <div className="mt-4 space-y-2">
             <p className="text-sm font-semibold text-ink-100">Bạn muốn đăng video ở đâu?</p>
             <PlatformPicker />
@@ -324,15 +333,6 @@ export function CreateVideoWizard({ presets }: { presets: { id: string; name: st
           <details className="mt-4 rounded-lg border border-ink-800 px-3 py-2">
             <summary className="cursor-pointer text-xs text-ink-400">Tuỳ chọn thêm (không bắt buộc)</summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <Field label="Phong cách nội dung">
-                <Select name="tone" defaultValue={template.defaultTone} key={`t-${template.id}`}>
-                  {TONES.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
               <Field label="Lồng tiếng">
                 <Select name="voiceMode" defaultValue={template.defaultVoiceMode} key={`v-${template.id}`}>
                   {VOICE_MODES.map((v) => (
