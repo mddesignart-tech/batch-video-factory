@@ -155,6 +155,12 @@ export async function normalizeVoiceClip(
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "voicenorm-"));
   const trimmed = path.join(work, "trimmed.wav");
+  // Every step writes into `work`; the finished file replaces `outputPath`
+  // only when ALL of them succeeded. A step that fails half-way (a silent clip
+  // measuring -inf LUFS, a locked file) used to leave a truncated WAV in place
+  // of the original, which the render then could not open.
+  const finalPath = outputPath;
+  outputPath = path.join(work, "levelled.wav");
 
   try {
     // `areverse` twice is the standard way to reach the tail: silenceremove
@@ -275,16 +281,24 @@ export async function normalizeVoiceClip(
     // encode. A figure taken any earlier would drift from what the subtitles
     // have to line up against.
     const durationSec = await durationOf(outputPath);
+    fs.mkdirSync(path.dirname(finalPath), { recursive: true });
+    fs.copyFileSync(outputPath, finalPath);
 
     return {
-      outputPath,
+      outputPath: finalPath,
       before,
       after,
       trimmedSeconds: Math.max(0, originalDuration - trimmedDuration),
       durationSec,
     };
   } finally {
-    fs.rmSync(work, { recursive: true, force: true });
+    // Never let cleanup hide the real outcome (Windows can briefly hold a file
+    // FFmpeg just closed: EPERM). A leftover temp folder costs nothing.
+    try {
+      fs.rmSync(work, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
 }
 

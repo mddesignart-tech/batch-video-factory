@@ -47,6 +47,11 @@ export async function saveCreativeStyle(projectId: string, input: Partial<Stored
       data: { creativeStyleJson: json, ...(nextTone ? { tone: toneOf(nextTone).id } : {}) },
     });
     await logger.info({ event: "creative.style_saved", projectId, message: "Đã lưu phong cách sáng tạo. Chưa viết lại kịch bản, chưa tạo media nào ($0)." });
+    // QĐ-128: the camera follows the style - AUTO scene plans only (a person's camera stays).
+    if (project.scriptJson) {
+      const { planProjectScenes } = await import("./scene-plan-service");
+      await planProjectScenes(projectId, { onlyPlanned: true });
+    }
   }
 
   const message = !changed

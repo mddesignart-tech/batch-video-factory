@@ -44,6 +44,7 @@ import { importSceneImage, storeImportedImage } from "./imported-image";
 import { autoAssignReferences, createReference, projectReferenceAssets, setSceneReferences } from "./reference-assets";
 import type { ReferenceType } from "@/domain/reference";
 import { persistScript, selectTextModel } from "./project-service";
+import { planProjectScenes } from "./scene-plan-service";
 import { guardedTextCall, scriptHashFor, textCallContext, withDerivedRouting } from "./script-service";
 
 /**
@@ -431,6 +432,8 @@ export async function generateContentProjectScript(projectId: string): Promise<S
   // Reference intent the writer returned, then deterministic auto-assignment
   // for every scene it left empty. Visible and editable on the storyboard.
   await autoAssignReferences(projectId, { onlyEmpty: true });
+  // QĐ-128: AI Camera Director + layers for the new script ($0, no media).
+  await planProjectScenes(projectId);
 
   await prisma.project.update({
     where: { id: projectId },

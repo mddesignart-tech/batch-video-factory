@@ -90,6 +90,19 @@ describe("LOCAL CAMERA (real FFmpeg render, $0)", () => {
     expect(meanDiff(await frameAt(still, 0.1, file("s0.raw")), await frameAt(still, 1.8, file("s1.raw")))).toBeLessThan(1.5);
   }, 120_000);
 
+  it("khổ thật 1080×1920: ảnh vào MỘT frame (không lặp) → render nhanh, không nổ số frame", async () => {
+    const big = { width: 1080, height: 1920, fps: 30 };
+    const args = buildSceneNormalizeArgs({ videoInput: file("still.png"), audioInput: null, duration: 4, target: big, output: file("big.mp4"), camera: { move: "PUSH_IN", speed: "SLOW" } });
+    expect(args).not.toContain("-loop");
+    expect(args[args.indexOf("-filter_complex") + 1]).toContain("scale=1440:2560,zoompan=");
+    const t0 = Date.now();
+    await ffmpeg(args);
+    expect(Date.now() - t0).toBeLessThan(60_000);
+    expect(Math.abs((await probeDuration(file("big.mp4"))) - 4)).toBeLessThan(0.15);
+    // V1 chain (no plan) still loops the picture, exactly as before.
+    expect(buildSceneNormalizeArgs({ videoInput: "a.png", audioInput: null, duration: 4, target: big, output: "o.mp4" })).toContain("-loop");
+  }, 120_000);
+
   it("ghép lớp thật: hậu cảnh + ambient loop + tiền cảnh trong suốt → MP4 đúng thời lượng", async () => {
     const out = file("layered.mp4");
     await ffmpeg(

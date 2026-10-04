@@ -215,6 +215,7 @@ export class MockTextProvider implements TextProvider {
       const characters = present;
       return {
         sceneNumber: index + 1,
+        sceneRole: beat.role,
         // Clamp to what a single AI video generation can actually produce well.
         duration: Math.min(6, Math.max(2, duration)),
         visualDescription,

@@ -234,6 +234,9 @@ export async function generateProjectScript(projectId: string): Promise<ScriptDo
     },
   });
   await recordConcept(project.idiomId, project.id, script);
+  // QĐ-128: camera + layers for the new script ($0, no media).
+  const { planProjectScenes } = await import("./scene-plan-service");
+  await planProjectScenes(project.id);
 
   return script;
 }

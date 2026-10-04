@@ -139,7 +139,10 @@ export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number
     default:
       z = `1+${n(A)}*${E}`;
   }
-  return `,scale=${width * 2}:${height * 2},zoompan=z='${z}':x='${x}':y='${y}':d=${frames}:s=${width}x${height}:fps=${fps}`;
+  // Upscale before zoompan so slow moves do not stair-step, but never past ~2.5K.
+  const up = Math.min(2, 2560 / Math.max(width, height));
+  const even = (v: number) => Math.round((v * up) / 2) * 2;
+  return `,scale=${even(width)}:${even(height)},zoompan=z='${z}':x='${x}':y='${y}':d=${frames}:s=${width}x${height}:fps=${fps}`;
 }
 
 // --------------------------------------------------------------- layered ---
@@ -149,8 +152,12 @@ export interface LayerInputs {
   background: string;
   /** Transparent PNG of the subject(s), drawn over the background. */
   foreground?: string | null;
-  /** Ambient loop clips, screen-blended subtly over the background. */
-  ambient?: { path: string; opacity?: number }[];
+  /**
+   * Ambient loop clips, screen-blended subtly over the background. TOP = only
+   * the upper band of the frame (sky: clouds, far birds, smoke) - used when
+   * there is no separate foreground, so nothing is drawn over a face.
+   */
+  ambient?: { path: string; opacity?: number; region?: "FULL" | "TOP" }[];
 }
 
 /**
@@ -170,7 +177,8 @@ export function buildLayeredSceneArgs(opts: {
   const { layers, target, camera } = opts;
   const { width, height, fps } = target;
   const dur = Math.max(0.5, Number(opts.duration.toFixed(3)));
-  const args = ["-y", "-hide_banner", "-loglevel", "error", "-loop", "1", "-t", String(dur), "-i", layers.background];
+  // The background goes in as ONE frame (zoompan makes the scene's frames from it).
+  const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", layers.background];
   let idx = 1;
   const fgIdx = layers.foreground ? idx++ : -1;
   if (layers.foreground) args.push("-loop", "1", "-t", String(dur), "-i", layers.foreground);
@@ -187,13 +195,20 @@ export function buildLayeredSceneArgs(opts: {
   // Background: far away, so it moves less (parallax).
   chains.push(
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}` +
-      `${cameraZoompan({ ...camera, critical: false }, { durationSec: dur, target, amplitudeScale: layers.foreground ? 0.4 : 1 })},fps=${fps},format=yuv420p[bg0]`,
+      `${cameraZoompan({ ...camera, critical: false }, { durationSec: dur, target, amplitudeScale: layers.foreground ? 0.4 : 1 })},fps=${fps},` +
+      `tpad=stop_mode=clone:stop_duration=${dur},format=yuv420p[bg0]`,
   );
   let last = "bg0";
   (layers.ambient ?? []).forEach((a, i) => {
     const op = Math.min(0.6, Math.max(0.1, a.opacity ?? 0.35));
-    chains.push(`[${ambIdx[i]}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=${fps},format=yuv420p[amb${i}]`);
-    chains.push(`[${last}][amb${i}]blend=all_mode=screen:all_opacity=${op.toFixed(2)}[mix${i}]`);
+    if (a.region === "TOP") {
+      const band = Math.round(height * 0.3);
+      chains.push(`[${ambIdx[i]}:v]scale=${width}:${band}:force_original_aspect_ratio=increase,crop=${width}:${band},fps=${fps},format=yuva420p,colorchannelmixer=aa=${op.toFixed(2)}[amb${i}]`);
+      chains.push(`[${last}][amb${i}]overlay=0:0:format=auto[mix${i}]`);
+    } else {
+      chains.push(`[${ambIdx[i]}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=${fps},format=yuv420p[amb${i}]`);
+      chains.push(`[${last}][amb${i}]blend=all_mode=screen:all_opacity=${op.toFixed(2)}[mix${i}]`);
+    }
     last = `mix${i}`;
   });
   if (layers.foreground) {

@@ -116,8 +116,15 @@ export async function failJob(jobId: string, error: unknown): Promise<boolean> {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) return false;
 
-  const message =
+  const base =
     error instanceof Error ? error.message : String(error ?? "Lỗi không xác định");
+  // An FFmpeg failure keeps the last lines FFmpeg printed - "exit code 3199971767"
+  // alone says nothing about which file or filter was at fault.
+  const stderr =
+    typeof error === "object" && error !== null && "stderr" in error && typeof (error as { stderr: unknown }).stderr === "string"
+      ? ((error as { stderr: string }).stderr.trim().split(/\r?\n/).slice(-3).join(" / ")).slice(-400)
+      : "";
+  const message = stderr ? `${base} (${stderr})` : base;
 
   // A FAILURE THAT SAYS IT WILL NOT PASS IS NOT RETRIED.
   //

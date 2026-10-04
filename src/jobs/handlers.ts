@@ -18,6 +18,7 @@ import { contentInfo } from "@/services/asset-content";
 import { pacingSummary, parseDurationMode } from "@/domain/scene-timing";
 import { deferJob } from "./queue";
 import { applyOutputControls } from "@/services/output-controls";
+import { renderInputsFor } from "@/services/scene-plan-service";
 
 /**
  * Job handlers.
@@ -208,6 +209,8 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
       minDuration: s.minDuration,
       maxDuration: s.maxDuration,
       motionSource: s.motionSource,
+      // QĐ-128 scene plan: camera on stills, layers. Absent for older scenes.
+      ...renderInputsFor(s),
       // The voice's own ordered lines: subtitles never re-parse (QĐ-122).
       spokenLines: spokenLines(s).map((l) => l.text),
     })),

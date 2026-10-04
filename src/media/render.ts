@@ -232,7 +232,11 @@ export function buildSceneNormalizeArgs(opts: {
 
   // A still image becomes a slow push-in so the scene is never frozen.
   const isStill = /\.(png|jpe?g|webp)$/i.test(videoInput);
-  if (isStill) args.push("-loop", "1", "-t", String(dur));
+  // QĐ-128: with a camera plan the still goes in as ONE frame - zoompan then
+  // makes exactly the scene's frames (a looped input would make d frames per
+  // input frame: thousands, which is slow and can crash FFmpeg). V1's chain
+  // (no plan) is unchanged.
+  if (isStill && !opts.camera) args.push("-loop", "1", "-t", String(dur));
   args.push("-i", videoInput);
 
   if (audioInput) args.push("-i", audioInput);

@@ -44,6 +44,7 @@ import { audienceOf, languageOf } from "@/domain/content-options";
 import { spokenLines } from "@/domain/scene-subtitles";
 import type { ScriptDoc } from "@/domain/script";
 import { CreativeStyleCard } from "./creative-style-card";
+import { sceneCameraViews } from "@/services/scene-camera-view";
 import { projectContent } from "@/domain/content-legacy";
 import { creativeBadges, parseCreativeStyle, type EffectiveCreativeStyle } from "@/domain/creative-style";
 import { REWRITABLE_STATUSES } from "@/services/creative-style";
@@ -125,6 +126,10 @@ export default async function ProjectDetailPage({
   const styleBadges = creativeBadges(writtenStyle ?? effectiveContent.creative);
   const canRewriteScript = (REWRITABLE_STATUSES as readonly string[]).includes(project.status);
   const hasMedia = project.scenes.some((s) => s.imagePath || s.videoPath || s.audioPath);
+  // QĐ-128 Camera & lớp cảnh: read only, $0. The Video AI price per scene comes from the cost preview.
+  const cameraByScene = project.scriptJson
+    ? await sceneCameraViews(id, new Map((preview?.current.scenes ?? []).map((p) => [p.sceneNumber, p.video?.estimatedCost ?? 0])))
+    : {};
   // Tài sản tham chiếu (QĐ-124): read only here, $0.
   const [references, refProblems] = await Promise.all([listProjectReferences(id), referenceProblems(id)]);
   const musicAsset = project.backgroundMusicAssetId
@@ -381,6 +386,7 @@ export default async function ProjectDetailPage({
                 primaryCharacters: sceneCharacters(scene).primary,
                 errorMessage: scene.errorMessage,
               }))}
+              cameraByScene={cameraByScene}
               routingByScene={Object.fromEntries(
                 (preview?.current.scenes ?? []).map((plan) => [
                   plan.sceneNumber,

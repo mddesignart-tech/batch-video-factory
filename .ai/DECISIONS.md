@@ -3800,3 +3800,27 @@ Test: `tests/creative-style.test.ts` (15).
    `script.txt` (idiom-v1, "Tự động") giữ nguyên byte. Cấu trúc từ một nguồn `idiomPlan` cho cả prompt và mock.
 3. `scriptNeedsRewrite(score, comedyLevel)`: hài 0–1 không chấm trục humor (không tự viết lại thành bản hài).
 4. `idiomPlan` lấp đủ thời lượng bằng beat trung tính (ví dụ khác, tóm tắt); nhịp quyết định số cảnh.
+
+## QĐ-128 — Scene Motion + Multi-layer Composer + AI Camera Director (2026-10-04/05)
+
+- Camera Grammar (`domain/camera-grammar.ts`): shot / angle / movement / focus chuẩn, câu chữ provider cố định (ZOOM ≠ DOLLY),
+  khả năng local trung thực (EXACT / APPROX / NONE + phương án local cho orbit/crane). Focus KHÔNG giả lập tại máy.
+- Scene plan (`domain/scene-plan.ts`, cột `Scene.scenePlanJson`, migration `20261007000000_scene_plan`): camera + layers + route,
+  nguồn AUTO / USER / LEGACY. NULL = cảnh cũ → render y hệt V1 (zoom vào chậm, args không đổi).
+- AI Camera Director (`domain/camera-director.ts`): quy tắc theo loại cảnh + Creative Style + preset camera (trong creativeStyleJson);
+  chuyên nghiệp/documentary không bao giờ crash zoom/whip; tham chiếu bắt buộc thắng hiệu ứng; continuity pass (hướng, hiệu ứng ≤1/3
+  cảnh, không 3 cảnh giống hệt, người nói giữ bên màn hình). Lý do chỉ cho UI.
+- Layers (`domain/scene-layers.ts`): tiền/trung/hậu cảnh + ≤2 ambient; ambient chỉ chạy tại máy khi có loop `data/ambient/<kind>.mp4`,
+  không có thì mô tả trong prompt. Reference type ENVIRONMENT mới.
+- Local compositor (`media/camera-motion.ts`): zoompan theo plan, easing theo thời lượng giọng + giữ cuối; ảnh vào MỘT frame
+  (looped input gây nổ frame / crash). Ghép lớp: hậu cảnh + ambient + tiền cảnh PNG trong suốt (GHÉP LỚP TẠI MÁY, $0).
+- Service (`services/scene-plan-service.ts`): plan sau khi viết kịch bản; USER không bị ghi đè; đổi phong cách chỉ lập lại plan AUTO
+  đã có; ghi câu camera chuẩn vào `Scene.camera` + "Scene depth:" vào prompt CHỈ khi cảnh chưa có media.
+- UI: preset CAMERA trong Phong cách sáng tạo; panel "Camera & lớp cảnh" (gợi ý + lý do, DÙNG GỢI Ý, ĐỔI CAMERA, Đặt lại tự động,
+  ambient bật/tắt, chi phí theo phần, cảnh báo model không hỗ trợ + DÙNG CAMERA LOCAL / GIẢM CHUYỂN ĐỘNG / ĐỔI CAMERA / CHỌN MODEL KHÁC).
+- Không đổi quyết định trả phí: router + duyệt như cũ; Director không bao giờ nâng cảnh lên Video AI.
+- Không có hệ transition / Smooth pass trong code: chỉ lưu gợi ý transition, nối cảnh vẫn là CUT.
+- Sửa kèm: `normalizeVoiceClip` làm trong thư mục tạm, chỉ chép đè khi xong (trước đây lỗi giữa chừng để lại WAV hỏng → render lỗi
+  INVALIDDATA); cleanup không che lỗi. `jobs/queue.ts` ghi kèm 3 dòng stderr FFmpeg.
+
+Test: scene-motion, camera-director, scene-layers, camera-motion, scene-motion-pipeline.

@@ -57,6 +57,14 @@ export const VideoModelProfileSchema = z.object({
   maxReferenceImages: z.number().int().min(0).max(16).optional(),
   /** QĐ-124, video: the adapter can send reference pictures besides the keyframe. */
   directReference: z.boolean().optional(),
+  /** QĐ-128 camera control. Absent = not promised (the router never assumes it). */
+  cameraControl: z.boolean().optional(),
+  /** Camera Grammar moves the vendor follows reliably (e.g. "ORBIT_LEFT", "DOLLY_IN"). */
+  cameraMoves: z.array(z.string()).optional(),
+  focusControl: z.boolean().optional(),
+  orbit: z.boolean().optional(),
+  tracking: z.boolean().optional(),
+  complexCameraPrompt: z.boolean().optional(),
   /** Price as the vendor states it (credits), next to the $ price column. */
   credits: z.number().nonnegative().optional(),
   billingUnit: z.string().optional(),

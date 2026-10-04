@@ -5,6 +5,7 @@ import { Ban, Check, Image as ImageIcon, Mic, Video } from "lucide-react";
 import { ImageReview, type ImageModelChoice } from "./image-review";
 import { SceneImagePanel } from "./scene-image-panel";
 import { SceneVoicePanel } from "./scene-voice-panel";
+import { SceneCameraPanel, type SceneCameraView } from "./scene-camera-panel";
 import { VideoSelectionPanel } from "./video-selection-panel";
 import { isNeedsSelection, needsSelectionMessage } from "@/domain/video-selection";
 import { aspectOf, effectiveFit, type FitMode } from "@/domain/platform-profile";
@@ -132,6 +133,7 @@ const PRIORITY_LABEL: Record<string, string> = {
 export function Storyboard({
   projectId,
   videoLimit,
+  cameraByScene = {},
   frame,
   frameFit,
   idiomPhrase,
@@ -145,6 +147,8 @@ export function Storyboard({
   projectId: string;
   /** The video's own budget (NGÂN SÁCH VIDEO), for the "Tăng ngân sách video" button. */
   videoLimit: number | null;
+  /** QĐ-128: Camera & lớp cảnh per scene id. */
+  cameraByScene?: Record<string, SceneCameraView>;
   /** The output frame (QĐ-121): the preview is drawn in this shape. */
   frame?: { width: number; height: number };
   /** The profile's fit mode, so the preview frames pictures like the render. */
@@ -424,6 +428,7 @@ export function Storyboard({
               projectId={projectId}
               videoLimit={videoLimit}
             />
+            {cameraByScene[selected.id] ? <SceneCameraPanel key={selected.id} view={cameraByScene[selected.id]!} /> : null}
             <div className="mb-3 flex flex-wrap gap-1.5">
               <ActionButton
                 size="sm"
