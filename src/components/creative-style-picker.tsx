@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Field, Select } from "@/components/ui";
 import { TONES } from "@/domain/content-options";
+import { CAMERA_PRESETS, effectiveCameraPreset, type CameraPresetId } from "@/domain/camera-director";
 import {
   COMEDY_LEVELS,
   COMEDY_STYLES,
@@ -110,6 +111,27 @@ export function CreativeStylePicker({
       </Select>
     </Field>
   );
+  // QĐ-128: one CAMERA choice for normal people; shot / angle / movement are per scene, under Nâng cao.
+  const autoCamera = effectiveCameraPreset({
+    cameraPreset: "AUTO",
+    comedyLevel: effective.comedyLevel,
+    tone: effective.tone,
+    creativePreset: effective.preset,
+    contentType: null,
+    emotion: effective.emotionStyle,
+    pacing: effective.pacingStyle,
+  });
+  const camera = (
+    <Field label="Camera">
+      <Select value={stored.cameraPreset ?? "AUTO"} onChange={(e) => setField("cameraPreset", e.currentTarget.value as CameraPresetId)}>
+        {CAMERA_PRESETS.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.id === "AUTO" ? `Tự động (${CAMERA_PRESETS.find((x) => x.id === autoCamera)?.label ?? ""})` : p.label}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
   const tone = (
     <Field label="Giọng điệu (tone)">
       <Select value={effective.tone} onChange={(e) => setField("tone", e.currentTarget.value)}>
@@ -175,6 +197,7 @@ export function CreativeStylePicker({
         {simple.filter(([k]) => show(k)).map(([k, node]) => (
           <div key={k}>{node}</div>
         ))}
+        {camera}
       </div>
       <details className="rounded-lg border border-ink-800 px-3 py-2">
         <summary className="cursor-pointer text-xs text-ink-400">Nâng cao: kiểu hài, năng lượng, giọng điệu</summary>

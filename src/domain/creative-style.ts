@@ -19,6 +19,7 @@
  */
 
 import { z } from "zod";
+import { CameraPresetSchema, type CameraPresetId } from "./camera-director";
 
 export const CREATIVE_STYLE_VERSION = "creative-v1";
 
@@ -126,6 +127,8 @@ export const CreativeStyleSchema = z.object({
   punchlineMode: z.enum(PUNCHLINE_MODES.map((p) => p.id) as [PunchlineMode, ...PunchlineMode[]]).optional(),
   emotionStyle: z.enum(EMOTION_STYLES.map((e) => e.id) as [EmotionId, ...EmotionId[]]).optional(),
   energyLevel: z.number().int().min(1).max(5).optional(),
+  /** QĐ-128 CAMERA preset ("Tự động" follows the style). */
+  cameraPreset: CameraPresetSchema.optional(),
 });
 export type StoredCreativeStyle = z.infer<typeof CreativeStyleSchema>;
 
@@ -160,6 +163,8 @@ export interface TemplateCreative {
 
 export interface EffectiveCreativeStyle extends CreativeFields {
   preset: CreativePresetId;
+  /** QĐ-128: camera preset; AUTO = the Camera Director follows this style. */
+  cameraPreset: CameraPresetId;
   /** Nothing was ever chosen: the template's defaults, as before this engine. */
   inferred: boolean;
 }
@@ -192,6 +197,7 @@ export function resolveCreativeStyle(
     punchlineMode: punchline,
     emotionStyle: emotion === "AUTO" ? base.emotionStyle : emotion,
     energyLevel: pick("energyLevel"),
+    cameraPreset: stored?.cameraPreset ?? "AUTO",
     inferred: stored === null,
   };
 }
@@ -492,7 +498,7 @@ export function storedCreativeJson(input: Partial<StoredCreativeStyle> | null | 
   const parsed = CreativeStyleSchema.safeParse(input);
   if (!parsed.success) return null;
   const s = parsed.data;
-  const explicit = (["tone", "comedyLevel", "comedyStyles", "pacingStyle", "punchlineMode", "emotionStyle", "energyLevel"] as const).some(
+  const explicit = (["tone", "comedyLevel", "comedyStyles", "pacingStyle", "punchlineMode", "emotionStyle", "energyLevel", "cameraPreset"] as const).some(
     (k) => s[k] !== undefined,
   );
   if (s.preset === "AUTO" && !explicit) return null;
