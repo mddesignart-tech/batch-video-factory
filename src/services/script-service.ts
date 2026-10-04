@@ -10,7 +10,7 @@ import { sha256 } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { buildPrompt } from "@/lib/prompts";
-import { creativeStylePrompt, idiomStructureHint, type EffectiveCreativeStyle } from "@/domain/creative-style";
+import { creativeStylePrompt, idiomPlan, idiomStructureHint, idiomWriterVoice, type EffectiveCreativeStyle } from "@/domain/creative-style";
 import { getTextProvider } from "@/providers/registry";
 import { ProviderError, type ProviderUsage, type ScriptRequest } from "@/providers/types";
 import { assertCanSpend } from "./spend-guard";
@@ -259,7 +259,7 @@ export async function generateScript(
 
   // Rendered here, not inside the provider: the template is operator-editable
   // content, and every text provider should send the same instructions.
-  const basePrompt = await buildPrompt("script", {
+  const values = {
     idiom: opts.idiom,
     meaning: opts.meaning,
     literalMeaning: opts.literalMeaning,
@@ -271,11 +271,19 @@ export async function generateScript(
       .join("\n"),
     avoidAngles:
       avoidAngles.length > 0 ? avoidAngles.join(", ") : "(none yet)",
-  });
-
+  };
+  // "Tự động" = prompts/script.txt byte for byte (idiom-v1). A chosen style
+  // uses idiom-v2, whose role, structure, scene count and humour rule all come
+  // from the style - never a comedy prompt with a "no jokes" note appended.
   const systemPrompt = opts.creative
-    ? [basePrompt, creativeStylePrompt(opts.creative, { factual: false, storyGags: true }), idiomStructureHint(opts.creative)].join("\n\n")
-    : basePrompt;
+    ? await buildPrompt("script-creative", {
+        ...values,
+        ...idiomWriterVoice(opts.creative),
+        creativeStyle: creativeStylePrompt(opts.creative, { factual: false, storyGags: true }),
+        structure: idiomStructureHint(opts.creative, opts.targetDuration),
+        sceneRange: `Exactly ${idiomPlan(opts.creative, opts.targetDuration).length}`,
+      })
+    : await buildPrompt("script", values);
 
   const request: ScriptRequest = {
     idiom: opts.idiom,
@@ -330,7 +338,7 @@ export async function generateScript(
   );
   let rewritten = false;
 
-  if (scriptNeedsRewrite(score)) {
+  if (scriptNeedsRewrite(score, opts.creative?.comedyLevel)) {
     const retry = await call("script-rewrite", estimate, () =>
       provider.generateScript({
         ...request,

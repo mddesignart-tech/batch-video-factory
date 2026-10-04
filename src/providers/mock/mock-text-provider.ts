@@ -14,6 +14,7 @@ import type {
   YoutubeMeta,
 } from "@/providers/types";
 import { hashCode, sleep } from "@/lib/utils";
+import { idiomPlan } from "@/domain/creative-style";
 import { writeMockContentScript } from "./mock-content-writer";
 
 /**
@@ -177,14 +178,17 @@ export class MockTextProvider implements TextProvider {
     const leo = req.characters[1]?.name ?? "Leo";
     const idiom = req.idiom;
 
-    const beats = req.creative ? idiomBeatsFor(req.creative) : BEATS.slice(0, req.targetDuration < 22 ? 5 : 6);
+    const beats = req.creative ? idiomBeatsFor(req.creative, req.targetDuration) : BEATS.slice(0, req.targetDuration < 22 ? 5 : 6);
     const shareTotal = beats.reduce((sum, b) => sum + b.share, 0);
+    // QĐ-127: a chosen style with comedy 0-1 is a calm explainer, start to end.
+    const calm = req.creative !== undefined && req.creative.comedyLevel <= 1;
 
     const scenes: SceneDoc[] = beats.map((beat, index) => {
-      const duration = round1(
-        (beat.share / shareTotal) * req.targetDuration,
-      );
-      const content = beatContent(beat.role, {
+      // A chosen style spreads the running time evenly over its planned beats.
+      const duration = req.creative
+        ? round1(req.targetDuration / beats.length)
+        : round1((beat.share / shareTotal) * req.targetDuration);
+      const content = beatContent(calm && beat.role === "hook" ? "hook-calm" : beat.role, {
         idiom,
         angle,
         max,
@@ -240,21 +244,38 @@ export class MockTextProvider implements TextProvider {
       };
     });
 
-    const doc: ScriptDoc = {
-      idiom,
-      title: `He Took "${idiom}" Literally 😂`,
-      hook: `My friend said "${idiom}"... so I did exactly that.`,
-      literalMisunderstanding: req.literalMeaning,
-      setup: angle.setup.replace("{idiom}", `"${idiom}"`),
-      escalation: angle.escalation,
-      punchline: angle.punchline,
-      meaning: req.meaning,
-      exampleSentence: req.exampleSentence,
-      durationTarget: req.targetDuration,
-      scenes,
-      closingCTA: "Follow for more funny English!",
-      angleKey: angle.key,
-    };
+    const doc: ScriptDoc = calm
+      ? {
+          // A calm explainer: plain title, hook and closing line - no joke.
+          idiom,
+          title: `"${idiom}" - meaning and examples`,
+          hook: `What does "${idiom}" mean?`,
+          literalMisunderstanding: "",
+          setup: "",
+          escalation: "",
+          punchline: "",
+          meaning: req.meaning,
+          exampleSentence: req.exampleSentence,
+          durationTarget: req.targetDuration,
+          scenes,
+          closingCTA: "Follow for more English idioms.",
+          angleKey: "clear-explainer",
+        }
+      : {
+          idiom,
+          title: `He Took "${idiom}" Literally 😂`,
+          hook: `My friend said "${idiom}"... so I did exactly that.`,
+          literalMisunderstanding: req.literalMeaning,
+          setup: angle.setup.replace("{idiom}", `"${idiom}"`),
+          escalation: angle.escalation,
+          punchline: angle.punchline,
+          meaning: req.meaning,
+          exampleSentence: req.exampleSentence,
+          durationTarget: req.targetDuration,
+          scenes,
+          closingCTA: "Follow for more funny English!",
+          angleKey: angle.key,
+        };
 
     // Validate our own output through exactly the same gate a real provider's
     // output goes through. A template bug should fail loudly, here, not later.
@@ -344,22 +365,22 @@ const CREATIVE_BEATS: Record<string, Beat> = {
   reaction: { role: "reaction", share: 0.12, complexity: "MEDIUM", spendPriority: "NORMAL", camera: "snap zoom to a reaction close-up", sfx: "pop" },
   gag: { role: "gag", share: 0.14, complexity: "HIGH", spendPriority: "NORMAL", camera: "wide reveal, quick cut", sfx: "boing" },
   payoff: { role: "payoff", share: 0.12, complexity: "MEDIUM", spendPriority: "HIGH", camera: "freeze-frame reaction close-up", sfx: "ding" },
+  usage: { role: "usage", share: 0.12, complexity: "LOW", spendPriority: "LOW", camera: "static two-shot, friendly and calm", sfx: "" },
+  recap: { role: "recap", share: 0.1, complexity: "LOW", spendPriority: "LOW", camera: "clean static shot, text-safe framing", sfx: "soft chime" },
 };
 
+/** A calm explainer (comedy 0-1) opens plainly: no record scratch, no shocked push-in. */
+const CALM_HOOK: Beat = { role: "hook", share: 0.12, complexity: "LOW", spendPriority: "HIGH", camera: "clean medium shot, calm and clear", sfx: "soft chime" };
+
 /**
- * The idiom structure a chosen creative style asks for (the same shapes the
- * prompt describes in idiomStructureHint). Comedy 0 explains without gags;
- * comedy 4+ adds a visual gag, a reaction and a final payoff.
+ * The idiom beats for a chosen creative style - from `idiomPlan`, the same
+ * source the real writer's idiom-v2 prompt uses, so mock and prompt agree.
  */
-export function idiomBeatsFor(style: NonNullable<ScriptRequest["creative"]>): Beat[] {
-  const by = (role: string) => BEATS.find((b) => b.role === role) ?? CREATIVE_BEATS[role]!;
-  let roles: string[];
-  if (style.comedyLevel <= 1) roles = style.comedyLevel === 1 ? ["hook", "literal", "meaning", "example"] : ["hook", "meaning", "example"];
-  else if (style.comedyLevel <= 3) roles = ["hook", "literal", "escalation", "punchline", "meaning", "example"];
-  else roles = ["hook", "literal", "gag", "escalation", "reaction", "meaning", "example", "payoff"];
-  if (style.punchlineMode === "NONE") roles = roles.filter((r) => r !== "punchline" && r !== "payoff");
-  if (style.punchlineMode === "REQUIRED" && !roles.includes("payoff")) roles = [...roles.filter((r) => r !== "punchline"), "payoff"];
-  return roles.map(by);
+export function idiomBeatsFor(style: NonNullable<ScriptRequest["creative"]>, targetDuration = 25): Beat[] {
+  const calm = style.comedyLevel <= 1;
+  return idiomPlan(style, targetDuration).map((role) =>
+    role === "hook" && calm ? CALM_HOOK : (BEATS.find((b) => b.role === role) ?? CREATIVE_BEATS[role]!),
+  );
 }
 
 // ----------------------------------------------------------------- helpers ---
@@ -423,6 +444,30 @@ function beatContent(role: string, ctx: BeatContext): BeatContent {
         narration: "",
         subtitle: `"That is NOT what I meant!"`,
         action: `${leo} facepalms while ${max} grins proudly.`,
+      };
+    case "hook-calm":
+      return {
+        visual: `${leo} faces the camera in a clean, bright setting; a text card reads "${idiom}".`,
+        dialogue: `${leo}: "Today's idiom: ${idiom}."`,
+        narration: "",
+        subtitle: `Today's idiom: ${idiom}`,
+        action: `${leo} points to the text card with a friendly smile.`,
+      };
+    case "usage":
+      return {
+        visual: `${max} and ${leo} chat calmly at a table; a small text card shows when to use the idiom.`,
+        dialogue: `${leo}: "Use it when you know something, but you do not say who told you."`,
+        narration: "",
+        subtitle: "Use it when you won't say who told you.",
+        action: `${leo} explains; ${max} nods and takes a note.`,
+      };
+    case "recap":
+      return {
+        visual: `Clean background with a large text card: "${idiom}" = ${meaning}.`,
+        dialogue: `${leo}: "${idiom} - ${meaning}."`,
+        narration: "",
+        subtitle: shorten(`${idiom} = ${meaning}`, 58),
+        action: `${leo} gives a calm thumbs up.`,
       };
     case "gag":
       return {

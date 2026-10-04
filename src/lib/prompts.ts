@@ -17,6 +17,7 @@ import { prisma } from "./prisma";
 export const PROMPT_NAMES = [
   "concept",
   "script",
+  "script-creative",
   "content-script",
   "storyboard",
   "image",

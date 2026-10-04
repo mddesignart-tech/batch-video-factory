@@ -18,6 +18,9 @@ import {
 } from "@/domain/creative-style";
 import { writeMockContentScript } from "@/providers/mock/mock-content-writer";
 import { MockTextProvider, idiomBeatsFor } from "@/providers/mock/mock-text-provider";
+import { idiomPlan, idiomStructureHint, idiomWriterVoice } from "@/domain/creative-style";
+import { scriptNeedsRewrite } from "@/domain/script";
+import { readPromptFile, renderTemplate } from "@/lib/prompts";
 import type { ContentScriptRequest } from "@/providers/types";
 import { createContentProject, generateContentProjectScript } from "@/services/content-service";
 import { createProjectForIdiom, generateProjectScript } from "@/services/project-service";
@@ -209,9 +212,10 @@ describe("TEMPLATE BEHAVIOUR (pure, mock writer)", () => {
   });
 
   it("IDIOM (bộ viết cũ): Hài 0 vs Hài 4 → cấu trúc khác đáng kể; Hài 4 có gag, cường điệu, phản ứng, punchline", async () => {
-    const zeroRoles = idiomBeatsFor(style("ENGLISH_IDIOM", { comedyLevel: 0 })).map((b) => b.role);
+    const zeroRoles = idiomBeatsFor(style("ENGLISH_IDIOM", { comedyLevel: 0, pacingStyle: "MEDIUM" }), 25).map((b) => b.role);
     const fourRoles = idiomBeatsFor(style("ENGLISH_IDIOM", { comedyLevel: 4, punchlineMode: "REQUIRED" })).map((b) => b.role);
-    expect(zeroRoles).toEqual(["hook", "meaning", "example"]);
+    // Comedy 0 explains (no literal / gag / escalation / punchline) and still fills 25 s.
+    expect(zeroRoles).toEqual(["hook", "meaning", "example", "usage", "recap"]);
     expect(fourRoles).toEqual(["hook", "literal", "gag", "escalation", "reaction", "meaning", "example", "payoff"]);
     const provider = new MockTextProvider();
     const base = {
@@ -312,8 +316,9 @@ describe("PROJECT (DB, mock)", () => {
     const four = await createProjectForIdiom({ idiomId: idiom.id, qualityMode: "BALANCED", autoGenerateScript: true, creativeStyle: { comedyLevel: 4, punchlineMode: "REQUIRED" } });
     expect(zero.templateVersion).toBe(IDIOM_CREATIVE_PROMPT_VERSION);
     const count = async (id: string) => prisma.scene.count({ where: { projectId: id } });
-    expect(await count(zero.id)).toBe(3);
+    expect(await count(zero.id)).toBe(idiomPlan(style("ENGLISH_IDIOM", { comedyLevel: 0 }), zero.targetDuration).length);
     expect(await count(four.id)).toBe(8);
+    expect(await count(zero.id)).toBeLessThan(8);
     // Rewriting an idiom project with a changed style also stays text-only.
     const before = await paidMedia();
     await saveCreativeStyle(zero.id, { comedyLevel: 5 });
@@ -341,4 +346,92 @@ describe("PROJECT (DB, mock)", () => {
     expect((await prisma.scene.findUniqueOrThrow({ where: { id: scene.id } })).imagePath).toBe("projects/x/images/old.png");
     expect(await paidMedia()).toEqual(before);
   }, 300_000);
+});
+
+// ------------------------------------------- QĐ-127 UI test fixes (4 bugs) ---
+
+describe("IDIOM CREATIVE FIXES (UI test A/B)", () => {
+  const A = style("ENGLISH_IDIOM", { preset: "TIKTOK_FUNNY", comedyLevel: 4, pacingStyle: "FAST", punchlineMode: "REQUIRED" });
+  const B = style("ENGLISH_IDIOM", { preset: "PROFESSIONAL", comedyLevel: 0, pacingStyle: "MEDIUM", punchlineMode: "NONE" });
+  const base = {
+    idiom: "A little bird told me",
+    meaning: "Someone told me a secret",
+    literalMeaning: "A tiny cartoon bird whispers into his ear",
+    exampleSentence: "A little bird told me it is your birthday.",
+    targetDuration: 25,
+    stylePrompt: "",
+    characters: [],
+    avoidAngles: [],
+    model: "mock",
+    systemPrompt: "",
+  };
+
+  it("lỗi 1: bản Chuyên nghiệp (hài 0) có tiêu đề, hook, CTA và cảnh mở đầu trung tính - không hài", async () => {
+    const b = (await new MockTextProvider().generateScript({ ...base, creative: B })).script;
+    expect(b.title).not.toMatch(/Literally|😂/);
+    expect(b.hook).not.toMatch(/did exactly that/);
+    expect(b.closingCTA).not.toMatch(/funny/i);
+    expect([b.setup, b.escalation, b.punchline]).toEqual(["", "", ""]);
+    const first = b.scenes[0]!;
+    expect(first.soundEffect).not.toBe("record scratch");
+    expect(first.camera).not.toMatch(/surprised/);
+    expect(first.subtitle).not.toMatch(/\?!/);
+    for (const s of b.scenes) expect(["record scratch", "comic boing", "boing", "rimshot", "cartoon gulp"]).not.toContain(s.soundEffect);
+    // Bản Hài TikTok giữ hook hài.
+    const a = (await new MockTextProvider().generateScript({ ...base, creative: A })).script;
+    expect(a.title).toMatch(/Literally/);
+    expect(a.scenes[0]!.soundEffect).toBe("record scratch");
+  });
+
+  it("lỗi 2: idiom-v2 dùng prompt riêng - hài 0 KHÔNG còn 'comedy writer', cấu trúc hài cứng hay '4 to 6 scenes'", () => {
+    const render = (s: typeof A) =>
+      renderTemplate(readPromptFile("script-creative"), {
+        ...base,
+        characters: "- Max", avoidAngles: "(none yet)",
+        ...idiomWriterVoice(s),
+        creativeStyle: creativeStylePrompt(s, { factual: false, storyGags: true }),
+        structure: idiomStructureHint(s, 25),
+        sceneRange: `Exactly ${idiomPlan(s, 25).length}`,
+      });
+    const pb = render(B);
+    expect(pb).not.toMatch(/\{\{\w+\}\}/);
+    expect(pb).not.toMatch(/You are a comedy writer/);
+    expect(pb).not.toMatch(/ESCALATION and PUNCHLINE/);
+    expect(pb).not.toMatch(/4 to 6 scenes/);
+    expect(pb).toMatch(/NOT a comedy sketch/);
+    expect(pb).toMatch(/Exactly 5 scenes/);
+    expect(pb).toMatch(/Comedy level: 0\/5/);
+    const pa = render(A);
+    expect(pa).toMatch(/You are a comedy writer/);
+    expect(pa).toMatch(/Exactly 8 scenes/);
+    expect(pa).toMatch(/FINAL PAYOFF/);
+    // "Tự động" (idiom-v1) is untouched.
+    expect(readPromptFile("script")).toMatch(/^You are a comedy writer/);
+    expect(readPromptFile("script")).toMatch(/4 to 6 scenes/);
+  });
+
+  it("lỗi 3: hài 0-1 không bị viết lại vì điểm 'humor' thấp; hài khác vẫn giữ luật cũ", () => {
+    const score = { hook: 8, humor: 3, clarity: 9, learningValue: 9, visualFeasibility: 8, notes: "" };
+    expect(scriptNeedsRewrite(score)).toBe(true);
+    expect(scriptNeedsRewrite(score, 4)).toBe(true);
+    expect(scriptNeedsRewrite(score, 1)).toBe(false);
+    expect(scriptNeedsRewrite(score, 0)).toBe(false);
+    expect(scriptNeedsRewrite({ ...score, clarity: 5 }, 0)).toBe(true);
+  });
+
+  it("lỗi 4: bản Chuyên nghiệp đủ 25 giây (không còn 3 × 6 s = 18 s); nhịp đổi số cảnh", async () => {
+    const b = (await new MockTextProvider().generateScript({ ...base, creative: B })).script;
+    const total = b.scenes.reduce((n, s) => n + s.duration, 0);
+    expect(total).toBeGreaterThanOrEqual(24);
+    expect(total).toBeLessThanOrEqual(26);
+    expect(b.scenes.map((s) => s.sceneRole ?? "")).toBeDefined();
+    for (const d of [15, 25, 45, 60]) {
+      const plan = idiomPlan(B, d);
+      expect(plan.length * 6).toBeGreaterThanOrEqual(d);
+      expect(plan).not.toEqual(expect.arrayContaining(["literal", "gag", "escalation", "punchline", "payoff", "reaction"]));
+    }
+    expect(idiomPlan({ ...B, pacingStyle: "SLOW" }, 30).length).toBeLessThan(idiomPlan({ ...B, pacingStyle: "FAST" }, 30).length);
+    // A keeps its 8 beats and ends on the payoff.
+    expect(idiomPlan(A, 25)).toEqual(["hook", "literal", "gag", "escalation", "reaction", "meaning", "example", "payoff"]);
+  });
 });

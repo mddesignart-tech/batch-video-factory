@@ -170,8 +170,14 @@ export type ScriptScore = z.infer<typeof ScriptScoreSchema>;
 export const SCRIPT_SCORE_THRESHOLD = 7;
 export const CRITICAL_SCORE_AXES = ["hook", "humor", "clarity"] as const;
 
-export function scriptNeedsRewrite(score: ScriptScore): boolean {
-  return CRITICAL_SCORE_AXES.some((axis) => score[axis] < SCRIPT_SCORE_THRESHOLD);
+/**
+ * One rewrite when a critical axis is weak. QĐ-127: with a chosen comedy level
+ * of 0-1 the script is MEANT to be unfunny, so humour is not judged - otherwise
+ * a calm explainer would be rewritten (and paid for) until it turned into a joke.
+ */
+export function scriptNeedsRewrite(score: ScriptScore, comedyLevel?: number): boolean {
+  const axes = comedyLevel !== undefined && comedyLevel <= 1 ? CRITICAL_SCORE_AXES.filter((a) => a !== "humor") : CRITICAL_SCORE_AXES;
+  return axes.some((axis) => score[axis] < SCRIPT_SCORE_THRESHOLD);
 }
 
 export const YoutubeMetaSchema = z.object({

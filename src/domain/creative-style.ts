@@ -390,13 +390,76 @@ export function creativeStylePrompt(s: EffectiveCreativeStyle, opts: { factual: 
   return lines.filter(Boolean).join("\n");
 }
 
-/** English idiom (original writer): the structure each comedy level asks for. */
-export function idiomStructureHint(s: EffectiveCreativeStyle): string {
+// ------------------------------------------------------- English idiom (v2) ---
+
+/** What each idiom beat must do (the real writer's structure lines). */
+const IDIOM_ROLE_TEXT: Record<string, string> = {
+  hook: "HOOK - stop the scroll",
+  literal: "LITERAL MISUNDERSTANDING - the character takes the idiom literally",
+  gag: "VISUAL GAG - one absurd, harmless picture of the literal reading",
+  escalation: "ESCALATION - it gets bigger and sillier",
+  punchline: "FUNNY MOMENT - the gag pays off",
+  reaction: "BIG REACTION - a comic reaction close-up",
+  meaning: "REAL MEANING - explained in very simple English",
+  example: "EXAMPLE SENTENCE - the idiom used naturally",
+  usage: "ANOTHER EXAMPLE - a second everyday situation where you would say it",
+  recap: "RECAP - one short line the viewer remembers",
+  payoff: "FINAL PAYOFF / PUNCHLINE - a clear funny line that closes the video",
+};
+
+/** Comfortable seconds per scene for each pacing (a scene can carry 2-6 s). */
+const IDIOM_SCENE_SECONDS: Record<string, number> = { SLOW: 6, MEDIUM: 5, FAST: 4, VERY_FAST: 3 };
+
+/**
+ * The idiom video's beats for a chosen style and length - ONE source for both
+ * the real writer's prompt (idiom-v2) and the mock writer, so they cannot
+ * disagree. Comedy 0-1 explains without gags; 4+ adds a visual gag, a reaction
+ * and a final payoff. The video is always long enough for its running time
+ * (no scene can exceed 6 s): neutral beats (another example, a recap) fill it.
+ */
+export function idiomPlan(s: EffectiveCreativeStyle, targetDuration: number): string[] {
+  let roles: string[];
+  if (s.comedyLevel <= 1) roles = s.comedyLevel === 1 ? ["hook", "literal", "meaning", "example"] : ["hook", "meaning", "example"];
+  else if (s.comedyLevel <= 3) roles = ["hook", "literal", "escalation", "punchline", "meaning", "example"];
+  else roles = ["hook", "literal", "gag", "escalation", "reaction", "meaning", "example", "payoff"];
+  if (s.punchlineMode === "NONE") roles = roles.filter((r) => r !== "punchline" && r !== "payoff");
+  if (s.punchlineMode === "REQUIRED" && !roles.includes("payoff")) roles = [...roles.filter((r) => r !== "punchline"), "payoff"];
+
+  const per = IDIOM_SCENE_SECONDS[s.pacingStyle] ?? 5;
+  const want = Math.min(12, Math.max(Math.ceil(targetDuration / 6), Math.round(targetDuration / per)));
+  // The payoff stays last; fillers go before it.
+  const tail = roles.at(-1) === "payoff" ? roles.pop()! : null;
+  if (roles.length + (tail ? 1 : 0) < want && !roles.includes("recap")) roles.push("recap");
+  while (roles.length + (tail ? 1 : 0) < want) {
+    const at = roles.lastIndexOf("usage") >= 0 ? roles.lastIndexOf("usage") : roles.lastIndexOf("example");
+    roles.splice(at + 1, 0, "usage");
+  }
+  if (tail) roles.push(tail);
+  return roles;
+}
+
+/** The STRUCTURE block of the idiom-v2 prompt: exactly these scenes, in this order. */
+export function idiomStructureHint(s: EffectiveCreativeStyle, targetDuration: number): string {
+  const roles = idiomPlan(s, targetDuration);
+  return [
+    `STRUCTURE - exactly ${roles.length} scenes, in this order (about ${Math.round(targetDuration / roles.length)} s each):`,
+    ...roles.map((r, i) => `  ${i + 1}. ${IDIOM_ROLE_TEXT[r] ?? r}`),
+  ].join("\n");
+}
+
+/** Who the idiom writer is, and its one humour rule, for this style. */
+export function idiomWriterVoice(s: EffectiveCreativeStyle): { writerRole: string; comedyRule: string } {
   if (s.comedyLevel <= 1)
-    return "STRUCTURE for this video: HOOK → real meaning explained clearly → everyday example → (optional gentle literal picture) → recap. Few or no gags.";
-  if (s.comedyLevel <= 3)
-    return "STRUCTURE for this video: HOOK → literal misunderstanding → funny situation → reaction → real meaning → example.";
-  return "STRUCTURE for this video: HOOK → literal misunderstanding → visual gag → escalation (it gets bigger and sillier) → big reaction → real meaning → example → final payoff / punchline.";
+    return {
+      writerRole:
+        "You are a clear, friendly English teacher writing short vertical videos that explain English idioms. This video is NOT a comedy sketch: no gags, no slapstick, no joke title.",
+      comedyRule:
+        "No gags, slapstick or comic sound effects. Show the meaning calmly and clearly; visuals illustrate, they do not joke. Title, hook and closing line are clear and plain.",
+    };
+  return {
+    writerRole: "You are a comedy writer for short vertical videos that teach English idioms.",
+    comedyRule: "The comedy must be VISUAL. A viewer with the sound off should still laugh.",
+  };
 }
 
 // ------------------------------------------------------------------ badges ---

@@ -3793,3 +3793,10 @@ Nâng "mức độ hài / phong cách" thành một engine chung cho MỌI conte
   style + thông báo "media cũ vẫn được giữ"; VIẾT LẠI vẫn khoá (MEDIA_STARTED) như trước.
 
 Test: `tests/creative-style.test.ts` (15).
+
+### QĐ-127a — Sửa 4 lỗi phát hiện khi test UI A/B (2026-10-04)
+1. Thành ngữ hài 0–1: tiêu đề / hook / CTA / cảnh mở đầu trung tính (mock), không record scratch.
+2. idiom-v2 dùng prompt riêng `prompts/script-creative.txt` (vai trò, cấu trúc, số cảnh, luật hài theo style);
+   `script.txt` (idiom-v1, "Tự động") giữ nguyên byte. Cấu trúc từ một nguồn `idiomPlan` cho cả prompt và mock.
+3. `scriptNeedsRewrite(score, comedyLevel)`: hài 0–1 không chấm trục humor (không tự viết lại thành bản hài).
+4. `idiomPlan` lấp đủ thời lượng bằng beat trung tính (ví dụ khác, tóm tắt); nhịp quyết định số cảnh.
