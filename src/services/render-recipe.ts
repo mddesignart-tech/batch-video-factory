@@ -78,6 +78,16 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
       // Multi-speaker captions (QĐ-122); absent for a one-line scene, so an
       // unchanged single-speaker video keeps its recipe.
       spoken: s.spokenLines && s.spokenLines.length >= 2 ? s.spokenLines : undefined,
+      // QĐ-128 camera / layers; absent for a scene without a plan, so an old
+      // video keeps its recipe (and its render).
+      camera: s.localCamera ?? undefined,
+      layers: s.layers
+        ? {
+            bg: content(s.layers.background),
+            fg: content(s.layers.foreground ?? null),
+            amb: (s.layers.ambient ?? []).map((a) => ({ sha: content(a.path), op: a.opacity ?? null })),
+          }
+        : undefined,
     })),
   };
 }

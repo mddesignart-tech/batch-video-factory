@@ -15,6 +15,7 @@ import {
 import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
 import type { SubtitleLayout } from "@/domain/output-controls";
 import { renderSegmentCached } from "./segment-cache";
+import { buildLayeredSceneArgs, cameraZoompan, type LayerInputs, type LocalCameraSpec } from "./camera-motion";
 import {
   DEFAULT_MIX,
   DUCK_RATIO,
@@ -102,6 +103,13 @@ export interface RenderScene {
   duration: number;
   subtitle: string;
   videoPath: string | null;
+  /**
+   * QĐ-128: the scene plan's camera, applied to a still. Absent = the V1 slow
+   * push-in (every scene made before scene plans existed).
+   */
+  localCamera?: LocalCameraSpec;
+  /** QĐ-128: separate layer files for a composited still scene (background / ambient / foreground). */
+  layers?: LayerInputs | null;
   /**
    * Legacy single audio file.
    *
@@ -210,6 +218,11 @@ export function buildSceneNormalizeArgs(opts: {
   output: string;
   /** COVER (default, V1's exact chain) or CONTAIN (whole picture over a blurred fill). */
   fit?: "COVER" | "CONTAIN";
+  /**
+   * QĐ-128: the scene's camera plan, for a still. Absent = the V1 slow push-in,
+   * argument for argument (legacy scenes and their segment cache are untouched).
+   */
+  camera?: LocalCameraSpec;
 }): string[] {
   const { videoInput, audioInput, duration, target, output } = opts;
   const { width, height, fps } = target;
@@ -229,9 +242,11 @@ export function buildSceneNormalizeArgs(opts: {
   // ~2.8s and then sat still, which a longer voice-timed scene would expose.
   const frames = Math.max(1, Math.round(dur * fps));
   const step = Math.min(0.0012, 0.1 / frames).toFixed(6);
-  const zoom = isStill
-    ? `,zoompan=z='min(zoom+${step},1.10)':d=${frames}:s=${width}x${height}:fps=${fps}`
-    : "";
+  const zoom = !isStill
+    ? ""
+    : opts.camera
+      ? cameraZoompan(opts.camera, { durationSec: dur, target: opts.target })
+      : `,zoompan=z='min(zoom+${step},1.10)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
   // Never stretched. COVER fills and crops the centre (V1's chain, unchanged);
   // CONTAIN shows the whole source over a blurred, filled copy of itself.
@@ -656,16 +671,32 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     // Identical segment work done before (same picture/clip, audio, length,
     // motion, codec) is copied from the local cache - compute saved, $0 either
     // way (QĐ-112).
+    // QĐ-128: a still with separate layer files is composited in one graph;
+    // a still with a camera plan moves as planned; anything else is V1's chain.
+    const isStillSource = !scene.videoPath && Boolean(scene.imagePath);
+    const layered = isStillSource && scene.layers ? scene.layers : null;
     const segment = await renderSegmentCached({
-      args: buildSceneNormalizeArgs({
-        videoInput: source,
-        audioInput,
-        duration: sceneDurations[i] ?? scene.duration,
-        target: req.target,
-        output,
-        fit,
-      }),
-      inputs: [source, ...(audioInput ? [audioInput] : [])],
+      args: layered
+        ? buildLayeredSceneArgs({
+            layers: layered,
+            audioInput,
+            duration: sceneDurations[i] ?? scene.duration,
+            target: req.target,
+            camera: scene.localCamera ?? { move: "SLOW_ZOOM_IN", speed: "SLOW" },
+            output,
+          })
+        : buildSceneNormalizeArgs({
+            videoInput: source,
+            audioInput,
+            duration: sceneDurations[i] ?? scene.duration,
+            target: req.target,
+            output,
+            fit,
+            ...(isStillSource && scene.localCamera ? { camera: scene.localCamera } : {}),
+          }),
+      inputs: layered
+        ? [layered.background, ...(layered.foreground ? [layered.foreground] : []), ...(layered.ambient ?? []).map((a) => a.path), ...(audioInput ? [audioInput] : [])]
+        : [source, ...(audioInput ? [audioInput] : [])],
       output,
     });
     if (segment.reused) segmentsReused += 1;
