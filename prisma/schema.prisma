@@ -594,6 +594,11 @@ model Scene {
   /// `deriveSceneVideoFacts` treats it as an explicit pin, so the "free wins"
   /// rule cannot quietly downgrade a clip the operator asked to buy.
   motionMode String @default("AUTO")
+  /// QĐ-128 SCENE PLAN: camera (shot / angle / movement / focus, AUTO or USER)
+  /// + layers (foreground / midground / background / ambient) + motion route.
+  /// JSON (domain/scene-plan.ts). NULL = a scene from before: rendered exactly
+  /// as it always was, nothing regenerated.
+  scenePlanJson String?
 
   /// Where the keyframe came from: "GENERATED" or "IMPORTED".
   ///
