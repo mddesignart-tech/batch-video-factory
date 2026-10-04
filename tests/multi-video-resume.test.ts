@@ -149,7 +149,15 @@ async function makeScene(
   });
 }
 
+/**
+ * Real (non-mock) ledger rows that existed BEFORE this file ran. Other test
+ * files seed a few on purpose (global-budget, spend-cap-settings) into the
+ * shared test database; only rows written by THIS file count.
+ */
+let realLedgerBaseline = 0;
+
 beforeAll(async () => {
+  realLedgerBaseline = await prisma.costEntry.count({ where: { estimated: false, provider: { not: "mock" } } });
   resetMockJobs();
   await setSpendCap(5);
   await setProviderBudget({
@@ -443,7 +451,7 @@ describe("ba video, ba trạng thái, một lần khởi động lại", () => {
     // Mock mode is pinned on by the suite; this asserts the consequence rather
     // than the setting, which is the part that would actually cost money.
     const real = await prisma.costEntry.count({ where: { estimated: false, provider: { not: "mock" } } });
-    expect(real).toBe(0);
+    expect(real - realLedgerBaseline).toBe(0);
   });
 });
 
