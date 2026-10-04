@@ -7,7 +7,8 @@
  */
 
 
-export const REFERENCE_TYPES = ["CHARACTER", "PRODUCT", "OBJECT", "TOY", "ANIMAL", "LOGO", "STYLE"] as const;
+// ENVIRONMENT (QĐ-128): a place - kitchen, cafe, forest, street - kept the same across scenes.
+export const REFERENCE_TYPES = ["CHARACTER", "PRODUCT", "OBJECT", "TOY", "ANIMAL", "ENVIRONMENT", "LOGO", "STYLE"] as const;
 export type ReferenceType = (typeof REFERENCE_TYPES)[number];
 
 export const REFERENCE_PRIORITIES = ["CRITICAL", "IMPORTANT", "OPTIONAL"] as const;
@@ -20,6 +21,7 @@ export const VI_REFERENCE_TYPE: Record<ReferenceType, string> = {
   OBJECT: "Đồ vật",
   TOY: "Đồ chơi",
   ANIMAL: "Động vật",
+  ENVIRONMENT: "Bối cảnh",
   LOGO: "Logo",
   STYLE: "Phong cách",
 };
@@ -57,6 +59,8 @@ export function typeRank(type: ReferenceType, isPrimary: boolean): number {
   if (type === "PRODUCT") return 1;
   if (type === "CHARACTER") return 2;
   if (type === "OBJECT" || type === "TOY" || type === "ANIMAL") return 3;
+  // A place matters less than any subject in it: it gives up its slot first.
+  if (type === "ENVIRONMENT") return 3.5;
   return 4; // LOGO / STYLE
 }
 

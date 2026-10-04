@@ -1692,6 +1692,8 @@ function withUniversalReferences(input: {
         return `Leave a clean area for the "${r.name}" logo, added later as the real file. Do not draw any logo, brand mark or lettering${what}.`;
       case "STYLE":
         return `Visual style reference "${r.name}"${what}. Match its palette, lighting and mood.`;
+      case "ENVIRONMENT":
+        return `${sent ? "Attached location reference" : "Location reference"} "${r.name}"${what}. Same place in every shot: keep its layout, furniture, colours and lighting.`;
       default:
         return (
           `${sent ? "Attached reference picture" : "Reference"} "${r.name}" (${r.type.toLowerCase()})${what}. ` +
