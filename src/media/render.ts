@@ -18,6 +18,7 @@ import { renderSegmentCached } from "./segment-cache";
 import { buildLayeredSceneArgs, cameraZoompan, layerFiles, type LayerInputs, type LocalCameraSpec } from "./camera-motion";
 import { blendTails, buildTransitionJoinArgs, hasBlend, planJoins } from "./transitions";
 import type { Transition } from "@/domain/camera-grammar";
+import { speakerBiasKeys, type ScreenSide } from "@/domain/speaker-focus";
 import {
   DEFAULT_MIX,
   DUCK_RATIO,
@@ -122,6 +123,11 @@ export interface RenderScene {
    * between two scenes that share a character renders as a cut (no ghosting).
    */
   subjects?: string[];
+  /**
+   * G4: who stands on which side (-1 left, 1 right) and how much the camera
+   * may lean towards the current speaker. Absent = no lean.
+   */
+  speakerFocus?: { sides: Record<string, ScreenSide>; amplitude: number };
   /**
    * Legacy single audio file.
    *
@@ -702,6 +708,13 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     // a still with a camera plan moves as planned; anything else is V1's chain.
     const isStillSource = !scene.videoPath && Boolean(scene.imagePath);
     const layered = isStillSource && scene.layers ? scene.layers : null;
+    // G4: lean towards the speaker, from the MEASURED dialogue timeline.
+    const lean =
+      isStillSource && scene.speakerFocus && audio
+        ? speakerBiasKeys(audio.timeline.entries, (name) => scene.speakerFocus!.sides[name] ?? null)
+        : [];
+    const camera = (base: LocalCameraSpec | undefined): LocalCameraSpec | undefined =>
+      lean.length && base ? { ...base, speakerBias: lean, speakerAmp: scene.speakerFocus!.amplitude } : base;
     const segment = await renderSegmentCached({
       args: layered
         ? buildLayeredSceneArgs({
@@ -709,7 +722,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
             audioInput,
             duration: (sceneDurations[i] ?? scene.duration) + (tails[i] ?? 0),
             target: req.target,
-            camera: scene.localCamera ?? { move: "SLOW_ZOOM_IN", speed: "SLOW" },
+            camera: camera(scene.localCamera ?? { move: "SLOW_ZOOM_IN", speed: "SLOW" })!,
             output,
           })
         : buildSceneNormalizeArgs({
@@ -719,7 +732,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
             target: req.target,
             output,
             fit,
-            ...(isStillSource && scene.localCamera ? { camera: scene.localCamera } : {}),
+            ...(isStillSource && scene.localCamera ? { camera: camera(scene.localCamera) } : {}),
           }),
       inputs: layered
         ? [...layerFiles(layered), ...(audioInput ? [audioInput] : [])]

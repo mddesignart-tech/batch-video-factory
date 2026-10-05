@@ -14,6 +14,7 @@ import type { ScriptDoc } from "@/domain/script";
 import { ambientLoopFor, availableAmbientKinds } from "./ambient-library";
 import type { AmbientInput, LayerInputs, LocalCameraSpec, PlacedSubject } from "@/media/camera-motion";
 import { slotsForNames, type SubjectSlot } from "@/media/layer-layout";
+import { sideFromSlot, type ScreenSide } from "@/domain/speaker-focus";
 import { projectReferenceAssets, sceneReferenceIds, type UniversalReference } from "./reference-assets";
 import { pngHasAlpha, resolveSubjects, subjectCandidates } from "./composite-subjects";
 import { projectFormat } from "./output-profile";
@@ -259,13 +260,47 @@ export function renderInputsFor(scene: Pick<Scene, "scenePlanJson" | "imagePath"
   localCamera?: LocalCameraSpec;
   layers?: LayerInputs | null;
   transitionIn?: Transition;
+  speakerFocus?: { sides: Record<string, ScreenSide>; amplitude: number };
 } {
   const plan = parseScenePlan(scene.scenePlanJson);
   if (!plan || plan.source === "LEGACY") return {};
   // A blend into this scene (cut / none stay absent, so the join and the recipe are V1's).
   const t = plan.camera.transitionIn;
   const blend = t !== "CUT" && t !== "NONE" ? { transitionIn: t } : {};
-  return { ...renderStill(scene, plan), ...blend };
+  const still = renderStill(scene, plan);
+  const focus = still.localCamera ? speakerFocusFor(plan, still.layers ?? null) : null;
+  return { ...still, ...(focus ? { speakerFocus: focus } : {}), ...blend };
+}
+
+/** Lean sizes (share of frame width): exact sides on separate cut-outs, smaller on a drawn picture. */
+const LEAN_EXACT = 0.015;
+const LEAN_DRAWN = 0.008;
+
+/**
+ * G4: who stands on which side, for the lean towards the current speaker.
+ * Separate cut-outs: their slots are exact. A single picture (or one cut-out
+ * of the whole group): the director's planned sides, leaned less - the
+ * drawing may not follow them perfectly. Null = no conversation to lean in.
+ */
+function speakerFocusFor(plan: ScenePlan, layers: LayerInputs | null): { sides: Record<string, ScreenSide>; amplitude: number } | null {
+  const fgs = layers?.foregrounds ?? [];
+  const separate = fgs.length >= 2 && fgs.every((f) => f.slot && f.slot !== "FULL");
+  if (separate) {
+    const labels = plan.layers.filter((x) => x.enabled && x.layerType === "FOREGROUND" && x.assetPath).map((x) => x.label);
+    const sides: Record<string, ScreenSide> = {};
+    fgs.forEach((f, i) => {
+      const side = sideFromSlot(f.slot);
+      if (labels[i] && side !== null && side !== 0) sides[labels[i]!] = side;
+    });
+    return Object.keys(sides).length >= 2 ? { sides, amplitude: LEAN_EXACT } : null;
+  }
+  const left = plan.camera.screenLeft ?? [];
+  const right = plan.camera.screenRight ?? [];
+  if (!left.length || !right.length) return null;
+  const sides: Record<string, ScreenSide> = {};
+  for (const n of left) sides[n] = -1;
+  for (const n of right) sides[n] = 1;
+  return { sides, amplitude: LEAN_DRAWN };
 }
 
 function renderStill(

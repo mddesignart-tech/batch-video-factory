@@ -85,6 +85,8 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
       // only matter to a blend (same character -> cut), so only then.
       transition: s.transitionIn ?? undefined,
       subjects: s.transitionIn ? (s.subjects ?? []) : undefined,
+      // G4 lean towards the speaker; absent when there is none.
+      speakerFocus: s.speakerFocus ?? undefined,
       layers: s.layers
         ? {
             bg: content(s.layers.background),

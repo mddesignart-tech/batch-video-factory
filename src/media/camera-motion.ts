@@ -27,6 +27,7 @@ import type { RenderTarget } from "./render";
 import { PARALLAX_FACTOR } from "@/domain/scene-plan";
 import { frameShape, subjectBoxes, type SubjectSlot } from "./layer-layout";
 import type { AmbientBand } from "@/domain/scene-layers";
+import { SPEAKER_FOCUS, type BiasKey } from "@/domain/speaker-focus";
 
 export interface LocalCameraSpec {
   move: CameraMove;
@@ -35,6 +36,29 @@ export interface LocalCameraSpec {
   critical?: boolean;
   /** Absent = EASE_IN_OUT. */
   easing?: CameraEasing;
+  /**
+   * G4: lean keyframes towards the current speaker (see domain/speaker-focus).
+   * Absent / empty = no lean (the plain move).
+   */
+  speakerBias?: BiasKey[];
+  /** Lean size, share of the frame width (default 0.015). */
+  speakerAmp?: number;
+}
+
+/**
+ * The lean as an expression of the output frame `on`: a sum of eased steps,
+ * one per change of speaker side. Never jumps: each change eases over ~1.2 s.
+ */
+export function speakerBiasExpr(keys: BiasKey[], fps: number): string {
+  const D = SPEAKER_FOCUS.easeSec;
+  const steps: string[] = [];
+  for (let k = 1; k < keys.length; k += 1) {
+    const delta = keys[k]!.side - keys[k - 1]!.side;
+    if (delta === 0) continue;
+    const p = `min(1,max(0,(on/${fps}-${keys[k]!.atSec.toFixed(3)})/${D}))`;
+    steps.push(`${delta}*${p}*${p}*(3-2*${p})`);
+  }
+  return steps.length ? `(${steps.join("+")})` : "";
 }
 
 /** Zoom amplitude by speed (× the frame). Small on purpose: the subject must stay whole. */
@@ -86,8 +110,10 @@ export function zoompanUpscale(target: RenderTarget): number {
  * Empty string for STATIC (the picture simply holds).
  */
 export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number; target: RenderTarget; amplitudeScale?: number; alpha?: boolean }): string {
-  const move = renderableMove(spec.move);
-  if (move === "STATIC") return "";
+  const lean = spec.speakerBias?.length ? speakerBiasExpr(spec.speakerBias, opts.target.fps) : "";
+  const move0 = renderableMove(spec.move);
+  if (move0 === "STATIC" && !lean) return "";
+  const move = move0;
   const { width, height, fps } = opts.target;
   const frames = Math.max(1, Math.round(opts.durationSec * fps));
   // A short scene gets a smaller move (it has less time to travel); 3 s and up is full size.
@@ -177,6 +203,18 @@ export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number
       break;
     default:
       z = `1+${n(A)}*${E}`;
+  }
+  if (lean) {
+    // Room for the lean: a touch of extra zoom, then the horizontal offset on
+    // top of the planned move (same frames, same easing - no new judder).
+    const amp = (spec.speakerAmp ?? 0.015) * (opts.amplitudeScale ?? 1);
+    if (move === "STATIC") {
+      z = "1";
+      x = cx;
+      y = cy;
+    }
+    z = `(${z})+${n(amp * 2.2)}`;
+    x = `(${x})+${n(amp)}*iw*${lean}`;
   }
   const up = zoompanUpscale(opts.target);
   // d = frames + 1: the fps filter after zoompan drops its last frame, and the
