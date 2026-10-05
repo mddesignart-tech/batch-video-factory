@@ -14,6 +14,7 @@ import type { ScriptDoc } from "@/domain/script";
 import { ambientFileFor, availableAmbientKinds } from "./ambient-library";
 import type { LayerInputs, LocalCameraSpec } from "@/media/camera-motion";
 import { projectReferenceAssets, sceneReferenceIds, type UniversalReference } from "./reference-assets";
+import { pngHasAlpha, resolveSubjects, subjectCandidates } from "./composite-subjects";
 import { projectFormat } from "./output-profile";
 
 /**
@@ -238,18 +239,7 @@ export async function setSceneAmbient(sceneId: string, enabled: boolean): Promis
   return plan;
 }
 
-/** PNG with an alpha channel (colour type 4 or 6) - usable as a cut-out foreground. */
-export function pngHasAlpha(file: string): boolean {
-  try {
-    const fd = fs.openSync(file, "r");
-    const head = Buffer.alloc(26);
-    fs.readSync(fd, head, 0, 26, 0);
-    fs.closeSync(fd);
-    return head.toString("latin1", 1, 4) === "PNG" && (head[25] === 6 || head[25] === 4);
-  } catch {
-    return false;
-  }
-}
+export { pngHasAlpha };
 
 /** Data-relative path → absolute, when the file is there. */
 export function existingAbsolute(p: string | null | undefined): string | null {
@@ -318,55 +308,88 @@ function renderStill(
 
 // ------------------------------------------------------------- composite ---
 
-const SUBJECT_TYPES = new Set(["PRODUCT", "CHARACTER", "ANIMAL", "TOY", "OBJECT"]);
-
-/** A scene can be composited locally when it has a location picture AND a cut-out (transparent) subject picture. */
-export async function compositeOption(sceneId: string): Promise<{ available: boolean; environment?: string; subject?: string; reason: string }> {
-  const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
-  const refs = (await projectReferenceAssets(scene.projectId)).filter((r) => r.enabled);
+function sceneSubjectRefs(scene: Scene, refs: UniversalReference[]): UniversalReference[] {
   const ids = new Set(sceneReferenceIds(scene));
-  const inScene = refs.filter((r) => ids.has(r.id) || r.useThroughout);
-  const env = inScene.find((r) => r.type === "ENVIRONMENT" && r.images.some((i) => i.exists));
-  const subject = inScene
-    .filter((r) => SUBJECT_TYPES.has(r.type))
-    .flatMap((r) => r.images.filter((i) => i.exists).map((i) => ({ r, i })))
-    .find(({ i }) => pngHasAlpha(toAbsolute(i.path)));
-  if (!env) return { available: false, reason: "Cần ảnh Bối cảnh (tham chiếu ENVIRONMENT) cho cảnh này." };
-  if (!subject) return { available: false, environment: env.name, reason: "Cần ảnh chủ thể đã tách nền (PNG trong suốt)." };
-  return { available: true, environment: env.name, subject: subject.r.name, reason: `Ghép "${subject.r.name}" lên "${env.name}" tại máy · $0.` };
+  return refs.filter((r) => r.enabled && (ids.has(r.id) || r.useThroughout));
 }
 
 /**
- * GHÉP LỚP TẠI MÁY: the location picture becomes the scene's picture (imported,
- * $0 - no image is generated) and the transparent subject is drawn over it with
- * the camera's parallax. Motion is local. A USER plan.
+ * A scene can be composited locally when it has a location picture
+ * (ENVIRONMENT reference) AND something that can stand in front of it: the
+ * scene's own picture or a subject reference, cut out of a plain backdrop on
+ * this machine (G1), or already transparent. Cheap: looks at files only; the
+ * cut itself happens when the composite is switched on.
+ */
+export async function compositeOption(sceneId: string): Promise<{ available: boolean; environment?: string; subject?: string; reason: string }> {
+  const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
+  const inScene = sceneSubjectRefs(scene, await projectReferenceAssets(scene.projectId));
+  const env = inScene.find((r) => r.type === "ENVIRONMENT" && r.images.some((i) => i.exists));
+  if (!env) return { available: false, reason: "Cần ảnh Bối cảnh (tham chiếu ENVIRONMENT) cho cảnh này." };
+  const c = subjectCandidates(scene, inScene);
+  if (!c.scenePicture && c.references.length === 0) {
+    return { available: false, environment: env.name, reason: "Cần ảnh chủ thể (ảnh cảnh hoặc ảnh tham chiếu nhân vật/sản phẩm) trên nền phẳng." };
+  }
+  const subject = c.references.length ? c.references.slice(0, 3).join(" + ") : "chủ thể của cảnh";
+  return {
+    available: true,
+    environment: env.name,
+    subject,
+    reason: `Ghép "${subject}" lên "${env.name}" tại máy · $0 (tách nền tại máy; ảnh nền phức tạp sẽ bị từ chối).`,
+  };
+}
+
+/**
+ * GHÉP LỚP TẠI MÁY: the subjects are cut out FIRST (from the scene's current
+ * picture or the references), then the location picture becomes the scene's
+ * picture (imported, $0 - no image is generated) and each subject is a
+ * foreground layer over it, with the camera's parallax. Motion is local. A USER plan.
  */
 export async function enableComposite(sceneId: string): Promise<ScenePlan> {
   const option = await compositeOption(sceneId);
   if (!option.available) throw new Error(option.reason);
   const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
-  const refs = (await projectReferenceAssets(scene.projectId)).filter((r) => r.enabled);
-  const env = refs.find((r) => r.name === option.environment && r.type === "ENVIRONMENT")!;
+  const inScene = sceneSubjectRefs(scene, await projectReferenceAssets(scene.projectId));
+  const env = inScene.find((r) => r.name === option.environment && r.type === "ENVIRONMENT")!;
   const envImage = env.images.find((i) => i.primary && i.exists) ?? env.images.find((i) => i.exists)!;
-  const subjectRef = refs.find((r) => r.name === option.subject && SUBJECT_TYPES.has(r.type))!;
-  const subjectImage = subjectRef.images.find((i) => i.exists && pngHasAlpha(toAbsolute(i.path)))!;
+  // Cut BEFORE the scene picture is replaced by the location.
+  const resolved = await resolveSubjects(scene, inScene.filter((r) => r.type !== "ENVIRONMENT"));
+  if (resolved.subjects.length === 0) {
+    throw new Error(`Không tách được chủ thể tại máy: ${resolved.skipped.join(" · ") || "không có ảnh phù hợp"}.`);
+  }
   const { importSceneImage } = await import("./imported-image");
   await importSceneImage({ sceneId, bytes: fs.readFileSync(toAbsolute(envImage.path)), originalFilename: envImage.filename, via: "scene-composite" });
   const base = parseScenePlan(scene.scenePlanJson) ?? (await suggestedPlans(scene.projectId)).get(sceneId)!.suggestion;
-  const layers = base.layers.map((x) =>
-    x.layerType === "FOREGROUND" && (x.entityId === subjectRef.id || x.label === subjectRef.name || x.entityType === "PRODUCT" || x.entityType === "CHARACTER")
-      ? { ...x, assetPath: subjectImage.path }
-      : x,
-  );
-  if (!layers.some((x) => x.assetPath === subjectImage.path)) {
-    layers.unshift({ ...layers[0]!, id: "fg-cutout", label: subjectRef.name, assetPath: subjectImage.path, layerType: "FOREGROUND" });
-  }
+  const template = base.layers.find((x) => x.layerType === "FOREGROUND");
+  const foreground: SceneLayer[] = resolved.subjects.map((sub, i) => ({
+    id: `fg-${i + 1}`,
+    layerType: "FOREGROUND",
+    zIndex: 40 + i,
+    label: sub.name,
+    promptPhrase: template?.promptPhrase ?? "",
+    entityType: sub.entityType,
+    ...(sub.referenceId ? { entityId: sub.referenceId, referenceAssetIds: [sub.referenceId] } : { referenceAssetIds: [] }),
+    motionType: sub.entityType === "PRODUCT" ? "STATIC" : "IDLE",
+    motionDirection: "NONE",
+    motionSpeed: "SLOW",
+    depth: 0.1,
+    parallaxFactor: 1,
+    startTime: null,
+    endTime: null,
+    enabled: true,
+    critical: sub.critical,
+    assetPath: sub.path,
+  }));
+  const layers = [...foreground, ...base.layers.filter((x) => x.layerType !== "FOREGROUND")];
   const plan = ScenePlanSchema.parse({ ...base, source: "USER", layers, route: "COMPOSITE" });
   await prisma.scene.update({
     where: { id: sceneId },
     data: { scenePlanJson: JSON.stringify(plan), motionMode: "LOCAL_MOTION", motionSource: "LOCAL_MOTION" },
   });
-  await logger.info({ event: "scene_plan.composite", projectId: scene.projectId, message: `Cảnh ${scene.sceneNumber}: ghép lớp tại máy (${option.reason})` });
+  await logger.info({
+    event: "scene_plan.composite",
+    projectId: scene.projectId,
+    message: `Cảnh ${scene.sceneNumber}: ghép lớp tại máy — ${resolved.subjects.map((x) => `${x.name} (${x.from})`).join(", ")} trên "${env.name}"${resolved.skipped.length ? `; bỏ qua: ${resolved.skipped.join(" · ")}` : ""}`,
+  });
   return plan;
 }
 
