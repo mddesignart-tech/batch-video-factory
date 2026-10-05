@@ -3874,3 +3874,28 @@ Sửa:
 
 Đo lại (project 1ef61e94, local $0): khung gần đứng ngoài điểm cắt 38 → 3 (bằng bản A; 2 khung thuộc chính clip gốc);
 jerk theo cảnh 0,18–0,66 → 0,19–0,34 (A: 0,17–0,26). Test: camera-smoothness (có đối chứng chuỗi cũ), scene-transitions.
+
+## QĐ-131 — Multi-layer Scene Composer G1–G7 (2026-10-05/06, local + mock, $0)
+
+- G1 `media/cutout.ts` + `services/composite-subjects.ts`: tách nền tại máy cho ảnh trên nền phẳng. Loang từ mép (không key toàn
+  ảnh), rào cạnh (EDGE_BARRIER) để vùng sáng gần màu nền của chủ thể (giày kem) không bị ăn; lỗ nền kín chỉ xoá khi gần như
+  trùng màu nền (T_POCKET) và đủ lớn; viền mềm dải hẹp + un-mix màu nền; cắt sát chủ thể; cache `data/cache/cutouts/` theo nội
+  dung (CUTOUT_VERSION). Từ chối: BUSY / GRADIENT / SUBJECT_FILLS_FRAME (chạm mép trên/hai bên, dải kín bề ngang) / TOO_SMALL.
+  Ghép lớp tự tách: ảnh cảnh trước (giữ tư thế cả nhóm), sau đó từng ảnh tham chiếu (≤ 3). Giới hạn: vệt sáng phản chiếu
+  trên sàn của ảnh gốc có thể còn lại.
+- G2 `media/layer-layout.ts` + `buildLayeredSceneArgs`: 1–3 chủ thể LEFT/CENTER/RIGHT (hoặc FULL = cả nhóm), MIDGROUND;
+  mỗi nhóm độ sâu là một tấm trong suốt đủ khung, cùng đường cong camera nhân hệ số parallax (nền 0,2 / trung 0,5 /
+  tiền 1,0), một graph FFmpeg. Bên màn hình của đối thoại giữ theo Director.
+- G3: ambient phân loại theo FILE: có alpha (.webm VP9 — giải mã bằng libvpx, .mov qtrle/png/ProRes 4444) → overlay theo
+  dải SKY / HORIZON / GROUND / FULL, nằm sau trung/tiền cảnh; không alpha (.mp4) → screen như cũ. Không có lớp chủ thể tách
+  nền thì chỉ dải trời. `ambient:generate` thêm loop trong suốt traffic / pedestrians / birds / leaves (hình minh hoạ đơn giản).
+  Đường chân trời mặc định 60 % (dọc) / 62 % (vuông) / 66 % (ngang) — cần kiểm tra với ảnh bối cảnh thật.
+- G4 `domain/speaker-focus.ts`: giữ two-shot, nghiêng nhẹ về người đang nói theo LƯỢT (không theo câu); câu < 1,2 s bỏ qua;
+  đối thoại nhanh (lượt trung vị < 1,5 s) không nghiêng; 1,5 % (chủ thể tách riêng) / 0,8 % (ảnh vẽ chung), chuyển 1,2 s.
+- G5 `PRESET_MOTION`: preset quyết định cả mức ambient (`ScenePlan.ambientIntensity`) và xu hướng chuyển cảnh
+  (CUT / SOFT = hoà tan ngắn khi đổi bối cảnh hoặc cảnh cảm xúc / DYNAMIC = lia nhanh khi đổi bối cảnh); không hai hiệu
+  ứng liền nhau; cùng nhân vật không hoà tan. `locationOf()` nhận bối cảnh từ mô tả cảnh.
+- G6: test bố cục thật trên 9:16 / 16:9 / 1:1 / 4:5.
+- G7: preflight mỗi cảnh có `motionParts` (camera / chủ thể / nền / ambient, cách làm + giá); đối soát thêm
+  `localMotionParts` và `paidMotion` (đã nằm trong tạo mới, không cộng hai lần).
+- Không migration (tất cả trong JSON). Camera smoothness QĐ-130 không đổi (test camera-smoothness xanh mọi phase).
