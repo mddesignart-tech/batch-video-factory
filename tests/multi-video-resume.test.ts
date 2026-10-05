@@ -12,7 +12,7 @@ import {
 import { approveAuthorization, createAuthorization } from "@/services/batch-authorization";
 import { reservationLedger } from "@/services/cost-reservation";
 import { resumeAuthorization } from "@/services/batch-authorization";
-import { setSpendCap } from "@/services/spend-guard";
+import { setSpendCap, spendStatus } from "@/services/spend-guard";
 import { setProviderBudget } from "@/services/provider-budget";
 import { claimNext, completeJob, enqueue, failJob } from "@/jobs/queue";
 import { onJobExhausted, runJob } from "@/jobs/handlers";
@@ -159,7 +159,10 @@ let realLedgerBaseline = 0;
 beforeAll(async () => {
   realLedgerBaseline = await prisma.costEntry.count({ where: { estimated: false, provider: { not: "mock" } } });
   resetMockJobs();
-  await setSpendCap(5);
+  // $5 of headroom ABOVE whatever the shared test database already counts as
+  // spent - other files seed real-looking ledger rows, and a flat $5 cap was
+  // already exhausted by them when this file ran late in the full suite.
+  await setSpendCap((await spendStatus()).spent + 5);
   await setProviderBudget({
     provider: "runway",
     available: 1000,
