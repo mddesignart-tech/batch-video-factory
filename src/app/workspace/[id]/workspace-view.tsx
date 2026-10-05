@@ -420,7 +420,7 @@ export function WorkspaceView({ initial }: { initial: Workspace }) {
               {summary.summary.pending > 0 ? ` · ${summary.summary.pending} chưa chạy` : ""}
             </p>
             <p className="text-xs text-ink-400">
-              Tổng thời lượng {formatDuration(summary.summary.totalDurationSec)} · Chi API thật {formatUSD(summary.summary.apiSpent, 4)} · Giá trị dùng lại{" "}
+              Tổng thời lượng {formatDuration(summary.summary.totalDurationSec)} · Chi API thật {formatUSD(summary.summary.apiSpent, 4)} · Giá trị dùng lại (chỉ asset REUSED, không gồm ảnh nhập){" "}
               {formatUSD(summary.summary.reusedValue, 4)} · Cảnh LOCAL {summary.summary.localScenes} · Clip Video AI {summary.summary.videoAiClips}
             </p>
             <div className="flex flex-wrap gap-2">

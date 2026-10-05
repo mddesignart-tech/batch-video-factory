@@ -140,7 +140,13 @@ export default async function AssetDetailPage({ params }: { params: Promise<{ id
             <Row label="Provider / model">{row.provider ? `${row.provider} / ${row.model}` : "— (ảnh nhập / không có)"}</Row>
             <Row label="Kích thước">
               {row.width && row.height ? `${row.width}×${row.height}` : "—"}
-              {row.durationSec ? ` · ${row.durationSec.toFixed(3)}s` : ""} · {formatBytes(row.bytes)} · {row.mimeType ?? "?"}
+              {row.durationSec ? ` · ${row.durationSec.toFixed(3)}s` : ""} · {formatBytes(detail.diskBytes ?? row.bytes)}
+              {detail.diskBytes === null ? (
+                <span className="text-danger-500"> (không có file trên đĩa; đã ghi {formatBytes(row.bytes)})</span>
+              ) : detail.diskBytes !== row.bytes ? (
+                <span className="text-warn-500"> (trên đĩa; đã ghi {formatBytes(row.bytes)})</span>
+              ) : null}{" "}
+              · {row.mimeType ?? "?"}
             </Row>
             <Row label="Chi phí gốc">
               {detail.originalCost

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { formatUSD } from "@/lib/utils";
 import { batchProgress } from "@/services/batch-runner";
 import { LIFECYCLE_TONE } from "@/domain/video-lifecycle";
+import { invalidVoiceLines } from "@/services/voice-validity";
 import { AutoRefresh } from "./auto-refresh";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,8 @@ export default async function QueuePage() {
   );
   const rows = progress.flatMap((p) => p.videos.map((v) => ({ batch: p, video: v })));
   const anyRunning = progress.some((p) => p.running || p.status === "RUNNING");
+  // A finished video whose voice file is broken needs a person (same rule as the workspace page).
+  const badVoices = await invalidVoiceLines(rows.map((r) => r.video.projectId));
 
   return (
     <>
@@ -70,7 +73,11 @@ export default async function QueuePage() {
                     </Link>
                   </Td>
                   <Td>
-                    <Badge tone={LIFECYCLE_TONE[video.lifecycle]}>{video.lifecycle}</Badge>
+                    {badVoices.has(video.projectId) ? (
+                      <Badge tone="danger">CẦN XỬ LÝ · giọng hỏng</Badge>
+                    ) : (
+                      <Badge tone={LIFECYCLE_TONE[video.lifecycle]}>{video.lifecycle}</Badge>
+                    )}
                   </Td>
                   <Td className="text-right tabular-nums">
                     {video.scenesCompleted}/{video.sceneCount}

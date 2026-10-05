@@ -129,7 +129,7 @@ export function VideoCard({
           <p className="text-[11px] text-ink-400">
             {v.lifecycle === "COMPLETED" ? "Chi thật " : "Dự toán thêm "}
             <span className="tabular-nums text-ink-200">{formatUSD(v.lifecycle === "COMPLETED" ? v.actualCost : v.estimatedCost, 4)}</span>
-            {v.reuseSaving > 0 ? <span className="text-ok-500"> · dùng lại tiết kiệm {formatUSD(v.reuseSaving, 4)}</span> : null}
+            {v.reuseSaving > 0 ? <span className="text-ok-500" title="Giá gốc của asset dùng lại và ảnh nhập sẵn — tiền KHÔNG chi"> · tiết kiệm (dùng lại + ảnh nhập) {formatUSD(v.reuseSaving, 4)}</span> : null}
           </p>
           <p className="truncate text-[11px] text-ink-500" title={[...v.videoModels, ...v.voices].join(", ")}>
             {v.videoModels.length > 0 ? `Video AI: ${v.videoModels.join(", ")}` : "Không Video AI"}

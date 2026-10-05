@@ -203,11 +203,19 @@ export function buildLayeredSceneArgs(opts: {
     const op = Math.min(0.6, Math.max(0.1, a.opacity ?? 0.35));
     if (a.region === "TOP") {
       const band = Math.round(height * 0.3);
-      chains.push(`[${ambIdx[i]}:v]scale=${width}:${band}:force_original_aspect_ratio=increase,crop=${width}:${band},fps=${fps},format=yuva420p,colorchannelmixer=aa=${op.toFixed(2)}[amb${i}]`);
-      chains.push(`[${last}][amb${i}]overlay=0:0:format=auto[mix${i}]`);
+      // Screen-blended into the sky band only: black in the loop leaves the
+      // picture untouched (a plain alpha overlay used to darken the whole band).
+      // Blends run in RGB: in YUV, video black is Y=16 (still lightens) and
+      // screening the 128 chroma planes shifts every colour.
+      chains.push(`[${ambIdx[i]}:v]scale=${width}:${band}:force_original_aspect_ratio=increase,crop=${width}:${band},fps=${fps},format=gbrp[amb${i}]`);
+      chains.push(`[${last}]split=2[base${i}][cut${i}]`);
+      chains.push(`[cut${i}]crop=${width}:${band}:0:0,format=gbrp[top${i}]`);
+      chains.push(`[top${i}][amb${i}]blend=all_mode=screen:all_opacity=${op.toFixed(2)},format=yuv420p[lit${i}]`);
+      chains.push(`[base${i}][lit${i}]overlay=0:0[mix${i}]`);
     } else {
-      chains.push(`[${ambIdx[i]}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=${fps},format=yuv420p[amb${i}]`);
-      chains.push(`[${last}][amb${i}]blend=all_mode=screen:all_opacity=${op.toFixed(2)}[mix${i}]`);
+      chains.push(`[${ambIdx[i]}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},fps=${fps},format=gbrp[amb${i}]`);
+      chains.push(`[${last}]format=gbrp[rgb${i}]`);
+      chains.push(`[rgb${i}][amb${i}]blend=all_mode=screen:all_opacity=${op.toFixed(2)},format=yuv420p[mix${i}]`);
     }
     last = `mix${i}`;
   });

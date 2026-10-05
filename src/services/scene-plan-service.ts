@@ -7,7 +7,7 @@ import { parseJson } from "@/lib/utils";
 import { projectContent } from "@/domain/content-legacy";
 import { sceneCharacters } from "@/domain/scene-characters";
 import { directVideo, type DirectorContext, type SceneSemantics } from "@/domain/camera-director";
-import { CameraPlanSchema, cameraPromptPhrase, localSupport, type CameraPlan } from "@/domain/camera-grammar";
+import { CameraPlanSchema, cameraPromptPhrase, localSupport, type CameraPlan, type Transition } from "@/domain/camera-grammar";
 import { inferLayers, layersPromptPhrase, sceneComplexity } from "@/domain/scene-layers";
 import { parseScenePlan, ScenePlanSchema, type MotionRoute, type ScenePlan, type SceneLayer } from "@/domain/scene-plan";
 import type { ScriptDoc } from "@/domain/script";
@@ -198,7 +198,10 @@ export async function applySuggestedPlan(sceneId: string): Promise<ScenePlan> {
  * ĐỔI CAMERA: a person's choice. Becomes a USER plan that no automatic pass
  * overwrites, until "Đặt lại tự động".
  */
-export async function setSceneCamera(sceneId: string, change: Partial<Pick<CameraPlan, "shotSize" | "cameraAngle" | "cameraMovement" | "cameraSpeed" | "focusStyle">>): Promise<ScenePlan> {
+export async function setSceneCamera(
+  sceneId: string,
+  change: Partial<Pick<CameraPlan, "shotSize" | "cameraAngle" | "cameraMovement" | "cameraSpeed" | "focusStyle" | "transitionIn">>,
+): Promise<ScenePlan> {
   const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
   const base = parseScenePlan(scene.scenePlanJson) ?? (await suggestedPlans(scene.projectId)).get(sceneId)?.suggestion;
   if (!base) throw new Error("Không tìm thấy cảnh.");
@@ -262,9 +265,23 @@ const SKY_AMBIENT = new Set(["clouds", "birds", "smoke"]);
  * scene made before scene plans) returns nothing, so it renders exactly as it
  * always did. A Video AI clip is never moved locally.
  */
-export function renderInputsFor(scene: Pick<Scene, "scenePlanJson" | "imagePath" | "videoPath">): { localCamera?: LocalCameraSpec; layers?: LayerInputs | null } {
+export function renderInputsFor(scene: Pick<Scene, "scenePlanJson" | "imagePath" | "videoPath">): {
+  localCamera?: LocalCameraSpec;
+  layers?: LayerInputs | null;
+  transitionIn?: Transition;
+} {
   const plan = parseScenePlan(scene.scenePlanJson);
   if (!plan || plan.source === "LEGACY") return {};
+  // A blend into this scene (cut / none stay absent, so the join and the recipe are V1's).
+  const t = plan.camera.transitionIn;
+  const blend = t !== "CUT" && t !== "NONE" ? { transitionIn: t } : {};
+  return { ...renderStill(scene, plan), ...blend };
+}
+
+function renderStill(
+  scene: Pick<Scene, "imagePath" | "videoPath">,
+  plan: ScenePlan,
+): { localCamera?: LocalCameraSpec; layers?: LayerInputs | null } {
   const critical = plan.layers.some((x) => x.enabled && x.layerType === "FOREGROUND" && x.critical);
   const localCamera: LocalCameraSpec = { move: plan.camera.cameraMovement, speed: plan.camera.cameraSpeed, critical };
   const picture = existingAbsolute(scene.imagePath);

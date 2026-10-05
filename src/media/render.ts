@@ -16,6 +16,8 @@ import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
 import type { SubtitleLayout } from "@/domain/output-controls";
 import { renderSegmentCached } from "./segment-cache";
 import { buildLayeredSceneArgs, cameraZoompan, type LayerInputs, type LocalCameraSpec } from "./camera-motion";
+import { buildTransitionJoinArgs, hasBlend, planJoins } from "./transitions";
+import type { Transition } from "@/domain/camera-grammar";
 import {
   DEFAULT_MIX,
   DUCK_RATIO,
@@ -111,6 +113,11 @@ export interface RenderScene {
   /** QĐ-128: separate layer files for a composited still scene (background / ambient / foreground). */
   layers?: LayerInputs | null;
   /**
+   * The scene plan's transition INTO this scene. Absent / CUT / NONE = hard
+   * cut (V1's stream-copy join). Never shifts a scene on the clock.
+   */
+  transitionIn?: Transition;
+  /**
    * Legacy single audio file.
    *
    * Only consulted when a scene has NO dialogue lines. Every project made since
@@ -199,6 +206,8 @@ export interface RenderResult {
   segmentsReused?: number;
   plannedTotal: number;
   finalTotal: number;
+  /** Scene joins rendered as a blend rather than a cut. */
+  transitionsApplied?: number;
 }
 
 // ------------------------------------------------------- pure arg builders ---
@@ -711,7 +720,19 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   const listName = "concat.txt";
   fs.writeFileSync(path.join(tempDir, listName), buildConcatList(normalised), "utf8");
   const joinedName = "joined.mp4";
-  await ffmpeg(buildConcatArgs(listName, joinedName), { cwd: tempDir });
+  const transitions = usable.map((s) => s.transitionIn);
+  const joinDurations = usable.map((s, i) => sceneDurations[i] ?? s.duration);
+  const joins = planJoins(transitions, joinDurations);
+  if (hasBlend(joins)) {
+    // A blend needs a re-encode of the join; the clock is unchanged (the
+    // outgoing scene's last frame is held under the blend).
+    await ffmpeg(
+      buildTransitionJoinArgs({ inputs: normalised, durations: joinDurations, transitions, fps: req.target.fps, output: joinedName }),
+      { cwd: tempDir, timeoutMs: 20 * 60 * 1000 },
+    );
+  } else {
+    await ffmpeg(buildConcatArgs(listName, joinedName), { cwd: tempDir });
+  }
 
   // ---- Subtitles, timed against the audio that will actually play ---------
   const cues = usingTimeline
@@ -898,6 +919,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     sceneAudioPaths,
     sceneTimings,
     segmentsReused,
+    transitionsApplied: joins.filter((j) => j.spec !== null).length,
     plannedTotal: Math.round(sceneTimings.reduce((n, t) => n + t.plannedDuration, 0) * 1000) / 1000,
     finalTotal: Math.round(sceneDurations.reduce((n, d) => n + d, 0) * 1000) / 1000,
   };

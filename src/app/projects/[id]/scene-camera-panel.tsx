@@ -12,7 +12,9 @@ import {
   SHOT_SIZES,
   SIMPLE_ANGLES,
   SIMPLE_MOVES,
+  TRANSITIONS,
   VI_CAMERA_ANGLE,
+  VI_TRANSITION,
   VI_CAMERA_MOVE,
   VI_CAMERA_SPEED,
   VI_FOCUS,
@@ -36,7 +38,9 @@ export interface SceneCameraView {
   source: "AUTO" | "USER" | "LEGACY";
   summary: string;
   reason: string;
-  camera: Pick<CameraPlan, "shotSize" | "cameraAngle" | "cameraMovement" | "cameraSpeed" | "focusStyle">;
+  camera: Pick<CameraPlan, "shotSize" | "cameraAngle" | "cameraMovement" | "cameraSpeed" | "focusStyle" | "transitionIn">;
+  /** The first scene has nothing before it, so no transition in. */
+  first: boolean;
   layers: { type: string; label: string; motion: string; enabled: boolean }[];
   suggestion: { summary: string; reason: string; differs: boolean };
   route: string;
@@ -91,6 +95,11 @@ export function SceneCameraPanel({ view }: { view: SceneCameraView }) {
         <li className="text-ink-200">
           <span className="text-ink-500">Camera:</span> {view.summary}
         </li>
+        {!view.first && view.source !== "LEGACY" ? (
+          <li className="text-ink-200">
+            <span className="text-ink-500">Chuyển cảnh vào:</span> {VI_TRANSITION[view.camera.transitionIn]}
+          </li>
+        ) : null}
       </ul>
       {view.hasAmbient ? (
         <label className="flex items-center gap-2 text-ink-300">
@@ -161,6 +170,17 @@ export function SceneCameraPanel({ view }: { view: SceneCameraView }) {
               ))}
             </Select>
           </Field>
+          {!view.first ? (
+            <Field label="Chuyển cảnh vào">
+              <Select value={draft.transitionIn} onChange={(e) => setDraft({ ...draft, transitionIn: e.currentTarget.value as CameraPlan["transitionIn"] })}>
+                {TRANSITIONS.filter((t) => t !== "NONE" || draft.transitionIn === "NONE").map((t) => (
+                  <option key={t} value={t}>
+                    {VI_TRANSITION[t]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           {advanced ? (
             <Field label="Tốc độ máy">
               <Select value={draft.cameraSpeed} onChange={(e) => setDraft({ ...draft, cameraSpeed: e.currentTarget.value as CameraPlan["cameraSpeed"] })}>

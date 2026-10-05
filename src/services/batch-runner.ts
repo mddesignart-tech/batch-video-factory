@@ -316,6 +316,8 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
   const planStatus = new Map(
     (planForStatus?.videos ?? []).filter((v) => v.projectId).map((v) => [v.projectId as string, v.status as string]),
   );
+  // A PARTIAL approval covers only some videos; the rest are not APPROVED.
+  const coveredIds = auth ? (parseJson<{ runnableProjectIds?: string[] | null }>(auth.note, {}).runnableProjectIds ?? null) : null;
   const videos: BatchProgressVideo[] = projects.map((p) => ({
     projectId: p.id,
     title: p.title,
@@ -335,7 +337,7 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
     voicesDone: p.scenes.filter((s) => s.audioPath).length,
     lifecycle: videoLifecycle({
       projectStatus: p.status,
-      authorizationStatus: auth?.status ?? null,
+      authorizationStatus: coveredIds && !coveredIds.includes(p.id) ? null : (auth?.status ?? null),
       planStatus: planStatus.get(p.id) ?? null,
     }),
     authorizedCost: auth?.maxCostPerVideo ?? batch.maxCostPerVideo,

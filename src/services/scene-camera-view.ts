@@ -41,7 +41,7 @@ export async function sceneCameraViews(projectId: string, videoCostBySceneNumber
     prisma.modelRegistry.findMany({ where: { type: "video", enabled: true }, select: { provider: true, modelId: true, capabilityProfileJson: true } }),
   ]);
   const out: Record<string, SceneCameraView> = {};
-  for (const scene of scenes) {
+  for (const [index, scene] of scenes.entries()) {
     const entry = plans.get(scene.id);
     if (!entry) continue;
     const current = entry.current;
@@ -59,7 +59,9 @@ export async function sceneCameraViews(projectId: string, videoCostBySceneNumber
         cameraMovement: (current ?? entry.suggestion).camera.cameraMovement,
         cameraSpeed: (current ?? entry.suggestion).camera.cameraSpeed,
         focusStyle: (current ?? entry.suggestion).camera.focusStyle,
+        transitionIn: (current ?? entry.suggestion).camera.transitionIn,
       },
+      first: index === 0,
       layers: (current ?? entry.suggestion).layers.map((l) => ({ type: VI_LAYER_TYPE[l.layerType], label: l.label, motion: VI_MOTION[l.motionType] ?? "", enabled: l.enabled })),
       suggestion: { summary: cameraSummaryVi(entry.suggestion.camera), reason: entry.suggestion.camera.reason, differs: !current || core(current) !== core(entry.suggestion) },
       route: `${VI_MOTION_ROUTE[(current ?? entry.suggestion).route]}${paidClip ? " · cảnh này đã duyệt Video AI" : ""}`,

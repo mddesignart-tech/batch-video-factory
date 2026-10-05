@@ -196,7 +196,10 @@ export async function normalizeVoiceClip(
       `loudnorm=I=${VOICE_TARGET_LUFS}:TP=${VOICE_TARGET_TRUE_PEAK}:LRA=${VOICE_TARGET_LRA}` +
       `:measured_I=${measured.integratedLufs}` +
       `:measured_TP=${measured.truePeakDb}` +
-      `:measured_LRA=${measured.lra}` +
+      // FFmpeg 6.1's loudnorm never finishes (0 % CPU, no output) when told the
+      // loudness range is exactly 0 - a perfectly flat clip, such as a mock
+      // tone. 0.1 LU is inaudibly different and lets it run.
+      `:measured_LRA=${Math.max(0.1, measured.lra)}` +
       `:measured_thresh=${measured.threshold}` +
       `:offset=${measured.targetOffset}` +
       `:linear=true:print_format=summary`;
@@ -220,7 +223,7 @@ export async function normalizeVoiceClip(
       "-c:a",
       "pcm_s16le",
       outputPath,
-    ]);
+    ], { timeoutMs: 2 * 60 * 1000 }); // one voice line: seconds, never minutes
 
     let after = await measureLoudness(outputPath);
 

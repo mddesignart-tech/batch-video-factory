@@ -3824,3 +3824,28 @@ Test: `tests/creative-style.test.ts` (15).
   INVALIDDATA); cleanup không che lỗi. `jobs/queue.ts` ghi kèm 3 dòng stderr FFmpeg.
 
 Test: scene-motion, camera-director, scene-layers, camera-motion, scene-motion-pipeline.
+
+## QĐ-129 — Chuyển cảnh xfade, ambient loop tại máy, sửa P2/P3 (2026-10-05)
+
+- Hạn mức chi: đã là $15,00 từ 2026-10-04 (SETTINGS_UI, có log `spend.cap_changed`); không đổi lại. Sổ $10,824435.
+- Transition (`media/transitions.ts`): `transitionIn` của scene plan nay được render. CROSSFADE=fade 0,5 s, WHIP=smoothleft 0,25 s,
+  ZOOM=zoomin 0,4 s, MATCH=dissolve 0,3 s; ≤ 25 % cảnh ngắn hơn, < 0,1 s → cắt. KHÔNG dời đồng hồ: frame cuối cảnh trước được giữ
+  (tpad clone) và blend bắt đầu đúng giây cảnh sau bắt đầu → tổng thời lượng, phụ đề, giọng không lệch. Tiếng nối liền, không hoà.
+  Không có blend = concat stream copy như V1 và recipe cũ giữ nguyên (CUT/NONE không truyền xuống). Panel: ô "Chuyển cảnh vào"
+  (cảnh 2 trở đi), lưu thành USER.
+- Ambient: `npm run ambient:generate` tạo loop thủ tục (clouds/smoke/steam/lights/water, 6 s, tuần hoàn đúng 1 vòng) vào
+  `data/ambient/`; file có sẵn không bị ghi đè (trừ --force). Các loại khác (traffic, pedestrians, birds, leaves, curtain, shadows)
+  vẫn chỉ mô tả trong prompt cho tới khi có loop thật.
+- Compositor: ambient blend screen trong RGB (gbrp). Trước đây blend chạy trên YUV (đen video Y=16 vẫn làm sáng, screen kênh U/V
+  128 làm lệch màu) và vùng TOP dùng overlay alpha (làm tối cả dải trời).
+- Lỗi treo: loudnorm FFmpeg 6.1 treo vĩnh viễn (0 % CPU) với `measured_LRA=0` + resample 24 kHz (giọng mock phẳng) → mỗi render
+  chờ 10 phút timeout. Kẹp `measured_LRA ≥ 0,1`; timeout bước này 2 phút. Fixture `tests/fixtures/flat-lra-voice.flac`.
+- P2: `DATABASE_URL` thêm `?socket_timeout=60` (.env + .env.example). WAL vẫn là quyết định riêng, chưa đổi.
+- P3: trang `/` và `/assets` không còn tràn ngang ở 390 px (lưới 1 cột + min-w-0; nút tiêu đề xuống dòng; select max-w-full);
+  `/queue`: video ngoài phạm vi duyệt PARTIAL không còn hiện APPROVED, video hỏng giọng hiện "CẦN XỬ LÝ · giọng hỏng";
+  nhãn tiết kiệm trên thẻ = "dùng lại + ảnh nhập", tổng kết = "chỉ asset REUSED"; trang asset hiện kích thước thật trên đĩa
+  (kèm số đã ghi khi khác / không có file). React key trùng giữa panel camera và form cảnh đã sửa.
+- Còn mở: 2 file giọng INVALID (wav 78 byte) cần tạo lại giọng (trả phí, chờ duyệt).
+
+Test: scene-transitions, ambient-loops, voice-normalize-hang (+ camera-motion, scene-motion-pipeline, batch-*, asset-library,
+daily-workflow, audio-mix).

@@ -103,7 +103,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
               placeholder="Tìm theo id, SHA, reuse key, tên file, dự án, model…"
               className="w-80 rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs"
             />
-            <select name="project" defaultValue={params.project ?? ""} className="rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs">
+            <select name="project" defaultValue={params.project ?? ""} className="max-w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs">
               <option value="">Mọi dự án</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>

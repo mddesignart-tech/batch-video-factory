@@ -280,9 +280,17 @@ export const VI_CAMERA_SPEED: Record<CameraSpeed, string> = { VERY_SLOW: "Rất 
 
 // ------------------------------------------------------------- transitions ---
 
-/** Suggested cut into the NEXT scene. Stored only - the renderer joins with CUT. */
+/** How this scene is joined to the one before it. CUT/NONE = hard cut; the rest render as an xfade (media/transitions.ts). */
 export const TRANSITIONS = ["CUT", "CROSSFADE", "WHIP", "ZOOM", "MATCH", "NONE"] as const;
 export type Transition = (typeof TRANSITIONS)[number];
+export const VI_TRANSITION: Record<Transition, string> = {
+  CUT: "Cắt thẳng",
+  CROSSFADE: "Hoà tan (crossfade)",
+  WHIP: "Lia nhanh (whip)",
+  ZOOM: "Zoom chuyển",
+  MATCH: "Match cut (hoà nhanh)",
+  NONE: "Không",
+};
 
 // -------------------------------------------------------------------- plan ---
 

@@ -391,7 +391,7 @@ export function continuityPass(scenes: { semantics: SceneSemantics; plan: Camera
       sides = null;
     }
 
-    // Transition suggestion (stored; the renderer joins with a cut).
+    // Transition into this scene (rendered as an xfade; CUT/NONE = hard cut).
     p.transitionIn = i === 0 ? "NONE" : kind === "EMOTIONAL" || (kind === "ENDING" && scenes[i - 1]?.kind === "EMOTIONAL") ? "CROSSFADE" : "CUT";
   }
   return out;

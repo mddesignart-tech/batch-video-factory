@@ -18,6 +18,7 @@
     "assets:cleanup": "tsx scripts/assets-cleanup.ts",
     "assets:health": "tsx scripts/assets-health.ts",
     "assets:backfill": "tsx scripts/assets-backfill.ts",
+    "ambient:generate": "tsx scripts/generate-ambient.ts",
     "backup": "tsx scripts/backup.ts",
     "doctor": "tsx scripts/doctor.ts",
     "setup": "prisma generate && prisma db push && tsx scripts/seed.ts",

@@ -8,6 +8,11 @@ import { AMBIENT_KINDS } from "@/domain/scene-layers";
  * passers-by, birds, clouds, leaves, steam... - kept at data/ambient/<kind>.mp4
  * (or .webm / .mov). Local files, $0, no provider. A kind without a file is
  * still planned, but only DESCRIBED in the image / video prompt.
+ *
+ * Loops are SCREEN-blended over the picture: they should be light on black
+ * (black = no change). `npm run ambient:generate` writes procedural loops for
+ * clouds / smoke / steam / lights / water; a real stock loop with the same
+ * name simply replaces one.
  */
 
 export const AMBIENT_DIR = path.join(DATA_ROOT, "ambient");

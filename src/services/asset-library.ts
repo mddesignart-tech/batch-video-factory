@@ -527,6 +527,8 @@ export interface AssetDetail {
   incrementalReuseCost: 0;
   characterVersions: string[];
   inputs: Record<string, unknown>;
+  /** The file's real size on disk now; null when there is no file. May differ from the recorded `row.bytes` (an INVALID file). */
+  diskBytes: number | null;
 }
 
 const LEDGER_CATEGORY: Record<string, string[]> = {
@@ -580,7 +582,18 @@ export async function getAssetDetail(assetId: string): Promise<AssetDetail | nul
     incrementalReuseCost: 0,
     characterVersions,
     inputs: parseJson<Record<string, unknown>>(a.inputsJson, {}),
+    diskBytes: diskSize(a.filePath),
   };
+}
+
+function diskSize(filePath: string | null): number | null {
+  if (!filePath) return null;
+  try {
+    const st = fs.statSync(toAbsolute(filePath));
+    return st.isFile() ? st.size : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A key or hash, shortened for display: first 10 + last 6. */

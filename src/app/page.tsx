@@ -295,8 +295,9 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      {/* grid-cols-1 + min-w-0: without them the single mobile column grows to the table's width and the page scrolls sideways. */}
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="min-w-0 lg:col-span-2">
           <CardHeader className="flex items-center justify-between">
             <CardTitle>Dự án gần đây</CardTitle>
             <Link

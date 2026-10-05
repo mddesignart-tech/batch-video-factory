@@ -428,7 +428,7 @@ export function Storyboard({
               projectId={projectId}
               videoLimit={videoLimit}
             />
-            {cameraByScene[selected.id] ? <SceneCameraPanel key={selected.id} view={cameraByScene[selected.id]!} /> : null}
+            {cameraByScene[selected.id] ? <SceneCameraPanel key={`camera-${selected.id}`} view={cameraByScene[selected.id]!} /> : null}
             <div className="mb-3 flex flex-wrap gap-1.5">
               <ActionButton
                 size="sm"
