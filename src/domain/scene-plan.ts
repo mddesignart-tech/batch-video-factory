@@ -84,6 +84,12 @@ export const LayerSchema = z.object({
   critical: z.boolean().default(false),
   /** A local file for this layer (cut-out PNG, background picture, ambient loop). Data-relative. */
   assetPath: z.string().max(400).optional(),
+  /** G8: size of a cut-out within its layout box (1 = a standing person); a bird or a product is smaller. */
+  scale: z.number().min(0.1).max(1.5).optional(),
+  /** G8: where a cut-out stands (its bottom edge, share of the frame height): a product on a counter top. */
+  floorY: z.number().min(0.2).max(1).optional(),
+  /** G8: on a BACKGROUND layer, where its far ground line is (share of height) - distant cars / passers-by stand there. */
+  horizonY: z.number().min(0.2).max(0.95).optional(),
 });
 export type SceneLayer = z.infer<typeof LayerSchema>;
 

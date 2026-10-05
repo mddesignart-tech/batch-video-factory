@@ -139,6 +139,10 @@ describe("G4 — render thật", () => {
     expect(composite.speakerFocus).toEqual({ sides: { Max: 1, Leo: -1 }, amplitude: 0.015 });
     const drawn = renderInputsFor({ ...scene, scenePlanJson: JSON.stringify({ source: "AUTO", route: "LOCAL_MOTION", camera, layers: [] }) });
     expect(drawn.speakerFocus).toEqual({ sides: { Leo: -1, Max: 1 }, amplitude: 0.008 });
+    // A presenter beside a product: the product is not a speaker, so there is nobody to lean between.
+    const productFg = { ...fg("fg-2", "Bình"), entityType: "PRODUCT" };
+    const review = renderInputsFor({ ...scene, scenePlanJson: JSON.stringify({ source: "USER", route: "COMPOSITE", camera: { ...camera, screenLeft: undefined, screenRight: undefined }, layers: [fg("fg-1", "An"), productFg] }) });
+    expect(review.speakerFocus).toBeUndefined();
     const solo = renderInputsFor({ ...scene, scenePlanJson: JSON.stringify({ source: "AUTO", route: "LOCAL_MOTION", camera: { ...camera, screenLeft: undefined, screenRight: undefined }, layers: [] }) });
     expect(solo.speakerFocus).toBeUndefined();
   });

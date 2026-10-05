@@ -276,6 +276,17 @@ export function renderInputsFor(scene: Pick<Scene, "scenePlanJson" | "imagePath"
   return { ...still, ...(focus ? { speakerFocus: focus } : {}), ...blend };
 }
 
+/**
+ * G8: how big a cut-out stands and where. The layer's own values win; else a
+ * size by what it is - a person fills their box, a product beside a presenter
+ * is smaller, an animal (a bird) smaller still.
+ */
+function placement(layer: SceneLayer, count: number): Pick<PlacedSubject, "scale" | "floorY"> {
+  const byType = layer.entityType === "ANIMAL" ? 0.45 : layer.entityType === "PRODUCT" ? (count > 1 ? 0.4 : 0.6) : undefined;
+  const scale = layer.scale ?? byType;
+  return { ...(scale !== undefined ? { scale } : {}), ...(layer.floorY !== undefined ? { floorY: layer.floorY } : {}) };
+}
+
 /** Lean sizes (share of frame width): exact sides on separate cut-outs, smaller on a drawn picture. */
 const LEAN_EXACT = 0.015;
 const LEAN_DRAWN = 0.008;
@@ -290,11 +301,13 @@ function speakerFocusFor(plan: ScenePlan, layers: LayerInputs | null): { sides: 
   const fgs = layers?.foregrounds ?? [];
   const separate = fgs.length >= 2 && fgs.every((f) => f.slot && f.slot !== "FULL");
   if (separate) {
-    const labels = plan.layers.filter((x) => x.enabled && x.layerType === "FOREGROUND" && x.assetPath).map((x) => x.label);
+    const layersInFront = plan.layers.filter((x) => x.enabled && x.layerType === "FOREGROUND" && x.assetPath);
     const sides: Record<string, ScreenSide> = {};
     fgs.forEach((f, i) => {
       const side = sideFromSlot(f.slot);
-      if (labels[i] && side !== null && side !== 0) sides[labels[i]!] = side;
+      // Only people speak: a product beside the presenter has no side to lean to.
+      const layer = layersInFront[i];
+      if (layer && layer.entityType === "CHARACTER" && side !== null && side !== 0) sides[layer.label] = side;
     });
     return Object.keys(sides).length >= 2 ? { sides, amplitude: LEAN_EXACT } : null;
   }
@@ -339,8 +352,9 @@ function renderStill(
     fg.length === 1 && fg[0]!.layer.label.includes(" + ")
       ? ["FULL"]
       : slotsForNames(fg.map((x) => x.layer.label), plan.camera.screenLeft, plan.camera.screenRight);
-  const foregrounds: PlacedSubject[] = fg.map((x, i) => ({ path: x.path, slot: fgSlots[i], critical: x.layer.critical }));
-  const midground: PlacedSubject[] = cutouts("MIDGROUND").map((x) => ({ path: x.path, critical: x.layer.critical }));
+  const foregrounds: PlacedSubject[] = fg.map((x, i) => ({ path: x.path, slot: fgSlots[i], critical: x.layer.critical, ...placement(x.layer, fg.length) }));
+  const midground: PlacedSubject[] = cutouts("MIDGROUND").map((x) => ({ path: x.path, critical: x.layer.critical, ...placement(x.layer, 1) }));
+  const horizonY = plan.layers.find((x) => x.layerType === "BACKGROUND" && x.horizonY !== undefined)?.horizonY;
   const foreground = foregrounds.length > 0;
   const ambient = ambientLayers
     .map((x): AmbientInput | null => {
@@ -358,7 +372,7 @@ function renderStill(
   if (!foreground && midground.length === 0 && ambient.length === 0) return { localCamera };
   return {
     localCamera,
-    layers: { background: picture, ...(foregrounds.length ? { foregrounds } : {}), ...(midground.length ? { midground } : {}), ambient },
+    layers: { background: picture, ...(foregrounds.length ? { foregrounds } : {}), ...(midground.length ? { midground } : {}), ambient, ...(horizonY !== undefined ? { horizonY } : {}) },
   };
 }
 

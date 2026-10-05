@@ -25,7 +25,7 @@
 import { localFallbackMove, localSupport, type CameraEasing, type CameraMove, type CameraSpeed } from "@/domain/camera-grammar";
 import type { RenderTarget } from "./render";
 import { PARALLAX_FACTOR } from "@/domain/scene-plan";
-import { frameShape, subjectBoxes, type SubjectSlot } from "./layer-layout";
+import { frameShape, subjectBoxes, subtitleTopLine, type SubjectSlot } from "./layer-layout";
 import type { AmbientBand } from "@/domain/scene-layers";
 import { SPEAKER_FOCUS, type BiasKey } from "@/domain/speaker-focus";
 
@@ -233,6 +233,10 @@ export interface PlacedSubject {
   slot?: SubjectSlot;
   /** A CRITICAL reference (product / character): its layer moves gently. */
   critical?: boolean;
+  /** Size within its layout box (1 = a standing person). */
+  scale?: number;
+  /** Bottom edge of the subject, share of the frame height (default: the floor line). */
+  floorY?: number;
 }
 
 export interface LayerInputs {
@@ -250,6 +254,8 @@ export interface LayerInputs {
    * there is no separate foreground, so nothing is drawn over a face.
    */
   ambient?: AmbientInput[];
+  /** The background's far ground line (share of height); absent = the frame shape's default. */
+  horizonY?: number;
 }
 
 export interface AmbientInput {
@@ -277,6 +283,9 @@ export function layerFiles(layers: LayerInputs): string[] {
   return [layers.background, ...(layers.midground ?? []).map((m) => m.path), ...foregroundsOf(layers).map((f) => f.path), ...(layers.ambient ?? []).map((a) => a.path)];
 }
 
+/** Below this size (of a person's box) a cut-out is a "small subject": a product, a bird. */
+const SMALL_SUBJECT = 0.7;
+
 /** Draw order inside one depth group: the sides first, the centre in front. */
 const SLOT_ORDER: Record<SubjectSlot, number> = { LEFT: 0, RIGHT: 1, CENTER: 2, FULL: 3 };
 
@@ -296,15 +305,22 @@ function plateChain(opts: {
 }): { chains: string[]; out: string } {
   const { width: W, height: H } = opts.target;
   const items = [...opts.inputs].sort((a, b) => SLOT_ORDER[a.subject.slot ?? "CENTER"] - SLOT_ORDER[b.subject.slot ?? "CENTER"]);
-  const boxes = subjectBoxes(items.length, opts.target, items.map((i) => i.subject.slot));
+  // Person-sized subjects set the height; a product / bird beside them is extra.
+  const fullSize = items.filter((i) => (i.subject.scale ?? 1) >= SMALL_SUBJECT).length || 1;
+  const boxes = subjectBoxes(items.length, opts.target, items.map((i) => i.subject.slot), fullSize);
+  const subtitleTop = subtitleTopLine(opts.target);
   const size = opts.size ?? 1;
   const chains: string[] = [];
   let plate = "";
   items.forEach((item, k) => {
     const b = boxes[k]!;
-    const bw = Math.max(2, Math.round((b.maxW * size) / 2) * 2);
-    const bh = Math.max(2, Math.round((b.maxH * size) / 2) * 2);
-    const bottom = Math.round(opts.floor !== undefined ? H * opts.floor : b.bottom);
+    const s = size * (item.subject.scale ?? 1);
+    const bw = Math.max(2, Math.round((b.maxW * s) / 2) * 2);
+    const bh = Math.max(2, Math.round((b.maxH * s) / 2) * 2);
+    let floor = item.subject.floorY ?? opts.floor ?? b.bottom / H;
+    // A small subject stands above the subtitle block, never under the words.
+    if ((item.subject.scale ?? 1) < SMALL_SUBJECT) floor = Math.min(floor, subtitleTop);
+    const bottom = Math.round(H * floor);
     const cx = Math.round(b.cx);
     const fit = `[${item.idx}:v]format=rgba,scale=${bw}:${bh}:force_original_aspect_ratio=decrease`;
     if (k === 0) {
@@ -389,7 +405,7 @@ export function buildLayeredSceneArgs(opts: {
         band === "SKY"
           ? `${Math.round(height * 0.06)}`
           : band === "HORIZON"
-            ? `${Math.round(height * HORIZON_LINE[shape])}-h`
+            ? `${Math.round(height * (layers.horizonY ?? HORIZON_LINE[shape]))}-h`
             : band === "GROUND"
               ? `${Math.round(height * 0.92)}-h`
               : "0";

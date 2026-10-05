@@ -1,4 +1,5 @@
 import type { RenderTarget } from "./render";
+import { platformSafeArea } from "@/domain/output-controls";
 
 /**
  * WHERE each cut-out subject stands in the frame (G2). Pure.
@@ -47,6 +48,15 @@ const CENTERS: Record<Shape, [number[], number[], number[]]> = {
   LANDSCAPE: [[0.5], [0.36, 0.64], [0.27, 0.5, 0.73]],
 };
 
+/**
+ * The top of the subtitle block (share of height): the platform's bottom safe
+ * area plus the ~15 % the subtitle layout may use (QĐ-125/126). A small
+ * subject (a bird, a product) stands above it, so the words never cover it.
+ */
+export function subtitleTopLine(t: Pick<RenderTarget, "width" | "height">): number {
+  return Math.round((1 - platformSafeArea(t.width, t.height).bottom - 0.15) * 1000) / 1000;
+}
+
 /** Top safe margin (share of height) - heads are never pushed above it. */
 export const TOP_SAFE = 0.06;
 /** Floor line (share of height). */
@@ -56,10 +66,17 @@ const FLOOR = 0.985;
  * One box per subject, in slot order. `slots` lets a conversation keep its
  * screen sides (Leo LEFT, Max RIGHT); absent = spread evenly in order.
  */
-export function subjectBoxes(count: number, target: Pick<RenderTarget, "width" | "height">, slots?: (SubjectSlot | undefined)[]): SubjectBox[] {
+export function subjectBoxes(
+  count: number,
+  target: Pick<RenderTarget, "width" | "height">,
+  slots?: (SubjectSlot | undefined)[],
+  /** How many of them are person-sized (a product or a bird beside a presenter does not make the presenter shorter). */
+  fullSize?: number,
+): SubjectBox[] {
   const { width: W, height: H } = target;
   const shape = frameShape(target);
   const n = Math.max(1, Math.min(3, count));
+  const tall = HEIGHT[shape][Math.max(1, Math.min(3, fullSize ?? n)) - 1]!;
   if (n === 1 && (slots?.[0] === "FULL" || !slots?.[0] || slots[0] === "CENTER")) {
     // One subject (or a whole group cut out together): centred, as large as the frame allows.
     const full = slots?.[0] === "FULL";
@@ -72,7 +89,7 @@ export function subjectBoxes(count: number, target: Pick<RenderTarget, "width" |
     const slot = slots?.[i];
     const share = slot && slot !== "FULL" ? byName[slot] : centers[i]!;
     const maxW = Math.min(slotW, 2 * Math.min(share, 1 - share) * W); // never past the frame edge
-    return { cx: W * share, bottom: H * FLOOR, maxW, maxH: H * HEIGHT[shape][n - 1]! };
+    return { cx: W * share, bottom: H * FLOOR, maxW, maxH: H * tall };
   });
 }
 

@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildLayeredSceneArgs, foregroundsOf } from "@/media/camera-motion";
-import { slotsForNames, subjectBoxes } from "@/media/layer-layout";
+import { slotsForNames, subjectBoxes, subtitleTopLine } from "@/media/layer-layout";
 import { ffmpeg, probeDuration, resolveFfmpeg } from "@/media/ffmpeg";
 import { renderInputsFor } from "@/services/scene-plan-service";
 import { DATA_ROOT, toRelative } from "@/lib/paths";
@@ -54,6 +54,45 @@ describe("G2 — bố cục chủ thể", () => {
     expect(slotsForNames(["A", "B", "C"])).toEqual(["LEFT", "CENTER", "RIGHT"]);
     expect(slotsForNames(["Mia"])).toEqual(["CENTER"]);
   });
+});
+
+describe("G8 — chủ thể nhỏ, phụ đề, chiều cao người", () => {
+  it("đỉnh dải phụ đề theo khổ: 9:16 = 0,65; 4:5 = 0,73; 1:1 = 0,75; 16:9 = 0,77", () => {
+    expect(subtitleTopLine({ width: 1080, height: 1920 })).toBe(0.65);
+    expect(subtitleTopLine({ width: 1080, height: 1350 })).toBe(0.73);
+    expect(subtitleTopLine({ width: 1080, height: 1080 })).toBe(0.75);
+    expect(subtitleTopLine({ width: 1920, height: 1080 })).toBe(0.77);
+  });
+
+  it("một người + một sản phẩm: người cao như khi đứng một mình (sản phẩm không làm người thấp đi)", () => {
+    const t = { width: 1080, height: 1920 };
+    expect(subjectBoxes(2, t, ["LEFT", "RIGHT"], 1)[0]!.maxH).toBe(subjectBoxes(1, t, ["CENTER"])[0]!.maxH * (0.7 / 0.7));
+    expect(subjectBoxes(2, t, ["LEFT", "RIGHT"], 1)[0]!.maxH).toBeGreaterThan(subjectBoxes(2, t, ["LEFT", "RIGHT"])[0]!.maxH);
+  });
+
+  it("render thật: chủ thể nhỏ (chim) được yêu cầu đứng sát đáy vẫn được nâng lên trên dải phụ đề", async () => {
+    const out = file("small.mp4");
+    const target = { width: 360, height: 640, fps: 30 };
+    await ffmpeg(
+      buildLayeredSceneArgs({
+        layers: { background: file("bg.png"), foregrounds: [{ path: file("red.png"), slot: "CENTER", scale: 0.45, floorY: 0.97 }] },
+        audioInput: null,
+        duration: 1,
+        target,
+        camera: { move: "STATIC", speed: "SLOW" },
+        output: out,
+      }),
+    );
+    // Red never appears inside the subtitle band (below 65 % of the height).
+    const raw = execFileSync(resolveFfmpeg()!, ["-hide_banner", "-loglevel", "error", "-ss", "0.5", "-i", out, "-frames:v", "1", "-vf", "format=rgb24", "-f", "rawvideo", "-"]);
+    let lowestRed = -1;
+    for (let y = 0; y < 640; y += 1) for (let x = 0; x < 360; x += 1) {
+      const i = (y * 360 + x) * 3;
+      if (raw[i]! > 200 && raw[i + 1]! < 70 && raw[i + 2]! < 70) lowestRed = y;
+    }
+    expect(lowestRed).toBeGreaterThan(0);
+    expect(lowestRed).toBeLessThanOrEqual(Math.round(640 * 0.65) + 2);
+  }, 60_000);
 });
 
 describe("G2 — graph ghép lớp", () => {
