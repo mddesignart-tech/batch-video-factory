@@ -386,6 +386,14 @@ function VideoBlock({ video, onUpdate }: { video: ImportVideoPreview; onUpdate?:
                 <Badge tone={s.motionSource === "LOCAL_MOTION" ? "ok" : "info"}>
                   {s.motionSource === "LOCAL_MOTION" ? "LOCAL_FREE" : "VIDEO_AI"}
                 </Badge>
+                {/* G7: the motion part by part - only the subject's Video AI movement is paid. */}
+                <ul className="mt-1 space-y-0.5 text-[10px] leading-tight">
+                  {(s.motionParts ?? []).map((p) => (
+                    <li key={p.part} className={p.cost > 0 ? "text-warn-500" : "text-ink-400"} title={p.how}>
+                      {p.label}: {p.cost > 0 ? `Video AI ~${formatUSD(p.cost)}` : "tại máy $0"}
+                    </li>
+                  ))}
+                </ul>
               </Td>
               <Td>
                 <Badge tone={IMAGE_SOURCE_TONE[s.imageSource]}>{s.imageSource}</Badge>
@@ -487,6 +495,8 @@ export function ReconciliationSummary({ preflight }: { preflight: Pick<ImportPre
         {line("REUSED VALUE (dùng lại, $0 lần này)", formatUSD(r.reusedValue, 6), "text-ok-500")}
         {line("IMPORTED VALUE (ảnh nhập, $0)", formatUSD(r.importedValue, 6), "text-ok-500")}
         {line("LOCAL FREE (FFmpeg tại máy)", `${r.localFreeScenes} cảnh · $0`, "text-ink-400")}
+        {line("CHUYỂN ĐỘNG TẠI MÁY (camera / nền / ambient / ghép lớp)", `${r.localMotionParts ?? 0} phần · $0`, "text-ok-500")}
+        {line("CHUYỂN ĐỘNG VIDEO AI (chủ thể, trả phí — đã nằm trong tạo mới)", `${r.paidMotion?.parts ?? 0} phần · ${formatUSD(r.paidMotion?.cost ?? 0, 6)}`)}
         {line(
           `OPTIONAL QA (AI trả phí ${r.paidQaEnabled ? "ĐANG BẬT" : "TẮT"})`,
           r.paidQaEnabled ? formatUSD(r.enabledQa, 6) : `${formatUSD(r.optionalQa, 6)} — không cộng`,

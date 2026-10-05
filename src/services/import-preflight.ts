@@ -20,6 +20,8 @@ import {
   type CharacterReadiness,
 } from "./character-service";
 import { sceneCharacters } from "@/domain/scene-characters";
+import { sceneMotionCost, type MotionCostPart } from "@/domain/camera-capability";
+import { legacyScenePlan, parseScenePlan } from "@/domain/scene-plan";
 import { evaluateSpendLimits, usd, type SpendVerdict } from "@/domain/spend-limits";
 import { sceneSpendLimit, videoSpendLimit } from "./batch-authorization";
 import { getSettings } from "@/lib/settings";
@@ -158,6 +160,13 @@ export interface ImportSceneLine {
    * it will NOT silently buy a replacement).
    */
   imageSource: "IMPORTED" | "REUSED" | "WILL_CREATE" | "NONE" | "MISSING";
+  /**
+   * G7: the scene's MOTION, part by part, each with how it is made and what
+   * it costs: camera, background, ambient and composite are local ($0); only
+   * the subject's movement in a bought Video AI clip carries a price. A scene
+   * where one part is paid is never shown as "all Video AI".
+   */
+  motionParts: MotionCostPart[];
   /** The keyframe on disk, relative to data/, for a thumbnail. Null if none. */
   imagePath: string | null;
   /** The name the imported picture had when the person supplied it, so the table shows which file went to which scene. */
@@ -439,6 +448,9 @@ export function paidModelsFor(
  * reusedValue / importedValue are what the same assets cost when they were
  * first made (or would cost new) - money NOT spent now, never part of a total.
  * localFree counts FFmpeg work: compute, $0, not a dollar saving.
+ * localMotionParts / paidMotion (G7) split each scene's motion into the parts
+ * made on this machine ($0) and the subject motion bought from Video AI -
+ * information only: the paid part is already inside newGeneration.
  * optionalQa is the price of paid AI scoring while it is switched OFF.
  */
 export interface CostReconciliation {
@@ -446,6 +458,10 @@ export interface CostReconciliation {
   reusedValue: number;
   importedValue: number;
   localFreeScenes: number;
+  /** Motion parts made on this machine (camera, background, ambient, composite): $0. */
+  localMotionParts: number;
+  /** Subject motion bought from Video AI, and what it costs (already inside newGeneration). */
+  paidMotion: { parts: number; cost: number };
   optionalQa: number;
   enabledQa: number;
   paidQaEnabled: boolean;
@@ -457,7 +473,9 @@ export interface CostReconciliation {
 }
 
 export function reconcileCosts(
-  videos: Pick<ImportVideoPreview, "breakdown" | "estimatedCost" | "scenes" | "localMotionCount">[],
+  videos: (Pick<ImportVideoPreview, "breakdown" | "estimatedCost" | "localMotionCount"> & {
+    scenes: (Pick<ImportVideoPreview["scenes"][number], "reuseFrom" | "saved"> & { motionParts?: MotionCostPart[] })[];
+  })[],
   paidQaEnabled: boolean,
 ): CostReconciliation {
   const sum = (f: (v: (typeof videos)[number]) => number) => round(videos.reduce((n, v) => n + f(v), 0), 6);
@@ -475,6 +493,11 @@ export function reconcileCosts(
     reusedValue: round(allSaved - importedValue, 6),
     importedValue,
     localFreeScenes: videos.reduce((n, v) => n + v.localMotionCount, 0),
+    localMotionParts: videos.reduce((n, v) => n + v.scenes.reduce((m, sc) => m + (sc.motionParts ?? []).filter((p) => p.cost === 0).length, 0), 0),
+    paidMotion: {
+      parts: videos.reduce((n, v) => n + v.scenes.reduce((m, sc) => m + (sc.motionParts ?? []).filter((p) => p.cost > 0).length, 0), 0),
+      cost: sum((v) => v.scenes.reduce((m, sc) => m + (sc.motionParts ?? []).reduce((k, p) => k + p.cost, 0), 0)),
+    },
     optionalQa: sum((v) => v.breakdown.optionalQa),
     enabledQa,
     paidQaEnabled,
@@ -724,6 +747,7 @@ export async function preflightImportedBatch(
             : null,
         estimatedCost: round(row.estimatedCost, 6),
         plan,
+        motionParts: motionPartsOf(scene ?? null, row.motionSource, row.video?.estimatedCost ?? 0),
         timing: await previewTiming(scene ?? null, row.sceneNumber, row.motionSource),
         // Scene cap (QĐ-108), against the INCREMENTAL cost: REUSE = $0.
         spendLimit: sceneSpendLimit(scene ?? null, settings.defaultMaxCostVideoAiScene),
@@ -1262,4 +1286,19 @@ function selectionReason(
     unavailablePin: pinGone ? (/\(([^)]+\/[^)]+)\)/.exec(body)?.[1] ?? "đã ghim") : null,
     diagnostics: body,
   });
+}
+
+/**
+ * G7: one scene's motion priced by part. The scene plan when there is one; a
+ * scene from before scene plans gets the legacy plan (its V1 slow push-in),
+ * so it still shows "Camera: tại máy $0" instead of nothing.
+ */
+export function motionPartsOf(
+  scene: { scenePlanJson?: string | null; camera?: string | null; visualDescription?: string | null; motionSource?: string | null } | null,
+  motionSource: string,
+  videoCost: number,
+): MotionCostPart[] {
+  const plan = parseScenePlan(scene?.scenePlanJson) ?? legacyScenePlan({ camera: scene?.camera, visualDescription: scene?.visualDescription, motionSource });
+  const paidClip = motionSource !== "LOCAL_MOTION" && videoCost > 0;
+  return sceneMotionCost(plan, { paidClip, videoCost: round(videoCost, 6) });
 }
