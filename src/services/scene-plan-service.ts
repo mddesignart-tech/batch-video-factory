@@ -12,7 +12,8 @@ import { inferLayers, layersPromptPhrase, sceneComplexity } from "@/domain/scene
 import { parseScenePlan, ScenePlanSchema, type MotionRoute, type ScenePlan, type SceneLayer } from "@/domain/scene-plan";
 import type { ScriptDoc } from "@/domain/script";
 import { ambientFileFor, availableAmbientKinds } from "./ambient-library";
-import type { LayerInputs, LocalCameraSpec } from "@/media/camera-motion";
+import type { LayerInputs, LocalCameraSpec, PlacedSubject } from "@/media/camera-motion";
+import { slotsForNames, type SubjectSlot } from "@/media/layer-layout";
 import { projectReferenceAssets, sceneReferenceIds, type UniversalReference } from "./reference-assets";
 import { pngHasAlpha, resolveSubjects, subjectCandidates } from "./composite-subjects";
 import { projectFormat } from "./output-profile";
@@ -285,13 +286,25 @@ function renderStill(
   const picture = existingAbsolute(scene.imagePath);
   if (!picture) return { localCamera };
   const ambientLayers = plan.layers.filter((x) => x.enabled && x.layerType === "AMBIENT" && x.motionType === "AMBIENT_VIDEO");
-  const foreground =
+  // Cut-out layers (transparent PNG on disk), only on a composited scene.
+  const cutouts = (type: "FOREGROUND" | "MIDGROUND") =>
     plan.route === "COMPOSITE"
-      ? (plan.layers
-          .filter((x) => x.enabled && x.layerType === "FOREGROUND" && x.assetPath)
-          .map((x) => existingAbsolute(x.assetPath))
-          .find((p): p is string => Boolean(p) && pngHasAlpha(p!)) ?? null)
-      : null;
+      ? plan.layers
+          .filter((x) => x.enabled && x.layerType === type && x.assetPath)
+          .map((x) => ({ layer: x, path: existingAbsolute(x.assetPath) }))
+          .filter((x): x is { layer: SceneLayer; path: string } => Boolean(x.path) && pngHasAlpha(x.path!))
+          .slice(0, 3)
+      : [];
+  const fg = cutouts("FOREGROUND");
+  // One cut-out holding the whole cast keeps its drawn grouping (FULL); separate
+  // ones stand where the director put each speaker (screen sides kept).
+  const fgSlots: SubjectSlot[] =
+    fg.length === 1 && fg[0]!.layer.label.includes(" + ")
+      ? ["FULL"]
+      : slotsForNames(fg.map((x) => x.layer.label), plan.camera.screenLeft, plan.camera.screenRight);
+  const foregrounds: PlacedSubject[] = fg.map((x, i) => ({ path: x.path, slot: fgSlots[i], critical: x.layer.critical }));
+  const midground: PlacedSubject[] = cutouts("MIDGROUND").map((x) => ({ path: x.path, critical: x.layer.critical }));
+  const foreground = foregrounds.length > 0;
   const ambient = ambientLayers
     .map((x) => {
       const kind = x.id.replace(/^amb-/, "");
@@ -302,8 +315,11 @@ function renderStill(
       return { path: file, opacity: 0.3, region: foreground ? ("FULL" as const) : ("TOP" as const) };
     })
     .filter((a): a is NonNullable<typeof a> => a !== null);
-  if (!foreground && ambient.length === 0) return { localCamera };
-  return { localCamera, layers: { background: picture, foreground, ambient } };
+  if (!foreground && midground.length === 0 && ambient.length === 0) return { localCamera };
+  return {
+    localCamera,
+    layers: { background: picture, ...(foregrounds.length ? { foregrounds } : {}), ...(midground.length ? { midground } : {}), ambient },
+  };
 }
 
 // ------------------------------------------------------------- composite ---

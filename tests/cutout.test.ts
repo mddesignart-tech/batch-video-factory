@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { analyzeBackdrop, cutoutImage, cutoutRaster } from "@/media/cutout";
+import { analyzeBackdrop, cutoutImage, cutoutRaster, trimToSubject } from "@/media/cutout";
 import { ffmpeg } from "@/media/ffmpeg";
 import { pngHasAlpha, resolveSubjects } from "@/services/composite-subjects";
 import type { UniversalReference } from "@/services/reference-assets";
@@ -33,8 +33,9 @@ const alphaAt = (r: { data: Uint8Array }, x: number, y: number) => r.data[(y * W
 const figure = (x: number, y: number): [number, number, number] | null => {
   const body = x >= 60 && x < 140 && y >= 60 && y < 300;
   if (!body) {
-    // soft floor shadow beside the feet
-    if (y >= 280 && x >= 40 && x < 60) return [190, 189, 189];
+    // floor shadow beside the feet: faint far out, darker close to the feet
+    if (y >= 280 && x >= 30 && x < 50) return [201, 200, 200];
+    if (y >= 280 && x >= 50 && x < 60) return [175, 174, 174];
     return null;
   }
   if (y >= 120 && y < 130) return [250, 250, 250]; // white stripe
@@ -89,13 +90,23 @@ describe("G1 — tách nền (loang từ mép, không key toàn ảnh)", () => {
     expect(alphaAt(r.raster, 98, 220)).toBeGreaterThan(100);
   });
 
-  it("bóng đổ mềm còn lại nửa trong suốt; mép chủ thể mềm (có alpha trung gian)", () => {
+  it("bóng đổ nhạt gần như trong suốt; phần đậm sát chân giữ lại; mép chủ thể mềm (có alpha trung gian)", () => {
     if (!("raster" in r)) throw new Error("refused");
-    const shadow = alphaAt(r.raster, 50, 290);
-    expect(shadow).toBeGreaterThan(0);
-    expect(shadow).toBeLessThan(255);
+    expect(alphaAt(r.raster, 35, 290)).toBeLessThan(64);
+    expect(alphaAt(r.raster, 55, 290)).toBeGreaterThan(64);
     const edge = [57, 58, 59, 60, 61, 62].map((x) => alphaAt(r.raster, x, 100));
     expect(edge.some((a) => a > 0 && a < 255)).toBe(true);
+  });
+
+  it("cắt sát chủ thể (+2 % lề): không còn lề trong suốt làm chủ thể nhỏ đi trong khung bố cục", () => {
+    if (!("raster" in r)) throw new Error("refused");
+    const t = trimToSubject(r.raster);
+    // Subject spans x 50..139 (dark shadow kept, the faint part is transparent), y 60..299; margin 6 px.
+    expect(t.width).toBeGreaterThanOrEqual(100);
+    expect(t.width).toBeLessThanOrEqual(108);
+    expect(t.height).toBeGreaterThanOrEqual(244);
+    expect(t.height).toBeLessThanOrEqual(250);
+    expect(t.data[3]).toBe(0); // the margin corner is transparent
   });
 
   it("từ chối thay vì tách sai: chạm mép trên / dải kín bề ngang / chủ thể quá nhỏ", () => {

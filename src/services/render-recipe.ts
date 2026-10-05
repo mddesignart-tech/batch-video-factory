@@ -89,6 +89,9 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
         ? {
             bg: content(s.layers.background),
             fg: content(s.layers.foreground ?? null),
+            // G2: several cut-outs with their slots, and a midground; absent on older layered scenes.
+            ...(s.layers.foregrounds?.length ? { fgs: s.layers.foregrounds.map((f) => ({ sha: content(f.path), slot: f.slot ?? null, crit: f.critical ?? false })) } : {}),
+            ...(s.layers.midground?.length ? { mid: s.layers.midground.map((m) => ({ sha: content(m.path), slot: m.slot ?? null })) } : {}),
             amb: (s.layers.ambient ?? []).map((a) => ({ sha: content(a.path), op: a.opacity ?? null })),
           }
         : undefined,

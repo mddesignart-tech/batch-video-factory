@@ -24,10 +24,20 @@ import { resolveFfmpeg } from "./ffmpeg";
  * subject at all are all REFUSED with a reason.
  */
 
-export const CUTOUT_VERSION = "cutout-v1";
+export const CUTOUT_VERSION = "cutout-v5";
 
 /** Colour distance (RGB, 0..441) below which a pixel is fully backdrop. */
 const T_INNER = 18;
+/** The fill spreads through pixels this close to the backdrop (a faint floor shadow included). */
+const T_FLOOD = 26;
+/** An enclosed pocket is only a backdrop gap when it matches the backdrop this closely (shading on a white shoe does not). */
+const T_POCKET = 7;
+/**
+ * Edge barrier: the fill never crosses a pixel whose brightness changes this
+ * much across it. The backdrop is smooth; a subject's outline is not - so a
+ * cream sneaker almost the colour of the backdrop still keeps its inside.
+ */
+const EDGE_BARRIER = 7;
 /** ... and above which it is fully subject. Between: soft edge. */
 const T_OUTER = 46;
 /** Border uniformity: mean deviation from the border colour must stay below this. */
@@ -131,9 +141,19 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
   const queue = new Int32Array(n);
   let head = 0;
   let tail = 0;
+  // Brightness and its local change (central differences), for the edge barrier.
+  const lum = new Float32Array(n);
+  for (let p = 0; p < n; p += 1) lum[p] = 0.299 * data[p * 4]! + 0.587 * data[p * 4 + 1]! + 0.114 * data[p * 4 + 2]!;
+  const edge = (p: number) => {
+    const x = p % w;
+    const gx = x > 0 && x < w - 1 ? Math.abs(lum[p + 1]! - lum[p - 1]!) : 0;
+    const gy = p >= w && p < n - w ? Math.abs(lum[p + w]! - lum[p - w]!) : 0;
+    return Math.max(gx, gy);
+  };
   const seed = (p: number) => {
     if (seen[p]) return;
-    if (dist(data, p * 4, backdrop) > T_OUTER) return;
+    if (edge(p) > EDGE_BARRIER) return;
+    if (dist(data, p * 4, backdrop) > T_FLOOD) return;
     seen[p] = 1;
     queue[tail++] = p;
   };
@@ -177,11 +197,11 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
   // Enclosed backdrop: the gap between two people, or between an arm and the
   // body, is not connected to the edge. A pocket of PURE backdrop colour big
   // enough to be a gap (not a white stripe or a highlight) is removed too.
-  const minPocket = Math.max(64, Math.round(n * 0.0008));
+  const minPocket = Math.max(64, Math.round(n * 0.0015));
   const pocket = new Uint8Array(n);
   const stack = new Int32Array(n);
   for (let p0 = 0; p0 < n; p0 += 1) {
-    if (seen[p0] || pocket[p0] || dist(data, p0 * 4, backdrop) > T_INNER) continue;
+    if (seen[p0] || pocket[p0] || dist(data, p0 * 4, backdrop) > T_POCKET) continue;
     let sp = 0;
     const members: number[] = [];
     stack[sp++] = p0;
@@ -191,7 +211,7 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
       members.push(p);
       const x = p % w;
       for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
-        if (q < 0 || q >= n || seen[q] || pocket[q] || dist(data, q * 4, backdrop) > T_INNER) continue;
+        if (q < 0 || q >= n || seen[q] || pocket[q] || dist(data, q * 4, backdrop) > T_POCKET) continue;
         pocket[q] = 1;
         stack[sp++] = q;
       }
@@ -199,6 +219,28 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
     if (members.length >= minPocket) for (const p of members) seed(p);
   }
   flood();
+  // Soft edge: a NARROW band (a few px) around the backdrop may be partly
+  // transparent. The fill itself never walks deep into light parts of the
+  // subject (white sneakers shaded grey on a grey backdrop stay solid).
+  const band = Math.max(2, Math.round(Math.max(w, h) * 0.004));
+  let ring: number[] = [];
+  for (let p = 0; p < n; p += 1) {
+    if (!seen[p]) continue;
+    const x = p % w;
+    if ((x > 0 && !seen[p - 1]) || (x < w - 1 && !seen[p + 1]) || (p >= w && !seen[p - w]) || (p < n - w && !seen[p + w])) ring.push(p);
+  }
+  for (let step = 0; step < band && ring.length; step += 1) {
+    const next: number[] = [];
+    for (const p of ring) {
+      const x = p % w;
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
+        if (q < 0 || q >= n || seen[q] || dist(data, q * 4, backdrop) > T_OUTER) continue;
+        seen[q] = 1;
+        next.push(q);
+      }
+    }
+    ring = next;
+  }
   // A band across the whole width (letterbox, blurred fill, a table edge to edge)
   // is not a subject on a backdrop: refuse rather than keep it as "subject".
   for (let y = 0; y < h; y += 2) {
@@ -240,6 +282,40 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
   }
   for (let p = 0; p < n; p += 1) out[p * 4 + 3] = soft[p]!;
   return { raster: { width: w, height: h, data: out }, subjectShare: share };
+}
+
+/**
+ * Crop to the subject's bounding box (+2 % margin, kept even). Empty
+ * transparent margins would make the subject small in its layout box, and
+ * the layout would not know where its feet are.
+ */
+export function trimToSubject(r: Raster): Raster {
+  const { width: w, height: h, data } = r;
+  let x0 = w;
+  let y0 = h;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      if (data[(y * w + x) * 4 + 3]! > 8) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < 0) return r;
+  const m = Math.round(Math.max(w, h) * 0.02);
+  x0 = Math.max(0, x0 - m);
+  y0 = Math.max(0, y0 - m);
+  x1 = Math.min(w - 1, x1 + m);
+  y1 = Math.min(h - 1, y1 + m);
+  const cw = (x1 - x0 + 1) & ~1;
+  const ch = (y1 - y0 + 1) & ~1;
+  const out = new Uint8Array(cw * ch * 4);
+  for (let y = 0; y < ch; y += 1) out.set(data.subarray(((y0 + y) * w + x0) * 4, ((y0 + y) * w + x0 + cw) * 4), y * cw * 4);
+  return { width: cw, height: ch, data: out };
 }
 
 // ------------------------------------------------------------------ I/O ---
@@ -310,6 +386,6 @@ export async function cutoutImage(file: string): Promise<CutoutResult> {
   if (fs.existsSync(out)) return { ok: true, path: out, cached: true, subjectShare: NaN, backdrop: color };
   const cut = cutoutRaster(raster, color);
   if ("refusal" in cut) return { ok: false, reason: cut.refusal, message: VI_CUTOUT_REFUSAL[cut.refusal] };
-  await writePng(cut.raster, out);
+  await writePng(trimToSubject(cut.raster), out);
   return { ok: true, path: out, cached: false, subjectShare: cut.subjectShare, backdrop: color };
 }

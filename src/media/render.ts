@@ -15,7 +15,7 @@ import {
 import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
 import type { SubtitleLayout } from "@/domain/output-controls";
 import { renderSegmentCached } from "./segment-cache";
-import { buildLayeredSceneArgs, cameraZoompan, type LayerInputs, type LocalCameraSpec } from "./camera-motion";
+import { buildLayeredSceneArgs, cameraZoompan, layerFiles, type LayerInputs, type LocalCameraSpec } from "./camera-motion";
 import { blendTails, buildTransitionJoinArgs, hasBlend, planJoins } from "./transitions";
 import type { Transition } from "@/domain/camera-grammar";
 import {
@@ -722,7 +722,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
             ...(isStillSource && scene.localCamera ? { camera: scene.localCamera } : {}),
           }),
       inputs: layered
-        ? [layered.background, ...(layered.foreground ? [layered.foreground] : []), ...(layered.ambient ?? []).map((a) => a.path), ...(audioInput ? [audioInput] : [])]
+        ? [...layerFiles(layered), ...(audioInput ? [audioInput] : [])]
         : [source, ...(audioInput ? [audioInput] : [])],
       output,
     });

@@ -74,7 +74,8 @@ describe("LOCAL CAMERA (args)", () => {
     const graph = args[args.indexOf("-filter_complex") + 1]!;
     expect(graph).toMatch(/\[0:v\].*zoompan.*\[bg0\]/);
     expect(graph).toContain("blend=all_mode=screen:all_opacity=0.30");
-    expect(graph).toMatch(/\[mix0\]\[fg\]overlay=/);
+    // The subject plate goes on top of the ambient-lit background.
+    expect(graph).toMatch(/\[mix0\]\[fgm\]overlay=/);
     expect(args.filter((a) => a === "-stream_loop")).toHaveLength(1);
   });
 });

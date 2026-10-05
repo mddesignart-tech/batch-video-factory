@@ -178,7 +178,7 @@ describe("ROUTING · COST · RESUME (DB, mock pipeline)", () => {
     expect(scene).toMatchObject({ imageSource: "IMPORTED", motionSource: "LOCAL_MOTION" });
     expect(parseScenePlan(scene.scenePlanJson)).toMatchObject({ route: "COMPOSITE", source: "USER" });
     const inputs = renderInputsFor(scene);
-    expect(inputs.layers?.foreground).toBeTruthy();
+    expect(inputs.layers?.foregrounds?.length).toBe(1);
     expect(inputs.localCamera).toBeTruthy();
     expect(await jobs()).toEqual(before);
   }, 300_000);

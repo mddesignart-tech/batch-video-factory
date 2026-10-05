@@ -24,6 +24,8 @@
 
 import { localFallbackMove, localSupport, type CameraEasing, type CameraMove, type CameraSpeed } from "@/domain/camera-grammar";
 import type { RenderTarget } from "./render";
+import { PARALLAX_FACTOR } from "@/domain/scene-plan";
+import { subjectBoxes, type SubjectSlot } from "./layer-layout";
 
 export interface LocalCameraSpec {
   move: CameraMove;
@@ -82,7 +84,7 @@ export function zoompanUpscale(target: RenderTarget): number {
  * The `zoompan` part of the chain for one still: `,scale=...,zoompan=...`.
  * Empty string for STATIC (the picture simply holds).
  */
-export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number; target: RenderTarget; amplitudeScale?: number }): string {
+export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number; target: RenderTarget; amplitudeScale?: number; alpha?: boolean }): string {
   const move = renderableMove(spec.move);
   if (move === "STATIC") return "";
   const { width, height, fps } = opts.target;
@@ -179,16 +181,30 @@ export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number
   // d = frames + 1: the fps filter after zoompan drops its last frame, and the
   // pad would then repeat the one before it - a one-frame freeze at the end.
   const even = (v: number) => Math.round((v * up) / 2) * 2;
-  return `,scale=${even(width)}:${even(height)}:flags=lanczos,format=gbrp,zoompan=z='${z}':x='${x}':y='${y}':d=${frames + 1}:s=${width}x${height}:fps=${fps}`;
+  // A transparent layer plate keeps its alpha through the move (gbrap).
+  return `,scale=${even(width)}:${even(height)}:flags=lanczos,format=${opts.alpha ? "gbrap" : "gbrp"},zoompan=z='${z}':x='${x}':y='${y}':d=${frames + 1}:s=${width}x${height}:fps=${fps}`;
 }
 
 // --------------------------------------------------------------- layered ---
 
+/** A cut-out (transparent PNG) placed in the frame. */
+export interface PlacedSubject {
+  path: string;
+  /** LEFT / CENTER / RIGHT for separate subjects; FULL = one cut-out holding the whole group. */
+  slot?: SubjectSlot;
+  /** A CRITICAL reference (product / character): its layer moves gently. */
+  critical?: boolean;
+}
+
 export interface LayerInputs {
   /** Background still (or the scene's own picture when there is no separate background). */
   background: string;
-  /** Transparent PNG of the subject(s), drawn over the background. */
+  /** Legacy: ONE transparent PNG of the subject(s) (= `foregrounds: [{ path, slot: "FULL" }]`). */
   foreground?: string | null;
+  /** 1-3 cut-out subjects in front (characters, presenter, product, main animal). */
+  foregrounds?: PlacedSubject[];
+  /** Cut-outs between the subjects and the background (props, a branch, a secondary animal). */
+  midground?: PlacedSubject[];
   /**
    * Ambient loop clips, screen-blended subtly over the background. TOP = only
    * the upper band of the frame (sky: clouds, far birds, smoke) - used when
@@ -197,11 +213,69 @@ export interface LayerInputs {
   ambient?: { path: string; opacity?: number; region?: "FULL" | "TOP" }[];
 }
 
+/** Foreground subjects, the legacy single `foreground` included. */
+export function foregroundsOf(layers: LayerInputs): PlacedSubject[] {
+  if (layers.foregrounds?.length) return layers.foregrounds.slice(0, 3);
+  return layers.foreground ? [{ path: layers.foreground, slot: "FULL" }] : [];
+}
+
+/** Every file a layered scene reads (segment cache inputs). */
+export function layerFiles(layers: LayerInputs): string[] {
+  return [layers.background, ...(layers.midground ?? []).map((m) => m.path), ...foregroundsOf(layers).map((f) => f.path), ...(layers.ambient ?? []).map((a) => a.path)];
+}
+
+/** Draw order inside one depth group: the sides first, the centre in front. */
+const SLOT_ORDER: Record<SubjectSlot, number> = { LEFT: 0, RIGHT: 1, CENTER: 2, FULL: 3 };
+
+/**
+ * One depth group (midground or foreground) as a transparent full-frame
+ * PLATE: each cut-out scaled into its box and stood on the floor line. The
+ * plate then takes the camera move scaled by its parallax, so near things
+ * move more than far ones - real depth on a push-in, not just a slide.
+ */
+function plateChain(opts: {
+  inputs: { idx: number; subject: PlacedSubject }[];
+  target: RenderTarget;
+  label: string;
+  /** Floor line / size scale for the group (midground stands a little higher and smaller). */
+  floor?: number;
+  size?: number;
+}): { chains: string[]; out: string } {
+  const { width: W, height: H } = opts.target;
+  const items = [...opts.inputs].sort((a, b) => SLOT_ORDER[a.subject.slot ?? "CENTER"] - SLOT_ORDER[b.subject.slot ?? "CENTER"]);
+  const boxes = subjectBoxes(items.length, opts.target, items.map((i) => i.subject.slot));
+  const size = opts.size ?? 1;
+  const chains: string[] = [];
+  let plate = "";
+  items.forEach((item, k) => {
+    const b = boxes[k]!;
+    const bw = Math.max(2, Math.round((b.maxW * size) / 2) * 2);
+    const bh = Math.max(2, Math.round((b.maxH * size) / 2) * 2);
+    const bottom = Math.round(opts.floor !== undefined ? H * opts.floor : b.bottom);
+    const cx = Math.round(b.cx);
+    const fit = `[${item.idx}:v]format=rgba,scale=${bw}:${bh}:force_original_aspect_ratio=decrease`;
+    if (k === 0) {
+      plate = `${opts.label}p0`;
+      chains.push(`${fit},pad=${W}:${H}:x='${cx}-iw/2':y='${bottom}-ih':color=black@0[${plate}]`);
+    } else {
+      const s = `${opts.label}s${k}`;
+      const next = `${opts.label}p${k}`;
+      chains.push(`${fit}[${s}]`);
+      chains.push(`[${plate}][${s}]overlay=x='${cx}-w/2':y='${bottom}-h':format=rgb[${next}]`);
+      plate = next;
+    }
+  });
+  return { chains, out: plate };
+}
+
 /**
  * One scene from separate layers, in ONE FFmpeg graph:
- *   background (+ camera, parallax 0.2-0.4) → ambient loops (subtle) →
- *   foreground PNG (moves with the camera at full parallax) → fps / format.
- * Audio is mapped exactly as in the single-picture chain.
+ *   background (camera x parallax 0.2 when something stands in front)
+ *   → ambient loops (subtle) → midground plate (x 0.5) → foreground plate (x 1.0)
+ *   → fps / format.
+ * Every plate moves on the same smooth camera curve (same easing, same
+ * frames), only scaled - so depth never introduces judder. Audio is mapped
+ * exactly as in the single-picture chain.
  */
 export function buildLayeredSceneArgs(opts: {
   layers: LayerInputs;
@@ -214,11 +288,20 @@ export function buildLayeredSceneArgs(opts: {
   const { layers, target, camera } = opts;
   const { width, height, fps } = target;
   const dur = Math.max(0.5, Number(opts.duration.toFixed(3)));
-  // The background goes in as ONE frame (zoompan makes the scene's frames from it).
+  const fgs = foregroundsOf(layers);
+  const mids = (layers.midground ?? []).slice(0, 3);
+  const inFront = fgs.length + mids.length > 0;
+  // Every still goes in as ONE frame (zoompan makes the scene's frames from it).
   const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", layers.background];
   let idx = 1;
-  const fgIdx = layers.foreground ? idx++ : -1;
-  if (layers.foreground) args.push("-loop", "1", "-t", String(dur), "-i", layers.foreground);
+  const midIdx = mids.map((m) => {
+    args.push("-i", m.path);
+    return { idx: idx++, subject: m };
+  });
+  const fgIdx = fgs.map((f) => {
+    args.push("-i", f.path);
+    return { idx: idx++, subject: f };
+  });
   const ambIdx: number[] = [];
   for (const a of layers.ambient ?? []) {
     args.push("-stream_loop", "-1", "-t", String(dur), "-i", a.path);
@@ -229,10 +312,10 @@ export function buildLayeredSceneArgs(opts: {
   else args.push("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo");
 
   const chains: string[] = [];
-  // Background: far away, so it moves less (parallax).
+  // Background: far away, so it moves least.
   chains.push(
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}` +
-      `${cameraZoompan({ ...camera, critical: false }, { durationSec: dur, target, amplitudeScale: layers.foreground ? 0.4 : 1 })},fps=${fps},` +
+      `${cameraZoompan({ ...camera, critical: false }, { durationSec: dur, target, amplitudeScale: inFront ? PARALLAX_FACTOR.BACKGROUND : 1 })},fps=${fps},` +
       `tpad=stop_mode=clone:stop_duration=${dur},format=yuv420p[bg0]`,
   );
   let last = "bg0";
@@ -256,15 +339,18 @@ export function buildLayeredSceneArgs(opts: {
     }
     last = `mix${i}`;
   });
-  if (layers.foreground) {
-    // The subject: full parallax. A lateral camera move slides it a little more than the background.
-    const lateral = /LEFT|RIGHT|PARALLAX|TRUCK|TRACK/.test(renderableMove(camera.move));
-    const dir = /LEFT/.test(camera.move) ? 1 : -1;
-    const shift = lateral && !camera.critical ? `${dir}*W*0.03*(t/${dur.toFixed(3)}-0.5)` : "0";
-    chains.push(`[${fgIdx}:v]scale=-2:${Math.round(height * 0.82)},format=rgba[fg]`);
-    chains.push(`[${last}][fg]overlay=x='(W-w)/2+${shift}':y='H-h-H*0.04':format=auto[comp]`);
-    last = "comp";
-  }
+  const group = (inputs: { idx: number; subject: PlacedSubject }[], label: string, factor: number, place: { floor?: number; size?: number }) => {
+    if (inputs.length === 0) return;
+    const plate = plateChain({ inputs, target, label, ...place });
+    chains.push(...plate.chains);
+    const critical = camera.critical || inputs.some((i) => i.subject.critical);
+    const move = cameraZoompan({ ...camera, critical }, { durationSec: dur, target, amplitudeScale: factor, alpha: true });
+    chains.push(`[${plate.out}]${move ? move.slice(1) + "," : ""}format=rgba[${label}m]`);
+    chains.push(`[${last}][${label}m]overlay=0:0:format=auto[${label}c]`);
+    last = `${label}c`;
+  };
+  group(midIdx, "mid", PARALLAX_FACTOR.MIDGROUND, { floor: 0.9, size: 0.6 });
+  group(fgIdx, "fg", PARALLAX_FACTOR.FOREGROUND, {});
   chains.push(`[${last}]fps=${fps},tpad=stop_mode=clone:stop_duration=10,setsar=1,format=yuv420p[v]`);
   chains.push(`[${audioIdx}:a]aresample=48000,apad[a]`);
 
