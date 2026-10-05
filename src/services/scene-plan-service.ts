@@ -11,8 +11,8 @@ import { CameraPlanSchema, cameraPromptPhrase, localSupport, type CameraPlan, ty
 import { inferLayers, layersPromptPhrase, sceneComplexity } from "@/domain/scene-layers";
 import { parseScenePlan, ScenePlanSchema, type MotionRoute, type ScenePlan, type SceneLayer } from "@/domain/scene-plan";
 import type { ScriptDoc } from "@/domain/script";
-import { ambientFileFor, availableAmbientKinds } from "./ambient-library";
-import type { LayerInputs, LocalCameraSpec, PlacedSubject } from "@/media/camera-motion";
+import { ambientLoopFor, availableAmbientKinds } from "./ambient-library";
+import type { AmbientInput, LayerInputs, LocalCameraSpec, PlacedSubject } from "@/media/camera-motion";
 import { slotsForNames, type SubjectSlot } from "@/media/layer-layout";
 import { projectReferenceAssets, sceneReferenceIds, type UniversalReference } from "./reference-assets";
 import { pngHasAlpha, resolveSubjects, subjectCandidates } from "./composite-subjects";
@@ -249,8 +249,6 @@ export function existingAbsolute(p: string | null | undefined): string | null {
   return fs.existsSync(abs) ? abs : null;
 }
 
-/** Sky-band ambient that may play over a single picture (never over the subject). */
-const SKY_AMBIENT = new Set(["clouds", "birds", "smoke"]);
 
 /**
  * What the renderer needs from a scene's plan. A scene WITHOUT a plan (every
@@ -306,15 +304,15 @@ function renderStill(
   const midground: PlacedSubject[] = cutouts("MIDGROUND").map((x) => ({ path: x.path, critical: x.layer.critical }));
   const foreground = foregrounds.length > 0;
   const ambient = ambientLayers
-    .map((x) => {
-      const kind = x.id.replace(/^amb-/, "");
-      const file = ambientFileFor(kind);
-      if (!file) return null;
-      // Without a separate foreground, only sky-band ambient is allowed (nothing over a face).
-      if (!foreground && !SKY_AMBIENT.has(kind)) return null;
-      return { path: file, opacity: 0.3, region: foreground ? ("FULL" as const) : ("TOP" as const) };
+    .map((x): AmbientInput | null => {
+      const loop = ambientLoopFor(x.id.replace(/^amb-/, ""));
+      if (!loop) return null;
+      // Without separate subject plates, only the sky band (nothing over a face).
+      if (!foreground && loop.band !== "SKY") return null;
+      if (loop.alpha) return { path: loop.path, alpha: true, band: loop.band, opacity: 0.9 };
+      return { path: loop.path, opacity: 0.3, region: foreground ? "FULL" : "TOP" };
     })
-    .filter((a): a is NonNullable<typeof a> => a !== null);
+    .filter((a): a is AmbientInput => a !== null);
   if (!foreground && midground.length === 0 && ambient.length === 0) return { localCamera };
   return {
     localCamera,

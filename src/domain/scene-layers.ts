@@ -28,20 +28,29 @@ export interface AmbientKind {
   direction: SceneLayer["motionDirection"];
   promptPhrase: string;
   entityType: SceneLayer["entityType"];
+  /**
+   * Where a local loop of it is placed (G3): SKY = upper band, HORIZON = far
+   * ground line (cars, passers-by), GROUND = lower band (water), FULL = whole
+   * frame (falling leaves, lights, steam).
+   */
+  band: AmbientBand;
 }
 
+export const AMBIENT_BANDS = ["SKY", "HORIZON", "GROUND", "FULL"] as const;
+export type AmbientBand = (typeof AMBIENT_BANDS)[number];
+
 export const AMBIENT_KINDS: readonly AmbientKind[] = [
-  { id: "traffic", label: "Xe chạy ngang", match: /\b(cars?|traffic|bus(?:es)?|taxis?|vehicles?|motorbikes?|scooters?)\b/i, motion: "CROSS", direction: "RIGHT", promptPhrase: "cars pass slowly in the distance", entityType: "VEHICLE" },
-  { id: "pedestrians", label: "Người đi bộ phía xa", match: /\b(pedestrians?|passers?-?by|crowd|people walk\w*|shoppers?)\b/i, motion: "CROSS", direction: "LEFT", promptPhrase: "a few people walk by far in the background", entityType: "PERSON" },
-  { id: "birds", label: "Chim bay xa", match: /\b(birds? (?:fly|flying|in the sky)|flock|seagulls?)\b/i, motion: "CROSS", direction: "RIGHT", promptPhrase: "small birds fly far away in the sky", entityType: "ANIMAL" },
-  { id: "clouds", label: "Mây trôi", match: /\b(clouds?|cloudy)\b/i, motion: "DRIFT", direction: "RIGHT", promptPhrase: "clouds drift slowly", entityType: "NATURE" },
-  { id: "leaves", label: "Lá rung", match: /\b(leaves|trees?|bushes|branches|foliage)\b/i, motion: "SWAY", direction: "NONE", promptPhrase: "leaves sway gently in the breeze", entityType: "NATURE" },
-  { id: "lights", label: "Đèn nhấp nháy", match: /\b(neon|lights? flicker\w*|fairy lights|candles?|lanterns?)\b/i, motion: "FLICKER", direction: "NONE", promptPhrase: "lights flicker softly", entityType: "EFFECT" },
-  { id: "water", label: "Nước chuyển động", match: /\b(river|lake|sea|ocean|pond|fountain|waves?|stream)\b/i, motion: "LOOP", direction: "NONE", promptPhrase: "water ripples gently", entityType: "NATURE" },
-  { id: "steam", label: "Hơi nước", match: /\b(steam\w*|hot (?:tea|coffee|soup)|kettle|boiling)\b/i, motion: "RISE", direction: "UP", promptPhrase: "soft steam rises", entityType: "EFFECT" },
-  { id: "smoke", label: "Khói nhẹ", match: /\b(smoke|chimney|campfire)\b/i, motion: "RISE", direction: "UP", promptPhrase: "light smoke drifts upward", entityType: "EFFECT" },
-  { id: "curtain", label: "Rèm lay", match: /\b(curtains?|drapes)\b/i, motion: "SWAY", direction: "NONE", promptPhrase: "curtains sway slightly", entityType: "OBJECT" },
-  { id: "shadows", label: "Bóng đổ chuyển động", match: /\b(shadows? (?:move|moving|shift\w*)|dappled light)\b/i, motion: "DRIFT", direction: "LEFT", promptPhrase: "soft shadows shift slowly", entityType: "EFFECT" },
+  { id: "traffic", label: "Xe chạy ngang", match: /\b(cars?|traffic|bus(?:es)?|taxis?|vehicles?|motorbikes?|scooters?)\b/i, motion: "CROSS", direction: "RIGHT", promptPhrase: "cars pass slowly in the distance", entityType: "VEHICLE", band: "HORIZON" },
+  { id: "pedestrians", label: "Người đi bộ phía xa", match: /\b(pedestrians?|passers?-?by|crowd|people walk\w*|shoppers?)\b/i, motion: "CROSS", direction: "LEFT", promptPhrase: "a few people walk by far in the background", entityType: "PERSON", band: "HORIZON" },
+  { id: "birds", label: "Chim bay xa", match: /\b(birds? (?:fly|flying|in the sky)|flock|seagulls?)\b/i, motion: "CROSS", direction: "RIGHT", promptPhrase: "small birds fly far away in the sky", entityType: "ANIMAL", band: "SKY" },
+  { id: "clouds", label: "Mây trôi", match: /\b(clouds?|cloudy)\b/i, motion: "DRIFT", direction: "RIGHT", promptPhrase: "clouds drift slowly", entityType: "NATURE", band: "SKY" },
+  { id: "leaves", label: "Lá rung", match: /\b(leaves|trees?|bushes|branches|foliage)\b/i, motion: "SWAY", direction: "NONE", promptPhrase: "leaves sway gently in the breeze", entityType: "NATURE", band: "FULL" },
+  { id: "lights", label: "Đèn nhấp nháy", match: /\b(neon|lights? flicker\w*|fairy lights|candles?|lanterns?)\b/i, motion: "FLICKER", direction: "NONE", promptPhrase: "lights flicker softly", entityType: "EFFECT", band: "FULL" },
+  { id: "water", label: "Nước chuyển động", match: /\b(river|lake|sea|ocean|pond|fountain|waves?|stream)\b/i, motion: "LOOP", direction: "NONE", promptPhrase: "water ripples gently", entityType: "NATURE", band: "GROUND" },
+  { id: "steam", label: "Hơi nước", match: /\b(steam\w*|hot (?:tea|coffee|soup)|kettle|boiling)\b/i, motion: "RISE", direction: "UP", promptPhrase: "soft steam rises", entityType: "EFFECT", band: "FULL" },
+  { id: "smoke", label: "Khói nhẹ", match: /\b(smoke|chimney|campfire)\b/i, motion: "RISE", direction: "UP", promptPhrase: "light smoke drifts upward", entityType: "EFFECT", band: "SKY" },
+  { id: "curtain", label: "Rèm lay", match: /\b(curtains?|drapes)\b/i, motion: "SWAY", direction: "NONE", promptPhrase: "curtains sway slightly", entityType: "OBJECT", band: "FULL" },
+  { id: "shadows", label: "Bóng đổ chuyển động", match: /\b(shadows? (?:move|moving|shift\w*)|dappled light)\b/i, motion: "DRIFT", direction: "LEFT", promptPhrase: "soft shadows shift slowly", entityType: "EFFECT", band: "FULL" },
 ];
 
 /** A location suggests its quiet background life even when the script does not list it. */

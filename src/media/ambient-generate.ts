@@ -84,3 +84,164 @@ export function buildAmbientLoopArgs(kind: string, output: string): string[] {
     output,
   ];
 }
+
+// ------------------------------------------------------- alpha (G3) loops ---
+
+/**
+ * TRANSPARENT ambient loops (.webm, VP9 with alpha): things that must be
+ * drawn OVER the background, not lit into it - cars, passers-by, birds,
+ * falling leaves. Distant and soft on purpose (small, slightly blurred): they
+ * give the background life without pulling the eye from the subject.
+ * Each is drawn on its own band canvas (the compositor places the band).
+ */
+
+/** Canvas per kind (the drawing is done small, then scaled up and blurred a touch). */
+interface AlphaRecipe {
+  /** Drawing size; output is 2x. */
+  w: number;
+  h: number;
+  /** r, g, b, a expressions of X, Y, T (0..255). */
+  r: string;
+  g: string;
+  b: string;
+  a: string;
+  blur: number;
+}
+
+const S = AMBIENT_LOOP.seconds;
+/** Wrap a moving coordinate so the loop repeats exactly: travels `k` canvas widths (+ margin) per loop. */
+const wrapX = (x0: number, period: number, k: number, dir: 1 | -1) => `mod(X-${x0}${dir > 0 ? "-" : "+"}${(period * k) / S}*T+${period * 4},${period})`;
+
+/** Far cars on a road band: body, lighter windows, dark wheels, moving right in two lanes. */
+function trafficRecipe(): AlphaRecipe {
+  const W = 360;
+  const cw = 44;
+  const P = W + cw;
+  const cars = [
+    { x0: 0, yb: 52, ch: 16, k: 1, c: [170, 40, 40] },
+    { x0: 150, yb: 52, ch: 15, k: 1, c: [40, 70, 150] },
+    { x0: 260, yb: 34, ch: 12, k: 1, c: [215, 215, 210] },
+    { x0: 80, yb: 34, ch: 12, k: 1, c: [60, 60, 60] },
+  ];
+  const parts = cars.map(({ x0, yb, ch, k, c }) => {
+    const u = wrapX(x0, P, k, 1);
+    const w = (ch / 16) * cw;
+    const body = `lt(${u},${w})*between(Y,${yb - ch},${yb})*gt(Y,${yb - ch}+lt(${u},${w * 0.15})*${ch * 0.5}+gt(${u},${w * 0.85})*${ch * 0.5})`;
+    const win = `between(${u},${w * 0.28},${w * 0.72})*between(Y,${yb - ch},${yb - ch * 0.55})`;
+    const wheel = `(lt(hypot(${u}-${w * 0.22},Y-${yb}),${ch * 0.26})+lt(hypot(${u}-${w * 0.78},Y-${yb}),${ch * 0.26}))`;
+    return { body, win, wheel, c };
+  });
+  const any = (f: (p: (typeof parts)[number]) => string) => `min(1,${parts.map(f).join("+")})`;
+  const colour = (k: 0 | 1 | 2) => parts.map((p) => `${p.body}*(${p.win}*${Math.min(255, p.c[k]! + 70)}+(1-${p.win})*${p.c[k]})`).join("+");
+  return {
+    w: W,
+    h: 60,
+    r: `min(255,${colour(0)})*(1-${any((p) => p.wheel)})+${any((p) => p.wheel)}*25`,
+    g: `min(255,${colour(1)})*(1-${any((p) => p.wheel)})+${any((p) => p.wheel)}*25`,
+    b: `min(255,${colour(2)})*(1-${any((p) => p.wheel)})+${any((p) => p.wheel)}*25`,
+    a: `255*${any((p) => `max(${p.body},${p.wheel})`)}`,
+    blur: 0.8,
+  };
+}
+
+/** Distant passers-by: head + body + bobbing walk, walking left, varied clothes. */
+function pedestriansRecipe(): AlphaRecipe {
+  const W = 360;
+  const P = W + 20;
+  const people = [
+    { x0: 20, s: 1, c: [60, 80, 140] },
+    { x0: 120, s: 0.9, c: [150, 60, 60] },
+    { x0: 210, s: 1.05, c: [70, 110, 70] },
+    { x0: 300, s: 0.85, c: [120, 100, 80] },
+  ];
+  const parts = people.map(({ x0, s, c }) => {
+    const u = wrapX(x0, P, 1, -1);
+    const bob = `${s * 1.2}*abs(sin(2*PI*T*1.8+${x0}))`;
+    const head = `lt(hypot(${u}-6,Y-(${50 - 36 * s}-${bob})),${3.2 * s})`;
+    const body = `between(${u},${6 - 3.5 * s},${6 + 3.5 * s})*between(Y,${50 - 32 * s}-${bob},${50 - 12 * s})`;
+    const legs = `between(Y,${50 - 12 * s},50)*(lt(abs(${u}-6-2*sin(2*PI*T*1.8+${x0})),1.4)+lt(abs(${u}-6+2*sin(2*PI*T*1.8+${x0})),1.4))`;
+    return { head, body, legs, c };
+  });
+  const sum = (f: (p: (typeof parts)[number]) => string) => parts.map(f).join("+");
+  const ch = (k: 0 | 1 | 2) => `min(255,${sum((p) => `${p.body}*${p.c[k]}+${p.head}*${[205, 165, 135][k]}+${p.legs}*40`)})`;
+  return { w: W, h: 56, r: ch(0), g: ch(1), b: ch(2), a: `255*min(1,${sum((p) => `${p.head}+${p.body}+${p.legs}`)})`, blur: 0.7 };
+}
+
+/** Small birds far away: a "V" that flaps, gliding right with a slow rise and fall. */
+function birdsRecipe(): AlphaRecipe {
+  const W = 360;
+  const P = W + 40;
+  const birds = [
+    { x0: 0, y: 40, s: 1 },
+    { x0: 40, y: 52, s: 0.8 },
+    { x0: 170, y: 30, s: 0.9 },
+    { x0: 260, y: 62, s: 0.7 },
+    { x0: 300, y: 45, s: 0.75 },
+  ];
+  const wing = birds.map(({ x0, y, s }) => {
+    const u = `(${wrapX(x0, P, 1, 1)}-20)`;
+    const yy = `(Y-${y}-3*sin(2*PI*T/${S}+${x0}))`;
+    const flap = `(0.35+0.3*sin(2*PI*T*3+${x0}))`;
+    return `lt(abs(${yy}+${flap}*abs(${u})),${1.1 * s})*lt(abs(${u}),${7 * s})`;
+  });
+  return { w: W, h: 100, r: "40", g: "45", b: "55", a: `255*min(1,${wing.join("+")})`, blur: 0.5 };
+}
+
+/** Falling leaves across the whole frame: small swaying ellipses, warm greens and yellows. */
+function leavesRecipe(): AlphaRecipe {
+  const W = 180;
+  const H = 320;
+  const leaves = Array.from({ length: 9 }, (_, i) => ({ x0: (i * 47) % W, y0: (i * 137) % H, c: i % 3 === 0 ? [200, 170, 40] : i % 3 === 1 ? [110, 160, 50] : [160, 120, 40] }));
+  const parts = leaves.map(({ x0, y0, c }) => {
+    const y = `mod(Y-${y0}-${H / S}*T,${H})`;
+    const x = `(X-${x0}-8*sin(2*PI*T*0.6+${y0}))`;
+    return { m: `lt(hypot(${x}/3.2,(${y}-${H / 2})/1.6),1)`, c };
+  });
+  const ch = (k: 0 | 1 | 2) => `min(255,${parts.map((p) => `${p.m}*${p.c[k]}`).join("+")})`;
+  return { w: W, h: H, r: ch(0), g: ch(1), b: ch(2), a: `255*min(1,${parts.map((p) => p.m).join("+")})`, blur: 0.6 };
+}
+
+const ALPHA_RECIPES: Record<string, () => AlphaRecipe> = {
+  traffic: trafficRecipe,
+  pedestrians: pedestriansRecipe,
+  birds: birdsRecipe,
+  leaves: leavesRecipe,
+};
+
+export const GENERATED_ALPHA_KINDS = Object.keys(ALPHA_RECIPES);
+
+/** A transparent loop (.webm VP9 + alpha), drawn small and scaled up 2x. */
+export function buildAlphaAmbientLoopArgs(kind: string, output: string): string[] {
+  const make = ALPHA_RECIPES[kind];
+  if (!make) throw new Error(`Không có công thức ambient trong suốt cho "${kind}".`);
+  const r = make();
+  const { fps, seconds } = AMBIENT_LOOP;
+  return [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=black@0.0:s=${r.w}x${r.h}:r=${fps}:d=${seconds}`,
+    "-vf",
+    `format=rgba,geq=r='${r.r}':g='${r.g}':b='${r.b}':a='${r.a}',scale=${r.w * 2}:${r.h * 2}:flags=bicubic,gblur=sigma=${r.blur}:planes=15`,
+    "-c:v",
+    "libvpx-vp9",
+    "-pix_fmt",
+    "yuva420p",
+    "-b:v",
+    "0",
+    "-crf",
+    "32",
+    "-auto-alt-ref",
+    "0",
+    "-deadline",
+    "good",
+    "-cpu-used",
+    "4",
+    "-an",
+    output,
+  ];
+}

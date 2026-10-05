@@ -25,7 +25,8 @@
 import { localFallbackMove, localSupport, type CameraEasing, type CameraMove, type CameraSpeed } from "@/domain/camera-grammar";
 import type { RenderTarget } from "./render";
 import { PARALLAX_FACTOR } from "@/domain/scene-plan";
-import { subjectBoxes, type SubjectSlot } from "./layer-layout";
+import { frameShape, subjectBoxes, type SubjectSlot } from "./layer-layout";
+import type { AmbientBand } from "@/domain/scene-layers";
 
 export interface LocalCameraSpec {
   move: CameraMove;
@@ -210,8 +211,22 @@ export interface LayerInputs {
    * the upper band of the frame (sky: clouds, far birds, smoke) - used when
    * there is no separate foreground, so nothing is drawn over a face.
    */
-  ambient?: { path: string; opacity?: number; region?: "FULL" | "TOP" }[];
+  ambient?: AmbientInput[];
 }
+
+export interface AmbientInput {
+  path: string;
+  opacity?: number;
+  /** Screen-blended loops (no alpha): TOP = sky band only, FULL = whole frame. */
+  region?: "FULL" | "TOP";
+  /** A transparent loop (G3): overlaid in its band instead of screen-blended. */
+  alpha?: boolean;
+  /** Where a transparent loop is placed. */
+  band?: AmbientBand;
+}
+
+/** The far ground line (share of height) where distant cars / passers-by stand. */
+export const HORIZON_LINE: Record<"PORTRAIT" | "SQUARE" | "LANDSCAPE", number> = { PORTRAIT: 0.6, SQUARE: 0.62, LANDSCAPE: 0.66 };
 
 /** Foreground subjects, the legacy single `foreground` included. */
 export function foregroundsOf(layers: LayerInputs): PlacedSubject[] {
@@ -304,7 +319,9 @@ export function buildLayeredSceneArgs(opts: {
   });
   const ambIdx: number[] = [];
   for (const a of layers.ambient ?? []) {
-    args.push("-stream_loop", "-1", "-t", String(dur), "-i", a.path);
+    // FFmpeg's built-in VP9 decoder drops the alpha plane; libvpx keeps it.
+    const vp9Alpha = a.alpha && /\.webm$/i.test(a.path) ? ["-c:v", "libvpx-vp9"] : [];
+    args.push("-stream_loop", "-1", "-t", String(dur), ...vp9Alpha, "-i", a.path);
     ambIdx.push(idx++);
   }
   const audioIdx = idx;
@@ -320,6 +337,29 @@ export function buildLayeredSceneArgs(opts: {
   );
   let last = "bg0";
   (layers.ambient ?? []).forEach((a, i) => {
+    if (a.alpha) {
+      // Transparent loop: drawn over the background in its band, behind any
+      // midground / foreground plate (those come later in the graph).
+      const op = Math.min(1, Math.max(0.1, a.opacity ?? 0.9));
+      const band = a.band ?? "FULL";
+      const shape = frameShape(target);
+      const fit =
+        band === "FULL"
+          ? `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`
+          : `scale=${width}:-2`;
+      const y =
+        band === "SKY"
+          ? `${Math.round(height * 0.06)}`
+          : band === "HORIZON"
+            ? `${Math.round(height * HORIZON_LINE[shape])}-h`
+            : band === "GROUND"
+              ? `${Math.round(height * 0.92)}-h`
+              : "0";
+      chains.push(`[${ambIdx[i]}:v]format=rgba,${fit},fps=${fps},colorchannelmixer=aa=${op.toFixed(2)}[amb${i}]`);
+      chains.push(`[${last}][amb${i}]overlay=x=0:y='${y}':format=auto[mix${i}]`);
+      last = `mix${i}`;
+      return;
+    }
     const op = Math.min(0.6, Math.max(0.1, a.opacity ?? 0.35));
     if (a.region === "TOP") {
       const band = Math.round(height * 0.3);
