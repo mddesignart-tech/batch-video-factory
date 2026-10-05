@@ -89,6 +89,11 @@ export interface LayerInput {
 export type SceneComplexity = "LOW" | "MEDIUM" | "HIGH";
 
 /** Infer the layers. The foreground always exists (the existing picture at minimum). */
+/** The place a scene's words describe ("Đường phố", "Gian bếp"...), or null. */
+export function locationOf(text: string): string | null {
+  return LOCATION_AMBIENT.find((l) => l.match.test(text))?.label ?? null;
+}
+
 export function inferLayers(input: LayerInput): SceneLayer[] {
   const words = `${input.visualDescription ?? ""} ${input.characterAction ?? ""}`;
   const present = (input.charactersPresent ?? []).filter((n) => n && n !== "Narrator");

@@ -67,6 +67,8 @@ export interface SceneSemantics {
   duration: number;
   /** The scene already has a clip (Video AI / imported): its own motion is kept, no local camera on top. */
   nativeClip?: boolean;
+  /** Where it happens ("Gian bếp"), when the words say; a change of place may earn a soft transition. */
+  location?: string | null;
 }
 
 export interface DirectorContext {
@@ -182,6 +184,32 @@ function baseShot(kind: SceneKind, s: SceneSemantics, ctx: DirectorContext): Dra
     default:
       return { shotSize: (s.charactersPresent ?? []).length ? "MEDIUM_CLOSE_UP" : "MEDIUM", cameraAngle: "EYE_LEVEL", cameraMovement: "PUSH_IN", cameraSpeed: "SLOW", focusStyle: "SHALLOW_FOCUS", why: "một chủ thể: bán cận, đẩy máy nhẹ" };
   }
+}
+
+/**
+ * G5: a motion preset is not only a camera. It also sets how much background
+ * life (ambient) a scene gets and how scenes are joined. Simple-mode users pick
+ * a preset (or AUTO); these numbers are never shown to them.
+ *  - ambient: 0 = none, 1 = full (opacity multiplier of local ambient loops);
+ *  - transitions: CUT = hard cuts only; SOFT = a short crossfade when the
+ *    place / time changes or on an emotional beat; DYNAMIC = a quick whip on a
+ *    change of place.
+ */
+export const PRESET_MOTION: Record<Exclude<CameraPresetId, "AUTO">, { ambient: number; transitions: "CUT" | "SOFT" | "DYNAMIC" }> = {
+  NATURAL: { ambient: 0.8, transitions: "SOFT" },
+  STATIC: { ambient: 0, transitions: "CUT" },
+  GENTLE: { ambient: 0.6, transitions: "SOFT" },
+  LIVELY: { ambient: 1, transitions: "DYNAMIC" },
+  CINEMATIC: { ambient: 0.9, transitions: "SOFT" },
+  FAST_COMEDY: { ambient: 0.7, transitions: "DYNAMIC" },
+  DOCUMENTARY: { ambient: 1, transitions: "SOFT" },
+  PRODUCT_REVIEW: { ambient: 0.4, transitions: "CUT" },
+};
+
+/** The motion side of a project's preset (AUTO resolved through the creative style). */
+export function presetMotion(ctx: Pick<DirectorContext, "cameraPreset" | "comedyLevel" | "tone" | "creativePreset" | "contentType" | "emotion" | "pacing">) {
+  const preset = effectiveCameraPreset(ctx);
+  return { preset, ...PRESET_MOTION[preset as Exclude<CameraPresetId, "AUTO">] };
 }
 
 /** The preset a project effectively uses: AUTO follows the creative style. */
@@ -348,7 +376,10 @@ const MIRROR: Partial<Record<CameraMove, CameraMove>> = {
  *  - a crossfade only between scenes that do NOT share a character (two faces
  *    at once otherwise) - a cut there instead.
  */
-export function continuityPass(scenes: { semantics: SceneSemantics; plan: CameraPlan; kind: SceneKind }[]): CameraPlan[] {
+export function continuityPass(
+  scenes: { semantics: SceneSemantics; plan: CameraPlan; kind: SceneKind }[],
+  transitions: "CUT" | "SOFT" | "DYNAMIC" = "SOFT",
+): CameraPlan[] {
   const out = scenes.map((x) => ({ ...x.plan }));
   let direction: "L" | "R" | null = null;
   let lastEffect = -99;
@@ -419,9 +450,19 @@ export function continuityPass(scenes: { semantics: SceneSemantics; plan: Camera
     }
 
     // Transition into this scene (rendered as an xfade; CUT/NONE = hard cut).
+    // The preset decides the tendency; never two effect transitions in a row;
+    // a crossfade never joins two shots of the same character (double faces).
     const wantsBlend = kind === "EMOTIONAL" || (kind === "ENDING" && scenes[i - 1]?.kind === "EMOTIONAL");
     const shared = i > 0 && sharesCharacter(scenes[i - 1]!.semantics, scenes[i]!.semantics);
-    p.transitionIn = i === 0 ? "NONE" : wantsBlend && !shared ? "CROSSFADE" : "CUT";
+    const here = scenes[i]!.semantics.location ?? null;
+    const before = i > 0 ? (scenes[i - 1]!.semantics.location ?? null) : null;
+    const placeChanged = Boolean(here && before && here !== before);
+    const lastWasEffect = i > 0 && !["CUT", "NONE"].includes(out[i - 1]!.transitionIn);
+    if (i === 0) p.transitionIn = "NONE";
+    else if (transitions === "CUT" || lastWasEffect) p.transitionIn = "CUT";
+    else if (transitions === "DYNAMIC" && placeChanged) p.transitionIn = "WHIP";
+    else if ((wantsBlend || placeChanged) && !shared) p.transitionIn = "CROSSFADE";
+    else p.transitionIn = "CUT";
   }
   return out;
 }
@@ -462,7 +503,7 @@ function orderedNames(s: SceneSemantics): string[] {
 /** Direct every scene of a video, then run the continuity pass. */
 export function directVideo(scenes: SceneSemantics[], ctx: DirectorContext): { plan: CameraPlan; kind: SceneKind; needsVideoAi: boolean }[] {
   const drafts = scenes.map((s) => ({ semantics: s, ...directScene(s, ctx) }));
-  const final = continuityPass(drafts);
+  const final = continuityPass(drafts, presetMotion(ctx).transitions);
   return final.map((plan, i) => ({
     plan,
     kind: drafts[i]!.kind,

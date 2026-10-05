@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Field, Select } from "@/components/ui";
 import { TONES } from "@/domain/content-options";
-import { CAMERA_PRESETS, effectiveCameraPreset, type CameraPresetId } from "@/domain/camera-director";
+import { CAMERA_PRESETS, effectiveCameraPreset, PRESET_MOTION, type CameraPresetId } from "@/domain/camera-director";
 import {
   COMEDY_LEVELS,
   COMEDY_STYLES,
@@ -130,6 +130,7 @@ export function CreativeStylePicker({
           </option>
         ))}
       </Select>
+      <p className="mt-1 text-[11px] text-ink-500">{presetHint(stored.cameraPreset && stored.cameraPreset !== "AUTO" ? stored.cameraPreset : autoCamera)}</p>
     </Field>
   );
   const tone = (
@@ -212,4 +213,13 @@ export function CreativeStylePicker({
       <input type="hidden" name={name} value={JSON.stringify(stored)} />
     </div>
   );
+}
+
+/** G5: what a motion preset does besides the camera, in plain words. */
+function presetHint(id: CameraPresetId): string {
+  if (id === "AUTO") return "";
+  const m = PRESET_MOTION[id];
+  const ambient = m.ambient === 0 ? "không có chuyển động nền" : m.ambient < 0.6 ? "chuyển động nền rất nhẹ" : m.ambient < 0.9 ? "chuyển động nền vừa phải" : "chuyển động nền rõ";
+  const join = m.transitions === "CUT" ? "chuyển cảnh: cắt thẳng" : m.transitions === "SOFT" ? "chuyển cảnh: hoà tan ngắn khi đổi bối cảnh" : "chuyển cảnh: lia nhanh khi đổi bối cảnh";
+  return `${ambient} · ${join}`;
 }

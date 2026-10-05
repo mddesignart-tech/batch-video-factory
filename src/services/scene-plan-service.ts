@@ -3,12 +3,12 @@ import type { Project, Scene } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { toAbsolute } from "@/lib/paths";
-import { parseJson } from "@/lib/utils";
+import { parseJson, round } from "@/lib/utils";
 import { projectContent } from "@/domain/content-legacy";
 import { sceneCharacters } from "@/domain/scene-characters";
-import { directVideo, type DirectorContext, type SceneSemantics } from "@/domain/camera-director";
+import { directVideo, presetMotion, type DirectorContext, type SceneSemantics } from "@/domain/camera-director";
 import { CameraPlanSchema, cameraPromptPhrase, localSupport, type CameraPlan, type Transition } from "@/domain/camera-grammar";
-import { inferLayers, layersPromptPhrase, sceneComplexity } from "@/domain/scene-layers";
+import { inferLayers, layersPromptPhrase, locationOf, sceneComplexity } from "@/domain/scene-layers";
 import { parseScenePlan, ScenePlanSchema, type MotionRoute, type ScenePlan, type SceneLayer } from "@/domain/scene-plan";
 import type { ScriptDoc } from "@/domain/script";
 import { ambientLoopFor, availableAmbientKinds } from "./ambient-library";
@@ -92,6 +92,7 @@ function semanticsOf(scene: Scene, l: Loaded): SceneSemantics {
     references: sceneRefs(scene, l.refs).map(({ type, name, critical }) => ({ type, name, critical })),
     duration: scene.finalDuration ?? scene.duration,
     nativeClip: Boolean(scene.videoPath),
+    location: locationOf(`${scene.visualDescription} ${scene.characterAction}`),
   };
 }
 
@@ -104,7 +105,9 @@ export function recommendedRoute(layers: SceneLayer[], camera: CameraPlan, compo
 }
 
 function buildPlan(scene: Scene, l: Loaded, camera: CameraPlan, kept: ScenePlan | null): ScenePlan {
-  const ambientOff = kept?.notes.includes("ambient-off") ?? false;
+  // G5: the preset's ambient level; "Tĩnh" (0) plans no background life at all.
+  const intensity = presetMotion(l.ctx).ambient;
+  const ambientOff = (kept?.notes.includes("ambient-off") ?? false) || intensity === 0;
   const layers = inferLayers({
     visualDescription: scene.visualDescription,
     characterAction: scene.characterAction,
@@ -129,6 +132,7 @@ function buildPlan(scene: Scene, l: Loaded, camera: CameraPlan, kept: ScenePlan 
     route: recommendedRoute(layers, camera, composite),
     cameraNeedsVideoAi: localSupport(camera.cameraMovement) === "NONE" || camera.focusStyle === "RACK_FOCUS",
     notes,
+    ambientIntensity: intensity,
   });
 }
 
@@ -344,8 +348,11 @@ function renderStill(
       if (!loop) return null;
       // Without separate subject plates, only the sky band (nothing over a face).
       if (!foreground && loop.band !== "SKY") return null;
-      if (loop.alpha) return { path: loop.path, alpha: true, band: loop.band, opacity: 0.9 };
-      return { path: loop.path, opacity: 0.3, region: foreground ? "FULL" : "TOP" };
+      // The preset's ambient level scales the loop (absent on older plans = full).
+      const k = plan.ambientIntensity ?? 1;
+      if (k <= 0) return null;
+      if (loop.alpha) return { path: loop.path, alpha: true, band: loop.band, opacity: round(0.9 * k, 2) };
+      return { path: loop.path, opacity: round(0.3 * k, 2), region: foreground ? "FULL" : "TOP" };
     })
     .filter((a): a is AmbientInput => a !== null);
   if (!foreground && midground.length === 0 && ambient.length === 0) return { localCamera };

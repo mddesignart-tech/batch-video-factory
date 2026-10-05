@@ -110,6 +110,8 @@ export const ScenePlanSchema = z.object({
   cameraNeedsVideoAi: z.boolean().default(false),
   /** Ambient wanted but no local loop available: described in prompts only. */
   notes: z.array(z.string().max(200)).max(10).default([]),
+  /** G5: how strongly local ambient loops show (the motion preset's choice); absent = full. */
+  ambientIntensity: z.number().min(0).max(1).optional(),
 });
 export type ScenePlan = z.infer<typeof ScenePlanSchema>;
 
