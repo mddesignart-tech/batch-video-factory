@@ -81,8 +81,10 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
       // QĐ-128 camera / layers; absent for a scene without a plan, so an old
       // video keeps its recipe (and its render).
       camera: s.localCamera ?? undefined,
-      // Absent for a cut, so a video without blends keeps its recipe.
+      // Absent for a cut, so a video without blends keeps its recipe. Subjects
+      // only matter to a blend (same character -> cut), so only then.
       transition: s.transitionIn ?? undefined,
+      subjects: s.transitionIn ? (s.subjects ?? []) : undefined,
       layers: s.layers
         ? {
             bg: content(s.layers.background),

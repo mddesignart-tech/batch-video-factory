@@ -65,6 +65,8 @@ export interface SceneSemantics {
   /** References in this scene. */
   references?: { type: string; name: string; critical: boolean }[];
   duration: number;
+  /** The scene already has a clip (Video AI / imported): its own motion is kept, no local camera on top. */
+  nativeClip?: boolean;
 }
 
 export interface DirectorContext {
@@ -339,18 +341,24 @@ const MIRROR: Partial<Record<CameraMove, CameraMove>> = {
  * The whole video at once: VARIETY + CONTINUITY.
  *  - lateral moves keep one screen direction (no left, right, left for nothing);
  *  - attention effects (crash zoom / whip) at most one in any three scenes;
- *  - three identical shots in a row: the third gets a gentle variation;
- *  - speakers keep their side of the frame through a conversation.
+ *  - no two still scenes in a row with the same kind of move (push, push...):
+ *    the second becomes a slight drift or a pull-back;
+ *  - a scene that already has a clip keeps its own motion and does not count;
+ *  - speakers keep their side of the frame through a conversation;
+ *  - a crossfade only between scenes that do NOT share a character (two faces
+ *    at once otherwise) - a cut there instead.
  */
 export function continuityPass(scenes: { semantics: SceneSemantics; plan: CameraPlan; kind: SceneKind }[]): CameraPlan[] {
   const out = scenes.map((x) => ({ ...x.plan }));
   let direction: "L" | "R" | null = null;
   let lastEffect = -99;
   let sides: { left: string[]; right: string[]; pair: string } | null = null;
+  let prevStill: CameraPlan | null = null;
 
   for (let i = 0; i < out.length; i += 1) {
     const p = out[i]!;
     const kind = scenes[i]!.kind;
+    const native = scenes[i]!.semantics.nativeClip === true;
 
     // Screen direction of lateral camera moves.
     const dirNow = LEFTWARD.includes(p.cameraMovement) ? "L" : RIGHTWARD.includes(p.cameraMovement) ? "R" : null;
@@ -378,6 +386,25 @@ export function continuityPass(scenes: { semantics: SceneSemantics; plan: Camera
       p.reason += " Đổi nhẹ để không lặp ba cảnh giống hệt nhau.";
     }
 
+    // Variety between neighbouring STILL scenes (a clip keeps its own motion).
+    if (native) {
+      p.reason += " Clip gốc: giữ nguyên chuyển động của clip, không thêm camera tại máy.";
+    } else {
+      const fam = moveFamily(p.cameraMovement);
+      if (prevStill && fam !== "OTHER" && fam === moveFamily(prevStill.cameraMovement)) {
+        const varied = variedMove(fam, scenes[i]!.semantics.duration, direction);
+        if (varied) {
+          p.cameraMovement = varied;
+          p.cameraSpeed = varied.startsWith("PAN_") ? "VERY_SLOW" : p.cameraSpeed;
+          if (varied.startsWith("PAN_")) direction = direction ?? (varied === "PAN_LEFT" ? "L" : "R");
+          p.reason += varied.startsWith("PAN_")
+            ? " Cảnh trước đã đẩy máy: cảnh này lia rất nhẹ để không lặp."
+            : " Không lặp cùng kiểu chuyển động với cảnh trước.";
+        }
+      }
+      prevStill = p;
+    }
+
     // Conversation sides (180° heuristic).
     if (kind === "DIALOGUE" || kind === "REACTION" || kind === "PUNCHLINE") {
       const names = orderedNames(scenes[i]!.semantics);
@@ -392,9 +419,33 @@ export function continuityPass(scenes: { semantics: SceneSemantics; plan: Camera
     }
 
     // Transition into this scene (rendered as an xfade; CUT/NONE = hard cut).
-    p.transitionIn = i === 0 ? "NONE" : kind === "EMOTIONAL" || (kind === "ENDING" && scenes[i - 1]?.kind === "EMOTIONAL") ? "CROSSFADE" : "CUT";
+    const wantsBlend = kind === "EMOTIONAL" || (kind === "ENDING" && scenes[i - 1]?.kind === "EMOTIONAL");
+    const shared = i > 0 && sharesCharacter(scenes[i - 1]!.semantics, scenes[i]!.semantics);
+    p.transitionIn = i === 0 ? "NONE" : wantsBlend && !shared ? "CROSSFADE" : "CUT";
   }
   return out;
+}
+
+type MoveFamily = "IN" | "OUT" | "LATERAL" | "OTHER";
+
+function moveFamily(m: CameraMove): MoveFamily {
+  if (m === "PUSH_IN" || m === "SLOW_ZOOM_IN" || m === "DOLLY_IN") return "IN";
+  if (m === "SLOW_ZOOM_OUT" || m === "PULL_BACK" || m === "DOLLY_OUT") return "OUT";
+  if (LEFTWARD.includes(m) || RIGHTWARD.includes(m)) return "LATERAL";
+  return "OTHER";
+}
+
+/** The second of two alike moves: a slight drift (long enough scene) or the opposite zoom. */
+function variedMove(fam: MoveFamily, duration: number, direction: "L" | "R" | null): CameraMove | null {
+  if (fam === "IN") return duration >= 2.5 ? (direction === "L" ? "PAN_LEFT" : "PAN_RIGHT") : "SLOW_ZOOM_OUT";
+  if (fam === "OUT") return "PUSH_IN";
+  if (fam === "LATERAL") return "PUSH_IN";
+  return null;
+}
+
+function sharesCharacter(a: SceneSemantics, b: SceneSemantics): boolean {
+  const before = new Set((a.charactersPresent ?? []).map((n) => n.toLowerCase()));
+  return (b.charactersPresent ?? []).some((n) => before.has(n.toLowerCase()));
 }
 
 function same(a: CameraPlan, b: CameraPlan): boolean {

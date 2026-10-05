@@ -60,6 +60,7 @@ export async function sceneCameraViews(projectId: string, videoCostBySceneNumber
         cameraSpeed: (current ?? entry.suggestion).camera.cameraSpeed,
         focusStyle: (current ?? entry.suggestion).camera.focusStyle,
         transitionIn: (current ?? entry.suggestion).camera.transitionIn,
+        cameraEasing: (current ?? entry.suggestion).camera.cameraEasing,
       },
       first: index === 0,
       layers: (current ?? entry.suggestion).layers.map((l) => ({ type: VI_LAYER_TYPE[l.layerType], label: l.label, motion: VI_MOTION[l.motionType] ?? "", enabled: l.enabled })),

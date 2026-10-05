@@ -3849,3 +3849,28 @@ Test: scene-motion, camera-director, scene-layers, camera-motion, scene-motion-p
 
 Test: scene-transitions, ambient-loops, voice-normalize-hang (+ camera-motion, scene-motion-pipeline, batch-*, asset-library,
 daily-workflow, audio-mix).
+
+## QĐ-130 — Camera motion mượt + chuyển cảnh liên tục (2026-10-05)
+
+Nguyên nhân bản B_scene_motion giật (đo frame-by-frame, 60 % trên khung, bỏ phụ đề):
+1. HOLD: `cameraZoompan` đạt 100 % ở 92 % cảnh rồi giữ; smoothstep về vận tốc 0 sớm hơn nữa → ~0,23–0,3 s gần đứng ở cuối
+   mọi cảnh (diff ≈ 0,001), rồi mới cắt / hoà tan. Đầu cảnh sau cũng bắt đầu từ vận tốc 0.
+2. TRANSITION FREEZE: bước ghép giữ frame cuối cảnh trước (tpad clone) suốt 0,5 s blend.
+3. INTEGER ROUNDING: zoompan cắt theo pixel nguyên (và chẵn với YUV); nguồn chỉ phóng 1,33x → bước ~1,5 px đầu ra,
+   chuyển động rất chậm (<1 px/khung) thành bậc thang (diff dao động 0,09 ↔ 0,97).
+4. Bộ lọc fps sau zoompan làm rơi khung cuối → tpad lặp khung trước (thêm 1 khung đứng).
+
+Sửa:
+- Tiến trình camera trải trên MỌI khung (không hold); easing chọn được LINEAR / EASE_IN / EASE_OUT / EASE_IN_OUT
+  (`CameraPlan.cameraEasing`, mặc định EASE_IN_OUT). Đường cong eased giữ 40 % tuyến tính → hai đầu chậm 40 % trung bình,
+  không bao giờ dừng giữa cảnh. Cảnh ngắn (< 3 s) biên độ nhỏ hơn (≥ 0,6x).
+- Ảnh phóng sao cho cạnh dài ≈ 5760 px (3x với 1080x1920) và chuyển RGB (gbrp) trước zoompan; zoompan d = frames + 1.
+- Chuyển cảnh: cảnh trước được render thêm "đuôi" = độ dài blend, camera chạy tiếp cùng đường cong dưới blend
+  (không tpad). Âm thanh cắt đúng độ dài cảnh. CROSSFADE 0,2 s, WHIP 0,2 s, ZOOM 0,25 s; MATCH = cắt (không hoà).
+- Chống bóng mờ: blend chồng ảnh (CROSSFADE/ZOOM) giữa hai cảnh có chung nhân vật → CẮT (`RenderScene.subjects`).
+- Clip gốc (Video AI / nhập): PRESERVE_NATIVE_MOTION — `renderInputsFor` không trả camera cho cảnh có clip.
+- Director: không hai cảnh ảnh tĩnh liền nhau cùng kiểu chuyển động (đẩy → lia nhẹ / zoom ra); clip gốc không tính;
+  hoà tan cảnh cảm xúc chỉ khi không chung nhân vật với cảnh trước.
+
+Đo lại (project 1ef61e94, local $0): khung gần đứng ngoài điểm cắt 38 → 3 (bằng bản A; 2 khung thuộc chính clip gốc);
+jerk theo cảnh 0,18–0,66 → 0,19–0,34 (A: 0,17–0,26). Test: camera-smoothness (có đối chứng chuỗi cũ), scene-transitions.

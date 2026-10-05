@@ -39,13 +39,13 @@ describe("LOCAL CAMERA (args)", () => {
   it("Tĩnh = không zoompan; pan/tilt/zoom có biểu thức riêng; chuyển động trải theo thời lượng giọng (d = số frame thật)", () => {
     expect(cameraZoompan({ move: "STATIC", speed: "SLOW" }, { durationSec: 5, target })).toBe("");
     const pan = cameraZoompan({ move: "PAN_RIGHT", speed: "SLOW" }, { durationSec: 5, target });
-    expect(pan).toContain("d=120:");
-    expect(pan).toContain("on/109"); // eased over ~92 % of the scene, then a short hold
+    expect(pan).toContain("d=121:"); // frames + 1 spare (the fps filter drops zoompan's last frame)
+    expect(pan).toContain("on/119"); // eased over EVERY frame of the scene: no hold at the end
     expect(pan).toMatch(/x='\(iw-iw\/zoom\)\*/);
     const tilt = cameraZoompan({ move: "TILT_DOWN", speed: "SLOW" }, { durationSec: 3, target });
     expect(tilt).toMatch(/y='\(ih-ih\/zoom\)\*/);
     const longer = cameraZoompan({ move: "SLOW_ZOOM_IN", speed: "SLOW" }, { durationSec: 8, target });
-    expect(longer).toContain("d=192:");
+    expect(longer).toContain("d=193:");
   });
 
   it("vùng an toàn: zoom có giới hạn; chủ thể bắt buộc → biên độ nhỏ hơn; orbit/crane dùng phương án local", () => {
@@ -94,7 +94,7 @@ describe("LOCAL CAMERA (real FFmpeg render, $0)", () => {
     const big = { width: 1080, height: 1920, fps: 30 };
     const args = buildSceneNormalizeArgs({ videoInput: file("still.png"), audioInput: null, duration: 4, target: big, output: file("big.mp4"), camera: { move: "PUSH_IN", speed: "SLOW" } });
     expect(args).not.toContain("-loop");
-    expect(args[args.indexOf("-filter_complex") + 1]).toContain("scale=1440:2560,zoompan=");
+    expect(args[args.indexOf("-filter_complex") + 1]).toContain("scale=3240:5760:flags=lanczos,format=gbrp,zoompan=");
     const t0 = Date.now();
     await ffmpeg(args);
     expect(Date.now() - t0).toBeLessThan(60_000);

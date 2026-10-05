@@ -88,6 +88,7 @@ function semanticsOf(scene: Scene, l: Loaded): SceneSemantics {
     speakingCharacters: cast.speaking,
     references: sceneRefs(scene, l.refs).map(({ type, name, critical }) => ({ type, name, critical })),
     duration: scene.finalDuration ?? scene.duration,
+    nativeClip: Boolean(scene.videoPath),
   };
 }
 
@@ -200,7 +201,7 @@ export async function applySuggestedPlan(sceneId: string): Promise<ScenePlan> {
  */
 export async function setSceneCamera(
   sceneId: string,
-  change: Partial<Pick<CameraPlan, "shotSize" | "cameraAngle" | "cameraMovement" | "cameraSpeed" | "focusStyle" | "transitionIn">>,
+  change: Partial<Pick<CameraPlan, "shotSize" | "cameraAngle" | "cameraMovement" | "cameraSpeed" | "focusStyle" | "transitionIn" | "cameraEasing">>,
 ): Promise<ScenePlan> {
   const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
   const base = parseScenePlan(scene.scenePlanJson) ?? (await suggestedPlans(scene.projectId)).get(sceneId)?.suggestion;
@@ -282,10 +283,17 @@ function renderStill(
   scene: Pick<Scene, "imagePath" | "videoPath">,
   plan: ScenePlan,
 ): { localCamera?: LocalCameraSpec; layers?: LayerInputs | null } {
+  // PRESERVE_NATIVE_MOTION: a clip already moves; no local camera is laid over it.
+  if (scene.videoPath) return {};
   const critical = plan.layers.some((x) => x.enabled && x.layerType === "FOREGROUND" && x.critical);
-  const localCamera: LocalCameraSpec = { move: plan.camera.cameraMovement, speed: plan.camera.cameraSpeed, critical };
+  const localCamera: LocalCameraSpec = {
+    move: plan.camera.cameraMovement,
+    speed: plan.camera.cameraSpeed,
+    critical,
+    easing: plan.camera.cameraEasing,
+  };
   const picture = existingAbsolute(scene.imagePath);
-  if (!picture || scene.videoPath) return { localCamera };
+  if (!picture) return { localCamera };
   const ambientLayers = plan.layers.filter((x) => x.enabled && x.layerType === "AMBIENT" && x.motionType === "AMBIENT_VIDEO");
   const foreground =
     plan.route === "COMPOSITE"

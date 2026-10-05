@@ -9,10 +9,16 @@ import type { Transition } from "@/domain/camera-grammar";
  *
  * A plain xfade overlaps two clips, so the video gets shorter by the transition
  * length and every later subtitle and voice line drifts early. Instead the
- * OUTGOING scene's last frame is held for the transition length (tpad clone)
- * and the blend starts exactly where the next scene starts. Each scene still
- * begins at its own planned second; the incoming scene simply fades in over
- * the held frame. Total length = the sum of scene lengths, as with a cut.
+ * OUTGOING scene is rendered a little longer (its "tail": the camera keeps
+ * moving on the same curve) and the blend starts exactly where the next scene
+ * starts. Each scene still begins at its own planned second, and the outgoing
+ * picture is still in motion under the blend - never a frozen frame (the old
+ * tpad clone froze it for the whole blend). Total length = the sum of scene
+ * lengths, as with a cut. Without a tail the last frame is held, as before.
+ *
+ * Short on purpose (0.2 s crossfade): a long dissolve between two shots of the
+ * same character shows two faces at once. A blend that overlays the pictures
+ * is therefore turned into a cut when both scenes show the same character.
  */
 
 export interface TransitionSpec {
@@ -24,11 +30,14 @@ export interface TransitionSpec {
 
 /** CUT / NONE (and anything unknown) = no blend: the join stays a hard cut. */
 export const TRANSITION_SPEC: Partial<Record<Transition, TransitionSpec>> = {
-  CROSSFADE: { xfade: "fade", durationSec: 0.5 },
-  WHIP: { xfade: "smoothleft", durationSec: 0.25 },
-  ZOOM: { xfade: "zoomin", durationSec: 0.4 },
-  MATCH: { xfade: "dissolve", durationSec: 0.3 },
+  CROSSFADE: { xfade: "fade", durationSec: 0.2 },
+  WHIP: { xfade: "smoothleft", durationSec: 0.2 },
+  ZOOM: { xfade: "zoomin", durationSec: 0.25 },
+  // MATCH is a cut on matching content (shape, motion, framing) - never a blend.
 };
+
+/** Blends that lay one picture over the other (ghosting risk); a slide (WHIP) does not. */
+const OVERLAYS = new Set<Transition>(["CROSSFADE", "ZOOM"]);
 
 /** A transition never takes more than this share of either neighbouring scene. */
 const MAX_SHARE = 0.25;
@@ -39,13 +48,21 @@ export interface PlannedJoin {
   spec: TransitionSpec | null;
   /** Clamped blend length; 0 for a cut. */
   durationSec: number;
+  /** Why a requested blend became a cut. */
+  guard?: "SAME_SUBJECT" | "TOO_SHORT";
 }
 
 /**
  * One join per scene boundary. Scene 0's `transitionIn` is ignored (nothing
  * before it). Lengths are clamped so a short scene is never mostly blend.
+ * `subjects` (characters on screen per scene): an overlaying blend between two
+ * scenes that share a character becomes a cut - no double faces.
  */
-export function planJoins(transitions: (Transition | null | undefined)[], durations: number[]): PlannedJoin[] {
+export function planJoins(
+  transitions: (Transition | null | undefined)[],
+  durations: number[],
+  subjects?: (string[] | null | undefined)[],
+): PlannedJoin[] {
   const joins: PlannedJoin[] = [];
   for (let i = 1; i < durations.length; i += 1) {
     const t = transitions[i];
@@ -54,11 +71,23 @@ export function planJoins(transitions: (Transition | null | undefined)[], durati
       joins.push({ index: i, spec: null, durationSec: 0 });
       continue;
     }
+    const before = new Set((subjects?.[i - 1] ?? []).map((n) => n.toLowerCase()));
+    if (t && OVERLAYS.has(t) && (subjects?.[i] ?? []).some((n) => before.has(n.toLowerCase()))) {
+      joins.push({ index: i, spec: null, durationSec: 0, guard: "SAME_SUBJECT" });
+      continue;
+    }
     const cap = Math.min(durations[i - 1] ?? 0, durations[i] ?? 0) * MAX_SHARE;
     const d = Math.round(Math.min(spec.durationSec, cap) * 1000) / 1000;
-    joins.push(d >= 0.1 ? { index: i, spec, durationSec: d } : { index: i, spec: null, durationSec: 0 });
+    joins.push(d >= 0.1 ? { index: i, spec, durationSec: d } : { index: i, spec: null, durationSec: 0, guard: "TOO_SHORT" });
   }
   return joins;
+}
+
+/** Extra seconds each scene is rendered past its end: the blend into the NEXT scene. */
+export function blendTails(joins: PlannedJoin[], sceneCount: number): number[] {
+  const tails = new Array<number>(sceneCount).fill(0);
+  for (const j of joins) if (j.spec) tails[j.index - 1] = j.durationSec;
+  return tails;
 }
 
 export function hasBlend(joins: PlannedJoin[]): boolean {
@@ -73,20 +102,25 @@ export function hasBlend(joins: PlannedJoin[]): boolean {
  */
 export function buildTransitionJoinArgs(opts: {
   inputs: string[];
+  /** Each scene's length on the clock (not counting its tail). */
   durations: number[];
   transitions: (Transition | null | undefined)[];
+  subjects?: (string[] | null | undefined)[];
+  /** Seconds each input runs past its scene (see blendTails); absent = 0 (last frame held under a blend). */
+  tails?: number[];
   fps: number;
   output: string;
 }): string[] {
   const { inputs, durations, fps, output } = opts;
-  const joins = planJoins(opts.transitions, durations);
+  const joins = planJoins(opts.transitions, durations, opts.subjects);
+  const tail = (i: number) => opts.tails?.[i] ?? 0;
   const args = ["-y", "-hide_banner", "-loglevel", "error"];
   for (const input of inputs) args.push("-i", input);
 
   const parts: string[] = [];
-  // Every scene trimmed to its exact length on a common clock, so offsets are exact.
+  // Every scene trimmed to its exact length (+ tail) on a common clock, so offsets are exact.
   inputs.forEach((_, i) => {
-    const d = Number((durations[i] ?? 0).toFixed(3));
+    const d = Number(((durations[i] ?? 0) + tail(i)).toFixed(3));
     parts.push(`[${i}:v]trim=duration=${d},setpts=PTS-STARTPTS,fps=${fps},settb=AVTB[s${i}]`);
   });
 
@@ -96,10 +130,15 @@ export function buildTransitionJoinArgs(opts: {
     const next = `s${join.index}`;
     const out = `j${join.index}`;
     if (join.spec) {
-      const held = `h${join.index}`;
-      parts.push(`[${current}]tpad=stop_mode=clone:stop_duration=${join.durationSec}[${held}]`);
+      // The outgoing scene's own tail covers the blend; only a missing part is held.
+      const missing = Number((join.durationSec - tail(join.index - 1)).toFixed(3));
+      let from = current;
+      if (missing > 0.0005) {
+        from = `h${join.index}`;
+        parts.push(`[${current}]tpad=stop_mode=clone:stop_duration=${missing}[${from}]`);
+      }
       parts.push(
-        `[${held}][${next}]xfade=transition=${join.spec.xfade}:duration=${join.durationSec}:offset=${elapsed.toFixed(3)}[${out}]`,
+        `[${from}][${next}]xfade=transition=${join.spec.xfade}:duration=${join.durationSec}:offset=${elapsed.toFixed(3)}[${out}]`,
       );
     } else {
       parts.push(`[${current}][${next}]concat=n=2:v=1:a=0[${out}]`);
@@ -108,7 +147,9 @@ export function buildTransitionJoinArgs(opts: {
     elapsed = Number((elapsed + (durations[join.index] ?? 0)).toFixed(3));
   }
   parts.push(`[${current}]format=yuv420p[v]`);
-  parts.push(`${inputs.map((_, i) => `[${i}:a]`).join("")}concat=n=${inputs.length}:v=0:a=1[a]`);
+  // Audio never carries a tail: each scene's sound is exactly its own length.
+  inputs.forEach((_, i) => parts.push(`[${i}:a]atrim=duration=${Number((durations[i] ?? 0).toFixed(3))},asetpts=PTS-STARTPTS[a${i}]`));
+  parts.push(`${inputs.map((_, i) => `[a${i}]`).join("")}concat=n=${inputs.length}:v=0:a=1[a]`);
 
   args.push(
     "-filter_complex",

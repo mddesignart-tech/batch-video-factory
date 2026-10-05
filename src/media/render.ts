@@ -16,7 +16,7 @@ import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
 import type { SubtitleLayout } from "@/domain/output-controls";
 import { renderSegmentCached } from "./segment-cache";
 import { buildLayeredSceneArgs, cameraZoompan, type LayerInputs, type LocalCameraSpec } from "./camera-motion";
-import { buildTransitionJoinArgs, hasBlend, planJoins } from "./transitions";
+import { blendTails, buildTransitionJoinArgs, hasBlend, planJoins } from "./transitions";
 import type { Transition } from "@/domain/camera-grammar";
 import {
   DEFAULT_MIX,
@@ -117,6 +117,11 @@ export interface RenderScene {
    * cut (V1's stream-copy join). Never shifts a scene on the clock.
    */
   transitionIn?: Transition;
+  /**
+   * Characters on screen. Only consulted for a blend: an overlaying blend
+   * between two scenes that share a character renders as a cut (no ghosting).
+   */
+  subjects?: string[];
   /**
    * Legacy single audio file.
    *
@@ -664,6 +669,15 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     }
   }
 
+  // Joins are decided BEFORE the scenes are cut: a scene followed by a blend is
+  // rendered a little longer (its tail), so its camera is still moving under
+  // the blend instead of freezing on its last frame.
+  const transitions = usable.map((s) => s.transitionIn);
+  const subjects = usable.map((s) => s.subjects ?? []);
+  const joinDurations = usable.map((s, i) => sceneDurations[i] ?? s.duration);
+  const joins = planJoins(transitions, joinDurations, subjects);
+  const tails = blendTails(joins, usable.length);
+
   // ---- Pass 1 - normalise every scene to identical codec parameters -------
   const normalised: string[] = [];
   let segmentsReused = 0;
@@ -693,7 +707,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         ? buildLayeredSceneArgs({
             layers: layered,
             audioInput,
-            duration: sceneDurations[i] ?? scene.duration,
+            duration: (sceneDurations[i] ?? scene.duration) + (tails[i] ?? 0),
             target: req.target,
             camera: scene.localCamera ?? { move: "SLOW_ZOOM_IN", speed: "SLOW" },
             output,
@@ -701,7 +715,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         : buildSceneNormalizeArgs({
             videoInput: source,
             audioInput,
-            duration: sceneDurations[i] ?? scene.duration,
+            duration: (sceneDurations[i] ?? scene.duration) + (tails[i] ?? 0),
             target: req.target,
             output,
             fit,
@@ -720,14 +734,11 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   const listName = "concat.txt";
   fs.writeFileSync(path.join(tempDir, listName), buildConcatList(normalised), "utf8");
   const joinedName = "joined.mp4";
-  const transitions = usable.map((s) => s.transitionIn);
-  const joinDurations = usable.map((s, i) => sceneDurations[i] ?? s.duration);
-  const joins = planJoins(transitions, joinDurations);
   if (hasBlend(joins)) {
-    // A blend needs a re-encode of the join; the clock is unchanged (the
-    // outgoing scene's last frame is held under the blend).
+    // A blend needs a re-encode of the join; the clock is unchanged (each scene
+    // starts at its own second; the outgoing one plays its tail under the blend).
     await ffmpeg(
-      buildTransitionJoinArgs({ inputs: normalised, durations: joinDurations, transitions, fps: req.target.fps, output: joinedName }),
+      buildTransitionJoinArgs({ inputs: normalised, durations: joinDurations, transitions, subjects, tails, fps: req.target.fps, output: joinedName }),
       { cwd: tempDir, timeoutMs: 20 * 60 * 1000 },
     );
   } else {

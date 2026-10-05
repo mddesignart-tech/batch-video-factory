@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { CAMERA_ANGLES, CAMERA_MOVES, CAMERA_SPEEDS, FOCUS_STYLES, SHOT_SIZES, TRANSITIONS } from "@/domain/camera-grammar";
+import { CAMERA_ANGLES, CAMERA_EASINGS, CAMERA_MOVES, CAMERA_SPEEDS, FOCUS_STYLES, SHOT_SIZES, TRANSITIONS } from "@/domain/camera-grammar";
 import { reducedCamera } from "@/domain/camera-capability";
 import { parseScenePlan } from "@/domain/scene-plan";
 import { prisma } from "@/lib/prisma";
@@ -30,6 +30,7 @@ const CameraChange = z.object({
   cameraSpeed: z.enum(CAMERA_SPEEDS).optional(),
   focusStyle: z.enum(FOCUS_STYLES).optional(),
   transitionIn: z.enum(TRANSITIONS).optional(),
+  cameraEasing: z.enum(CAMERA_EASINGS).optional(),
 });
 
 async function done(sceneId: string, message: string): Promise<ActionResult> {

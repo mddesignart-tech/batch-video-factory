@@ -14,11 +14,15 @@
  *  - focus is never rendered (no depth data) - it lives in the prompts.
  *
  * Timing follows the voice: the move is spread over the FINAL scene length
- * (voice-aware), eased in and out, with a short hold at the end - never a zoom
- * that finishes in one second and then stands still for four.
+ * (voice-aware, plus any blend tail), eased softly in and out and STILL MOVING
+ * on the last frame - no hold, so a cut or blend never follows a freeze.
+ *
+ * Smoothness: zoompan crops on whole (and, in YUV, even) source pixels. The
+ * picture is therefore upscaled 3x and converted to RGB first, so one source
+ * step is a third of an output pixel and slow moves glide instead of stepping.
  */
 
-import { localFallbackMove, localSupport, type CameraMove, type CameraSpeed } from "@/domain/camera-grammar";
+import { localFallbackMove, localSupport, type CameraEasing, type CameraMove, type CameraSpeed } from "@/domain/camera-grammar";
 import type { RenderTarget } from "./render";
 
 export interface LocalCameraSpec {
@@ -26,6 +30,8 @@ export interface LocalCameraSpec {
   speed: CameraSpeed;
   /** A CRITICAL product / animal / character is in frame: gentler, never cropped hard. */
   critical?: boolean;
+  /** Absent = EASE_IN_OUT. */
+  easing?: CameraEasing;
 }
 
 /** Zoom amplitude by speed (× the frame). Small on purpose: the subject must stay whole. */
@@ -41,24 +47,54 @@ export function renderableMove(move: CameraMove): CameraMove {
   return localSupport(move) === "NONE" ? localFallbackMove(move) : move === "AUTO" ? "SLOW_ZOOM_IN" : move;
 }
 
+/** Linear share kept in every eased curve: the camera never reaches zero speed mid-scene. */
+const EASE_FLOOR = 0.4;
+
+/**
+ * Progress 0..1 of a move, as an FFmpeg expression of the linear progress `L`.
+ * Eased curves mix in a linear share, so the speed at either end is 40 % of the
+ * average instead of 0 - soft, but never a stop.
+ */
+export function easingExpr(easing: CameraEasing, L: string): string {
+  const k = EASE_FLOOR;
+  switch (easing) {
+    case "LINEAR":
+      return L;
+    case "EASE_IN":
+      return `(${k}*${L}+${1 - k}*(1-cos(PI/2*${L})))`;
+    case "EASE_OUT":
+      return `(${k}*${L}+${1 - k}*sin(PI/2*${L}))`;
+    default:
+      return `(${k}*${L}+${1 - k}*(0.5-0.5*cos(PI*${L})))`;
+  }
+}
+
+/**
+ * Source upscale before zoompan (see header): the picture's long side becomes
+ * ~5760 px whatever the output size (3x for 1080x1920), so one source step is
+ * the same tiny fraction of the frame at every size. Bounded for 4K / thumbnails.
+ */
+export function zoompanUpscale(target: RenderTarget): number {
+  return Math.min(9, Math.max(1.5, 5760 / Math.max(target.width, target.height)));
+}
+
 /**
  * The `zoompan` part of the chain for one still: `,scale=...,zoompan=...`.
- * Empty string for STATIC (the picture simply holds). The picture is
- * upscaled first so slow moves do not stair-step.
+ * Empty string for STATIC (the picture simply holds).
  */
 export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number; target: RenderTarget; amplitudeScale?: number }): string {
   const move = renderableMove(spec.move);
   if (move === "STATIC") return "";
   const { width, height, fps } = opts.target;
   const frames = Math.max(1, Math.round(opts.durationSec * fps));
-  const scale = opts.amplitudeScale ?? 1;
+  // A short scene gets a smaller move (it has less time to travel); 3 s and up is full size.
+  const scale = (opts.amplitudeScale ?? 1) * Math.min(1, Math.max(0.6, opts.durationSec / 3));
   const cap = spec.critical ? 0.08 : 1;
   const A = Math.min(AMPLITUDE[spec.speed] * scale, cap, MAX_LOCAL_ZOOM - 1);
   const O = Math.min(OVERSCAN[spec.speed] * scale, spec.critical ? 0.06 : 1);
-  // Progress 0..1 over ~92 % of the scene (intro ease → action → short hold), smoothstep-eased.
-  const hold = Math.max(1, Math.round(frames * 0.92) - 1);
-  const P = `min(1,on/${hold})`;
-  const E = `(${P}*${P}*(3-2*${P}))`;
+  // Progress over EVERY output frame, first to last: no hold at the end.
+  const L = `min(1,on/${Math.max(1, frames - 1)})`;
+  const E = easingExpr(spec.easing ?? "EASE_IN_OUT", L);
   const cx = "iw/2-(iw/zoom/2)";
   const cy = "ih/2-(ih/zoom/2)";
   const rangeX = "(iw-iw/zoom)";
@@ -139,10 +175,11 @@ export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number
     default:
       z = `1+${n(A)}*${E}`;
   }
-  // Upscale before zoompan so slow moves do not stair-step, but never past ~2.5K.
-  const up = Math.min(2, 2560 / Math.max(width, height));
+  const up = zoompanUpscale(opts.target);
+  // d = frames + 1: the fps filter after zoompan drops its last frame, and the
+  // pad would then repeat the one before it - a one-frame freeze at the end.
   const even = (v: number) => Math.round((v * up) / 2) * 2;
-  return `,scale=${even(width)}:${even(height)},zoompan=z='${z}':x='${x}':y='${y}':d=${frames}:s=${width}x${height}:fps=${fps}`;
+  return `,scale=${even(width)}:${even(height)}:flags=lanczos,format=gbrp,zoompan=z='${z}':x='${x}':y='${y}':d=${frames + 1}:s=${width}x${height}:fps=${fps}`;
 }
 
 // --------------------------------------------------------------- layered ---

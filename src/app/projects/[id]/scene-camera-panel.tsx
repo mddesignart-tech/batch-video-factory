@@ -6,6 +6,7 @@ import { Camera, Layers, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { Alert, Badge, Button, Field, Select } from "@/components/ui";
 import {
   CAMERA_ANGLES,
+  CAMERA_EASINGS,
   CAMERA_MOVES,
   CAMERA_SPEEDS,
   FOCUS_STYLES,
@@ -14,6 +15,7 @@ import {
   SIMPLE_MOVES,
   TRANSITIONS,
   VI_CAMERA_ANGLE,
+  VI_CAMERA_EASING,
   VI_TRANSITION,
   VI_CAMERA_MOVE,
   VI_CAMERA_SPEED,
@@ -38,7 +40,7 @@ export interface SceneCameraView {
   source: "AUTO" | "USER" | "LEGACY";
   summary: string;
   reason: string;
-  camera: Pick<CameraPlan, "shotSize" | "cameraAngle" | "cameraMovement" | "cameraSpeed" | "focusStyle" | "transitionIn">;
+  camera: Pick<CameraPlan, "shotSize" | "cameraAngle" | "cameraMovement" | "cameraSpeed" | "focusStyle" | "transitionIn" | "cameraEasing">;
   /** The first scene has nothing before it, so no transition in. */
   first: boolean;
   layers: { type: string; label: string; motion: string; enabled: boolean }[];
@@ -176,6 +178,17 @@ export function SceneCameraPanel({ view }: { view: SceneCameraView }) {
                 {TRANSITIONS.filter((t) => t !== "NONE" || draft.transitionIn === "NONE").map((t) => (
                   <option key={t} value={t}>
                     {VI_TRANSITION[t]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
+          {advanced ? (
+            <Field label="Gia tốc chuyển động">
+              <Select value={draft.cameraEasing} onChange={(e) => setDraft({ ...draft, cameraEasing: e.currentTarget.value as CameraPlan["cameraEasing"] })}>
+                {CAMERA_EASINGS.map((s) => (
+                  <option key={s} value={s}>
+                    {VI_CAMERA_EASING[s]}
                   </option>
                 ))}
               </Select>

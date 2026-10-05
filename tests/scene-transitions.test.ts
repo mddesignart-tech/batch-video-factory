@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildSceneNormalizeArgs, renderProject } from "@/media/render";
-import { buildTransitionJoinArgs, hasBlend, planJoins } from "@/media/transitions";
+import { blendTails, buildTransitionJoinArgs, hasBlend, planJoins } from "@/media/transitions";
 import { ffmpeg, probeDuration } from "@/media/ffmpeg";
 import { renderInputsFor } from "@/services/scene-plan-service";
 import { renderRecipeHash } from "@/services/render-recipe";
@@ -36,28 +36,48 @@ beforeAll(async () => {
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 describe("CHUYỂN CẢNH (kế hoạch)", () => {
-  it("CUT / NONE / không có = cắt thẳng; cảnh đầu bỏ qua transitionIn", () => {
-    const joins = planJoins(["CROSSFADE", "CUT", "NONE", undefined], [3, 3, 3, 3]);
-    expect(joins.map((j) => j.spec)).toEqual([null, null, null]);
+  it("CUT / NONE / MATCH / không có = cắt thẳng; cảnh đầu bỏ qua transitionIn", () => {
+    const joins = planJoins(["CROSSFADE", "CUT", "NONE", undefined, "MATCH"], [3, 3, 3, 3, 3]);
+    expect(joins.map((j) => j.spec)).toEqual([null, null, null, null]);
     expect(hasBlend(joins)).toBe(false);
   });
 
-  it("độ dài blend bị giới hạn theo cảnh ngắn (≤ 25 %), quá ngắn thì thành cắt", () => {
-    const joins = planJoins([null, "CROSSFADE", "WHIP", "CROSSFADE"], [4, 1, 4, 0.3]);
-    expect(joins[0]).toMatchObject({ durationSec: 0.25 });
+  it("crossfade mặc định 0,2 s (không còn 0,5 s); whip 0,2 s; zoom 0,25 s; cảnh quá ngắn thì thành cắt", () => {
+    const joins = planJoins([null, "CROSSFADE", "WHIP", "ZOOM", "CROSSFADE"], [4, 4, 4, 4, 0.3]);
+    expect(joins[0]).toMatchObject({ durationSec: 0.2 });
     expect(joins[0]!.spec?.xfade).toBe("fade");
-    expect(joins[1]).toMatchObject({ durationSec: 0.25 });
+    expect(joins[1]).toMatchObject({ durationSec: 0.2 });
     expect(joins[1]!.spec?.xfade).toBe("smoothleft");
-    expect(joins[2]!.spec).toBeNull();
+    expect(joins[2]).toMatchObject({ durationSec: 0.25 });
+    expect(joins[3]).toMatchObject({ spec: null, guard: "TOO_SHORT" });
   });
 
-  it("graph: giữ frame cuối cảnh trước (tpad) rồi xfade ĐÚNG tại giây bắt đầu cảnh sau; tiếng nối liền, không hoà", () => {
-    const args = buildTransitionJoinArgs({ inputs: ["a.mp4", "b.mp4", "c.mp4"], durations: [2, 3, 2], transitions: [null, "CROSSFADE", "CUT"], fps: 24, output: "j.mp4" });
+  it("GHOSTING: hai cảnh cùng nhân vật → hoà tan/zoom thành CẮT; khác nhân vật thì vẫn hoà tan; whip (trượt) không bị chặn", () => {
+    const subjects = [["Leo"], ["leo", "Mia"], ["Max"], ["Max"]];
+    const joins = planJoins([null, "CROSSFADE", "CROSSFADE", "WHIP"], [3, 3, 3, 3], subjects);
+    expect(joins[0]).toMatchObject({ spec: null, guard: "SAME_SUBJECT" });
+    expect(joins[1]!.spec?.xfade).toBe("fade");
+    expect(joins[2]!.spec?.xfade).toBe("smoothleft");
+  });
+
+  it("graph có đuôi: cảnh trước CHẠY TIẾP dưới blend (không tpad đứng hình); xfade đúng giây bắt đầu cảnh sau; tiếng cắt đúng độ dài", () => {
+    const transitions = [null, "CROSSFADE", "CUT"] as const;
+    const joins = planJoins([...transitions], [2, 3, 2]);
+    const tails = blendTails(joins, 3);
+    expect(tails).toEqual([0.2, 0, 0]);
+    const args = buildTransitionJoinArgs({ inputs: ["a.mp4", "b.mp4", "c.mp4"], durations: [2, 3, 2], transitions: [...transitions], tails, fps: 24, output: "j.mp4" });
     const graph = args[args.indexOf("-filter_complex") + 1]!;
-    expect(graph).toContain("[s0]tpad=stop_mode=clone:stop_duration=0.5[h1]");
-    expect(graph).toContain("[h1][s1]xfade=transition=fade:duration=0.5:offset=2.000[j1]");
+    expect(graph).toContain("[0:v]trim=duration=2.2,");
+    expect(graph).not.toContain("tpad");
+    expect(graph).toContain("[s0][s1]xfade=transition=fade:duration=0.2:offset=2.000[j1]");
     expect(graph).toContain("[j1][s2]concat=n=2:v=1:a=0[j2]");
-    expect(graph).toContain("[0:a][1:a][2:a]concat=n=3:v=0:a=1[a]");
+    expect(graph).toContain("[0:a]atrim=duration=2,");
+    expect(graph).toContain("[a0][a1][a2]concat=n=3:v=0:a=1[a]");
+  });
+
+  it("graph không đuôi (dự phòng): giữ frame cuối đúng bằng độ dài blend", () => {
+    const args = buildTransitionJoinArgs({ inputs: ["a.mp4", "b.mp4"], durations: [2, 3], transitions: [null, "CROSSFADE"], fps: 24, output: "j.mp4" });
+    expect(args[args.indexOf("-filter_complex") + 1]).toContain("[s0]tpad=stop_mode=clone:stop_duration=0.2[h1]");
   });
 });
 
@@ -68,9 +88,9 @@ describe("CHUYỂN CẢNH (FFmpeg thật)", () => {
       buildTransitionJoinArgs({ inputs: [file("norm0.mp4"), file("norm1.mp4"), file("norm2.mp4")], durations: [2, 2, 2], transitions: [null, "CROSSFADE", "CUT"], fps: 24, output: out }),
     );
     expect(Math.abs((await probeDuration(out)) - 6)).toBeLessThan(0.1);
-    // Scene 1 (white) starts at 2.0 and is fully in by 2.5; scene 2 cuts in at 4.0.
+    // Scene 1 (white) starts at 2.0 and is fully in by 2.2; scene 2 cuts in at 4.0.
     expect(await lumaAt(out, 1.5)).toBeLessThan(40);
-    const mid = await lumaAt(out, 2.25);
+    const mid = await lumaAt(out, 2.1);
     expect(mid).toBeGreaterThan(60);
     expect(mid).toBeLessThan(200);
     expect(await lumaAt(out, 3.0)).toBeGreaterThan(215);

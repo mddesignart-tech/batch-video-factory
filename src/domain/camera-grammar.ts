@@ -278,6 +278,22 @@ export const CAMERA_SPEEDS = ["VERY_SLOW", "SLOW", "MEDIUM", "FAST"] as const;
 export type CameraSpeed = (typeof CAMERA_SPEEDS)[number];
 export const VI_CAMERA_SPEED: Record<CameraSpeed, string> = { VERY_SLOW: "Rất chậm", SLOW: "Chậm", MEDIUM: "Vừa", FAST: "Nhanh" };
 
+// ----------------------------------------------------------------- easing ---
+
+/**
+ * How the move accelerates. EASE_IN_OUT (default) starts and ends softly but
+ * never comes to a dead stop inside the scene: the camera is still moving on
+ * the last frame, so a cut or blend never follows a freeze.
+ */
+export const CAMERA_EASINGS = ["EASE_IN_OUT", "LINEAR", "EASE_IN", "EASE_OUT"] as const;
+export type CameraEasing = (typeof CAMERA_EASINGS)[number];
+export const VI_CAMERA_EASING: Record<CameraEasing, string> = {
+  EASE_IN_OUT: "Mềm đầu + cuối (mặc định)",
+  LINEAR: "Đều",
+  EASE_IN: "Mềm lúc đầu",
+  EASE_OUT: "Mềm lúc cuối",
+};
+
 // ------------------------------------------------------------- transitions ---
 
 /** How this scene is joined to the one before it. CUT/NONE = hard cut; the rest render as an xfade (media/transitions.ts). */
@@ -288,7 +304,7 @@ export const VI_TRANSITION: Record<Transition, string> = {
   CROSSFADE: "Hoà tan (crossfade)",
   WHIP: "Lia nhanh (whip)",
   ZOOM: "Zoom chuyển",
-  MATCH: "Match cut (hoà nhanh)",
+  MATCH: "Match cut (cắt khớp)",
   NONE: "Không",
 };
 
@@ -299,6 +315,7 @@ export const CameraPlanSchema = z.object({
   cameraAngle: z.enum(CAMERA_ANGLES),
   cameraMovement: z.enum(CAMERA_MOVES),
   cameraSpeed: z.enum(CAMERA_SPEEDS).default("SLOW"),
+  cameraEasing: z.enum(CAMERA_EASINGS).default("EASE_IN_OUT"),
   focusStyle: z.enum(FOCUS_STYLES).default("AUTO"),
   /** Who / what the shot is about ("Leo", "Bình giữ nhiệt Mind"). */
   subjectFocus: z.string().max(120).default(""),
