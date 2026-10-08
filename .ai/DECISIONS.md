@@ -3899,3 +3899,39 @@ jerk theo cảnh 0,18–0,66 → 0,19–0,34 (A: 0,17–0,26). Test: camera-smoo
 - G7: preflight mỗi cảnh có `motionParts` (camera / chủ thể / nền / ambient, cách làm + giá); đối soát thêm
   `localMotionParts` và `paidMotion` (đã nằm trong tạo mới, không cộng hai lần).
 - Không migration (tất cả trong JSON). Camera smoothness QĐ-130 không đổi (test camera-smoothness xanh mọi phase).
+
+## QĐ-131 G8–G9 — Kiểm tra trên giao diện thật + sửa (2026-10-08, local + mock, $0)
+
+**Cách làm.** UI thật (`next start`, cổng 3100) trên BẢN SAO cô lập `data/.qa-131` (DB + ambient + nhân vật, `DATA_DIR`
+riêng, `AI_MOCK_MODE=true`, mọi key trống). Ba case G8 qua giao diện: review bình giữ nhiệt trong gian bếp, chim xanh
+trong công viên, hội thoại trên đường phố. Sổ production không đổi.
+
+**Lỗi tìm thấy và đã sửa.**
+- P1 — bối cảnh thêm SAU khi có kịch bản (cách người dùng làm) không vào kế hoạch lớp: cảnh ghép không có lớp nền,
+  không ambient. Nay: đổi tham chiếu → lập lại plan AUTO ($0); GHÉP LỚP lập lại phần phía sau chủ thể (nền + ambient)
+  từ ảnh bối cảnh, giữ camera của cảnh.
+- P1 — bối cảnh tên tiếng Việt ("Gian bếp", "Công viên", "Đường phố") không được nhận → không ambient. `LOCATION_AMBIENT`
+  có thêm mẫu tiếng Việt (ranh giới chữ Unicode), và tên ảnh bối cảnh cũng được xét.
+- P1 — cảnh hội thoại không ghép được qua UI: chủ thể chỉ lấy từ tham chiếu của dự án, không lấy nhân vật trong trang
+  Nhân vật (form tham chiếu lại không có loại Nhân vật). Nay nhân vật mà cảnh nêu tên (có ảnh) được tách nền làm chủ thể.
+- P1 — DÙNG GỢI Ý / Đặt lại tự động / lập lại plan trên cảnh đã ghép làm mất lớp tách nền → cảnh render thành bối cảnh
+  trống (ảnh cảnh đã là ảnh bối cảnh). Nay plan giữ chủ thể tách nền + vị trí + chân trời.
+- P1 — file tách nền mất (dọn cache, chép máy khác) → cảnh âm thầm thành bối cảnh trống. Nay trước khi render tách lại
+  từ ảnh tham chiếu ($0); không tách lại được → dừng render, báo rõ cảnh nào.
+- P2 — sản phẩm ghép một mình quá to và đứng ở sàn trước quầy bếp. Nay có khối VỊ TRÍ TRONG KHUNG trên cảnh ghép:
+  cỡ (Rất nhỏ…Cỡ người đứng), chỗ đứng (đáy chủ thể, 40–95 %), đường chân trời (35–75 %); sản phẩm không có chỗ đứng
+  riêng tự đứng trên đường chân trời đã đặt (= mặt bàn trong ảnh ngang tầm mắt).
+- P2 — ảnh PNG trong suốt (chim, sticker) làm ảnh cảnh hiện trên NỀN ĐEN + bản phóng mờ của chính nó. Nay khi nhập: đặt
+  lên nền sáng `STILL_MATTE` (#F1EEE8), khung contain = đặt giữa nền sáng; khi render ảnh as_is có alpha: bản phẳng cache
+  `data/cache/matte/<sha>.png` (không đổi chuỗi FFmpeg cũ).
+- P3 — nút GHÉP LỚP bị ẩn không lý do; nay hiện lý do (ví dụ "Cần ảnh Bối cảnh…").
+- G8 bóng sàn: vùng xám mượt cùng sắc nền, sẫm hơn nền, ở 40 % dưới ảnh, nối với nền → bóng ĐEN bán trong suốt (trước là
+  mảng xám/trắng đục dưới chân). `CUTOUT_VERSION` = cutout-v6 (cache cũ tự bỏ qua).
+- G8 ambient xa (HORIZON): 60 % bề ngang, lặp đôi, mờ nhẹ, nhạt hơn 25 % — khối màu minh hoạ không còn to bằng người.
+
+**Thử và bỏ.** Chỉ xoá "khoảng nền kín" khi viền quanh là chủ thể rõ (để giữ vệt sáng trên giày trắng): làm khe giữa
+tay–thân, giữa hai chân không còn được xoá → bỏ, giữ luật v5.
+
+**Giới hạn còn lại.** Chủ thể TRẮNG trên nền TRẮNG (giày, tay áo trắng) vẫn có chỗ bị loang — tách bằng màu không
+phân biệt được; cần ảnh chủ thể trên nền xám/màu tương phản. Loop xe / người / lá / chim vẫn là hình minh hoạ tự sinh;
+muốn thật cần file loop alpha thật (.webm VP9 / .mov) đặt vào `data/ambient/`.
