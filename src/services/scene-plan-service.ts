@@ -2,20 +2,21 @@ import fs from "node:fs";
 import type { Project, Scene } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
-import { toAbsolute } from "@/lib/paths";
+import { toAbsolute, toRelative } from "@/lib/paths";
 import { parseJson, round } from "@/lib/utils";
 import { projectContent } from "@/domain/content-legacy";
 import { sceneCharacters } from "@/domain/scene-characters";
 import { directVideo, presetMotion, type DirectorContext, type SceneSemantics } from "@/domain/camera-director";
 import { CameraPlanSchema, cameraPromptPhrase, localSupport, type CameraPlan, type Transition } from "@/domain/camera-grammar";
 import { inferLayers, layersPromptPhrase, locationOf, sceneComplexity } from "@/domain/scene-layers";
-import { parseScenePlan, ScenePlanSchema, type MotionRoute, type ScenePlan, type SceneLayer } from "@/domain/scene-plan";
+import { LayerSchema, parseScenePlan, ScenePlanSchema, type MotionRoute, type ScenePlan, type SceneLayer } from "@/domain/scene-plan";
 import type { ScriptDoc } from "@/domain/script";
 import { ambientLoopFor, availableAmbientKinds } from "./ambient-library";
+import { cutoutImage } from "@/media/cutout";
 import type { AmbientInput, LayerInputs, LocalCameraSpec, PlacedSubject } from "@/media/camera-motion";
 import { slotsForNames, type SubjectSlot } from "@/media/layer-layout";
 import { sideFromSlot, type ScreenSide } from "@/domain/speaker-focus";
-import { projectReferenceAssets, sceneReferenceIds, type UniversalReference } from "./reference-assets";
+import { listProjectReferences, projectReferenceAssets, sceneReferenceIds, type UniversalReference } from "./reference-assets";
 import { pngHasAlpha, resolveSubjects, subjectCandidates } from "./composite-subjects";
 import { projectFormat } from "./output-profile";
 
@@ -124,16 +125,34 @@ function buildPlan(scene: Scene, l: Loaded, camera: CameraPlan, kept: ScenePlan 
       .map((x) => `${x.label}: chưa có file loop tại máy - chỉ mô tả trong prompt ảnh/video.`),
   ].slice(0, 10);
   const composite = kept?.route === "COMPOSITE";
+  const planned = composite ? keepCutouts(layers, kept!) : layers;
   return ScenePlanSchema.parse({
     source: "AUTO",
     camera,
-    layers,
-    complexity: sceneComplexity(layers, camera.cameraMovement),
-    route: recommendedRoute(layers, camera, composite),
+    layers: planned,
+    complexity: sceneComplexity(planned, camera.cameraMovement),
+    route: recommendedRoute(planned, camera, composite),
     cameraNeedsVideoAi: localSupport(camera.cameraMovement) === "NONE" || camera.focusStyle === "RACK_FOCUS",
     notes,
     ambientIntensity: intensity,
   });
+}
+
+/**
+ * A composited scene re-planned (DÙNG GỢI Ý, Đặt lại tự động, a reference
+ * change): its picture IS the location now, so the cut-out subjects - with the
+ * size, standing line and horizon a person set - must survive, or the scene
+ * would render as an empty background.
+ */
+function keepCutouts(inferred: SceneLayer[], kept: ScenePlan): SceneLayer[] {
+  const cut = kept.layers.filter((x) => (x.layerType === "FOREGROUND" || x.layerType === "MIDGROUND") && x.assetPath);
+  if (cut.length === 0) return inferred;
+  const horizonY = kept.layers.find((x) => x.layerType === "BACKGROUND" && x.horizonY !== undefined)?.horizonY;
+  const midCut = cut.some((x) => x.layerType === "MIDGROUND");
+  const behind = inferred
+    .filter((x) => x.layerType !== "FOREGROUND" && !(midCut && x.layerType === "MIDGROUND"))
+    .map((x) => (x.layerType === "BACKGROUND" && horizonY !== undefined ? { ...x, horizonY } : x));
+  return [...cut, ...behind];
 }
 
 /** Write the plan's words into a scene that has no media yet (never into one that has). */
@@ -245,6 +264,90 @@ export async function setSceneAmbient(sceneId: string, enabled: boolean): Promis
   return plan;
 }
 
+/**
+ * VỊ TRÍ TRONG KHUNG (G8, from the UI): on a composited scene, how big each
+ * cut-out stands and where its bottom edge sits, and the location's horizon
+ * (where distant cars / passers-by walk). null = back to automatic. $0, local.
+ */
+export async function setSceneLayout(
+  sceneId: string,
+  change: { subjects?: { id: string; scale?: number | null; floorY?: number | null }[]; horizonY?: number | null },
+): Promise<ScenePlan> {
+  const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
+  const base = parseScenePlan(scene.scenePlanJson);
+  if (!base || base.route !== "COMPOSITE") throw new Error("Chỉ chỉnh vị trí được trên cảnh đang ghép lớp tại máy.");
+  const set = (layer: SceneLayer, key: "scale" | "floorY" | "horizonY", v: number | null | undefined): SceneLayer => {
+    if (v === undefined) return layer;
+    const next: SceneLayer = { ...layer };
+    if (v === null) delete next[key];
+    else next[key] = v;
+    return next;
+  };
+  let layers = base.layers.map((x) => {
+    const c = change.subjects?.find((sub) => sub.id === x.id);
+    return c && x.assetPath ? set(set(x, "scale", c.scale), "floorY", c.floorY) : x;
+  });
+  if (change.horizonY !== undefined) {
+    if (!layers.some((x) => x.layerType === "BACKGROUND") && change.horizonY !== null) {
+      layers.push(
+        LayerSchema.parse({ id: "bg", layerType: "BACKGROUND", zIndex: 10, label: "Bối cảnh", entityType: "ENVIRONMENT", depth: 0.9, parallaxFactor: 0.2 }),
+      );
+    }
+    layers = layers.map((x) => (x.layerType === "BACKGROUND" ? set(x, "horizonY", change.horizonY) : x));
+  }
+  const plan = ScenePlanSchema.parse({ ...base, source: "USER", layers });
+  await prisma.scene.update({ where: { id: sceneId }, data: { scenePlanJson: JSON.stringify(plan) } });
+  return plan;
+}
+
+/**
+ * Before a render: a composited scene whose cut-out file is gone (cache
+ * cleaned, project copied to another machine) is cut again from its
+ * reference picture - locally, $0. Without this it would render as the empty
+ * location. A subject that cannot be restored (cut from a scene picture that
+ * has since been replaced) is reported, never silently dropped.
+ */
+export async function restoreCutouts(projectId: string): Promise<{ restored: number; missing: string[] }> {
+  const scenes = await prisma.scene.findMany({ where: { projectId, skipped: false }, orderBy: { sceneNumber: "asc" } });
+  let refs: UniversalReference[] | null = null;
+  let restored = 0;
+  const missing: string[] = [];
+  for (const scene of scenes) {
+    const plan = parseScenePlan(scene.scenePlanJson);
+    if (!plan || plan.route !== "COMPOSITE") continue;
+    let changed = false;
+    const layers: SceneLayer[] = [];
+    for (const layer of plan.layers) {
+      if (!layer.enabled || !layer.assetPath || existingAbsolute(layer.assetPath)) {
+        layers.push(layer);
+        continue;
+      }
+      refs ??= await listProjectReferences(projectId);
+      const ref = refs.find((r) => r.id === layer.entityId || layer.referenceAssetIds.includes(r.id));
+      const img = ref?.images.find((i) => i.primary && i.exists) ?? ref?.images.find((i) => i.exists);
+      let file: string | null = null;
+      if (img) {
+        const abs = toAbsolute(img.path);
+        if (pngHasAlpha(abs)) file = abs;
+        else {
+          const cut = await cutoutImage(abs);
+          if (cut.ok) file = cut.path;
+        }
+      }
+      if (file) {
+        layers.push({ ...layer, assetPath: toRelative(file) });
+        changed = true;
+        restored += 1;
+      } else {
+        layers.push(layer);
+        missing.push(`Cảnh ${scene.sceneNumber}: ${layer.label}`);
+      }
+    }
+    if (changed) await prisma.scene.update({ where: { id: scene.id }, data: { scenePlanJson: JSON.stringify({ ...plan, layers }) } });
+  }
+  return { restored, missing };
+}
+
 export { pngHasAlpha };
 
 /** Data-relative path → absolute, when the file is there. */
@@ -281,10 +384,13 @@ export function renderInputsFor(scene: Pick<Scene, "scenePlanJson" | "imagePath"
  * size by what it is - a person fills their box, a product beside a presenter
  * is smaller, an animal (a bird) smaller still.
  */
-function placement(layer: SceneLayer, count: number): Pick<PlacedSubject, "scale" | "floorY"> {
+function placement(layer: SceneLayer, count: number, horizonY?: number): Pick<PlacedSubject, "scale" | "floorY"> {
   const byType = layer.entityType === "ANIMAL" ? 0.45 : layer.entityType === "PRODUCT" ? (count > 1 ? 0.4 : 0.6) : undefined;
   const scale = layer.scale ?? byType;
-  return { ...(scale !== undefined ? { scale } : {}), ...(layer.floorY !== undefined ? { floorY: layer.floorY } : {}) };
+  // A product with no standing line of its own stands on the location's horizon
+  // once one is set: in an eye-level shot that is the counter / table top.
+  const floorY = layer.floorY ?? (layer.entityType === "PRODUCT" ? horizonY : undefined);
+  return { ...(scale !== undefined ? { scale } : {}), ...(floorY !== undefined ? { floorY } : {}) };
 }
 
 /** Lean sizes (share of frame width): exact sides on separate cut-outs, smaller on a drawn picture. */
@@ -352,9 +458,9 @@ function renderStill(
     fg.length === 1 && fg[0]!.layer.label.includes(" + ")
       ? ["FULL"]
       : slotsForNames(fg.map((x) => x.layer.label), plan.camera.screenLeft, plan.camera.screenRight);
-  const foregrounds: PlacedSubject[] = fg.map((x, i) => ({ path: x.path, slot: fgSlots[i], critical: x.layer.critical, ...placement(x.layer, fg.length) }));
-  const midground: PlacedSubject[] = cutouts("MIDGROUND").map((x) => ({ path: x.path, critical: x.layer.critical, ...placement(x.layer, 1) }));
   const horizonY = plan.layers.find((x) => x.layerType === "BACKGROUND" && x.horizonY !== undefined)?.horizonY;
+  const foregrounds: PlacedSubject[] = fg.map((x, i) => ({ path: x.path, slot: fgSlots[i], critical: x.layer.critical, ...placement(x.layer, fg.length, horizonY) }));
+  const midground: PlacedSubject[] = cutouts("MIDGROUND").map((x) => ({ path: x.path, critical: x.layer.critical, ...placement(x.layer, 1, horizonY) }));
   const foreground = foregrounds.length > 0;
   const ambient = ambientLayers
     .map((x): AmbientInput | null => {
@@ -378,9 +484,17 @@ function renderStill(
 
 // ------------------------------------------------------------- composite ---
 
+/**
+ * What may stand in (or behind) this scene: the project's own references
+ * attached to it, plus the Character Bible people the scene names - a
+ * conversation's cast comes from the Characters page, not from this panel.
+ */
 function sceneSubjectRefs(scene: Scene, refs: UniversalReference[]): UniversalReference[] {
   const ids = new Set(sceneReferenceIds(scene));
-  return refs.filter((r) => r.enabled && (ids.has(r.id) || r.useThroughout));
+  const cast = new Set(sceneCharacters(scene).present.map((n) => n.toLowerCase()));
+  return refs.filter((r) =>
+    r.source === "CHARACTER_BIBLE" ? cast.has(r.name.toLowerCase()) && r.images.some((i) => i.exists) : r.enabled && (ids.has(r.id) || r.useThroughout),
+  );
 }
 
 /**
@@ -392,7 +506,7 @@ function sceneSubjectRefs(scene: Scene, refs: UniversalReference[]): UniversalRe
  */
 export async function compositeOption(sceneId: string): Promise<{ available: boolean; environment?: string; subject?: string; reason: string }> {
   const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
-  const inScene = sceneSubjectRefs(scene, await projectReferenceAssets(scene.projectId));
+  const inScene = sceneSubjectRefs(scene, await listProjectReferences(scene.projectId));
   const env = inScene.find((r) => r.type === "ENVIRONMENT" && r.images.some((i) => i.exists));
   if (!env) return { available: false, reason: "Cần ảnh Bối cảnh (tham chiếu ENVIRONMENT) cho cảnh này." };
   const c = subjectCandidates(scene, inScene);
@@ -418,7 +532,7 @@ export async function enableComposite(sceneId: string): Promise<ScenePlan> {
   const option = await compositeOption(sceneId);
   if (!option.available) throw new Error(option.reason);
   const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
-  const inScene = sceneSubjectRefs(scene, await projectReferenceAssets(scene.projectId));
+  const inScene = sceneSubjectRefs(scene, await listProjectReferences(scene.projectId));
   const env = inScene.find((r) => r.name === option.environment && r.type === "ENVIRONMENT")!;
   const envImage = env.images.find((i) => i.primary && i.exists) ?? env.images.find((i) => i.exists)!;
   // Cut BEFORE the scene picture is replaced by the location.
@@ -428,7 +542,11 @@ export async function enableComposite(sceneId: string): Promise<ScenePlan> {
   }
   const { importSceneImage } = await import("./imported-image");
   await importSceneImage({ sceneId, bytes: fs.readFileSync(toAbsolute(envImage.path)), originalFilename: envImage.filename, via: "scene-composite" });
-  const base = parseScenePlan(scene.scenePlanJson) ?? (await suggestedPlans(scene.projectId)).get(sceneId)!.suggestion;
+  // The camera is the scene's own (a person may have chosen it); what stands
+  // behind the subjects is planned again now that the location picture is
+  // attached: its background layer (and horizon) and the ambient it implies.
+  const fresh = (await suggestedPlans(scene.projectId)).get(sceneId)!.suggestion;
+  const base = parseScenePlan(scene.scenePlanJson) ?? fresh;
   const template = base.layers.find((x) => x.layerType === "FOREGROUND");
   const foreground: SceneLayer[] = resolved.subjects.map((sub, i) => ({
     id: `fg-${i + 1}`,
@@ -449,8 +567,12 @@ export async function enableComposite(sceneId: string): Promise<ScenePlan> {
     critical: sub.critical,
     assetPath: sub.path,
   }));
-  const layers = [...foreground, ...base.layers.filter((x) => x.layerType !== "FOREGROUND")];
-  const plan = ScenePlanSchema.parse({ ...base, source: "USER", layers, route: "COMPOSITE" });
+  const ambientOff = base.notes.includes("ambient-off");
+  const behind = fresh.layers
+    .filter((x) => x.layerType !== "FOREGROUND")
+    .map((x) => (x.layerType === "AMBIENT" && ambientOff ? { ...x, enabled: false } : x));
+  const layers = [...foreground, ...behind];
+  const plan = ScenePlanSchema.parse({ ...base, source: "USER", layers, route: "COMPOSITE", ambientIntensity: base.ambientIntensity ?? fresh.ambientIntensity });
   await prisma.scene.update({
     where: { id: sceneId },
     data: { scenePlanJson: JSON.stringify(plan), motionMode: "LOCAL_MOTION", motionSource: "LOCAL_MOTION" },

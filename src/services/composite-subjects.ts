@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { Scene } from "@prisma/client";
 import { toAbsolute, toRelative } from "@/lib/paths";
-import { cutoutImage } from "@/media/cutout";
+import { cutoutImage, pngHasAlpha } from "@/media/cutout";
 import type { UniversalReference } from "./reference-assets";
 
 /**
@@ -37,18 +37,7 @@ export interface SubjectResolution {
   skipped: string[];
 }
 
-/** PNG with an alpha channel (colour type 4 or 6). */
-export function pngHasAlpha(file: string): boolean {
-  try {
-    const fd = fs.openSync(file, "r");
-    const head = Buffer.alloc(26);
-    fs.readSync(fd, head, 0, 26, 0);
-    fs.closeSync(fd);
-    return head.toString("latin1", 1, 4) === "PNG" && (head[25] === 6 || head[25] === 4);
-  } catch {
-    return false;
-  }
-}
+export { pngHasAlpha };
 
 const entityOf = (type: string): SubjectEntity =>
   type === "CHARACTER" ? "CHARACTER" : type === "PRODUCT" ? "PRODUCT" : type === "ANIMAL" ? "ANIMAL" : "OBJECT";

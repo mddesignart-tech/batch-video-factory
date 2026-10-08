@@ -31,6 +31,16 @@ const VI_MOTION: Partial<Record<LayerMotion, string>> = {
   SLOW_PAN: "lia chậm",
 };
 
+/** What the "Vị trí trong khung" controls start from, for a composited scene. */
+function placementView(plan: ScenePlan): NonNullable<SceneCameraView["placement"]> {
+  return {
+    subjects: plan.layers
+      .filter((l) => l.enabled && (l.layerType === "FOREGROUND" || l.layerType === "MIDGROUND") && l.assetPath)
+      .map((l) => ({ id: l.id, label: l.label, entityType: l.entityType, scale: l.scale ?? null, floorY: l.floorY ?? null })),
+    horizonY: plan.layers.find((l) => l.layerType === "BACKGROUND" && l.horizonY !== undefined)?.horizonY ?? null,
+  };
+}
+
 const core = (p: ScenePlan) => JSON.stringify([p.camera.shotSize, p.camera.cameraAngle, p.camera.cameraMovement, p.camera.focusStyle]);
 
 export async function sceneCameraViews(projectId: string, videoCostBySceneNumber: Map<number, number>): Promise<Record<string, SceneCameraView>> {
@@ -71,6 +81,7 @@ export async function sceneCameraViews(projectId: string, videoCostBySceneNumber
       hasAmbient: (current ?? entry.suggestion).layers.some((l) => l.layerType === "AMBIENT"),
       ambientOn: (current ?? entry.suggestion).layers.some((l) => l.layerType === "AMBIENT" && l.enabled),
       composite: composite ? { available: true, reason: "", active: true } : { ...(await compositeOption(scene.id)), active: false },
+      placement: composite ? placementView(plan) : null,
       notes: (current ?? entry.suggestion).notes.filter((n) => n !== "ambient-off"),
     };
   }

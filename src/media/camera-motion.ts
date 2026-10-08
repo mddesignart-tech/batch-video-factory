@@ -269,6 +269,11 @@ export interface AmbientInput {
   band?: AmbientBand;
 }
 
+/** A far (HORIZON) loop is drawn at this share of the frame width (tiled twice) ... */
+const HORIZON_SCALE = 0.6;
+/** ... and this much fainter than the preset's level. */
+const HORIZON_FADE = 0.75;
+
 /** The far ground line (share of height) where distant cars / passers-by stand. */
 export const HORIZON_LINE: Record<"PORTRAIT" | "SQUARE" | "LANDSCAPE", number> = { PORTRAIT: 0.6, SQUARE: 0.62, LANDSCAPE: 0.66 };
 
@@ -409,7 +414,18 @@ export function buildLayeredSceneArgs(opts: {
             : band === "GROUND"
               ? `${Math.round(height * 0.92)}-h`
               : "0";
-      chains.push(`[${ambIdx[i]}:v]format=rgba,${fit},fps=${fps},colorchannelmixer=aa=${op.toFixed(2)}[amb${i}]`);
+      if (band === "HORIZON") {
+        // Far away: smaller (tiled twice across the width so the road stays
+        // busy), a little soft and fainter - distant movement, not cut-out
+        // shapes the size of the people in front.
+        const far = Math.round((width * HORIZON_SCALE) / 2) * 2;
+        chains.push(`[${ambIdx[i]}:v]format=rgba,scale=${far}:-2,fps=${fps},split=2[ha${i}][hb${i}]`);
+        chains.push(
+          `[ha${i}][hb${i}]hstack=2,crop=${width}:ih:0:0,gblur=sigma=${(width / 900).toFixed(2)}:planes=15,colorchannelmixer=aa=${(op * HORIZON_FADE).toFixed(2)}[amb${i}]`,
+        );
+      } else {
+        chains.push(`[${ambIdx[i]}:v]format=rgba,${fit},fps=${fps},colorchannelmixer=aa=${op.toFixed(2)}[amb${i}]`);
+      }
       chains.push(`[${last}][amb${i}]overlay=x=0:y='${y}':format=auto[mix${i}]`);
       last = `mix${i}`;
       return;

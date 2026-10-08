@@ -18,7 +18,7 @@ import { contentInfo } from "@/services/asset-content";
 import { pacingSummary, parseDurationMode } from "@/domain/scene-timing";
 import { deferJob } from "./queue";
 import { applyOutputControls } from "@/services/output-controls";
-import { renderInputsFor } from "@/services/scene-plan-service";
+import { renderInputsFor, restoreCutouts } from "@/services/scene-plan-service";
 import { sceneCharacters } from "@/domain/scene-characters";
 
 /**
@@ -119,6 +119,13 @@ async function handleSceneMedia(job: Job): Promise<HandlerResult> {
 async function handleRenderFinal(job: Job): Promise<HandlerResult> {
   const projectId = job.projectId;
   if (!projectId) throw new Error("Job thiếu projectId.");
+
+  // A composited scene whose cut-out file went missing is cut again ($0); one
+  // that cannot be restored stops the render instead of showing an empty location.
+  const cutouts = await restoreCutouts(projectId);
+  if (cutouts.missing.length) {
+    throw new Error(`Thiếu ảnh tách nền: ${cutouts.missing.join(" · ")}. Bấm GHÉP LỚP TẠI MÁY lại cho cảnh đó (miễn phí).`);
+  }
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },

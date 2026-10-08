@@ -30,6 +30,7 @@ import {
   resetSceneCameraAction,
   setSceneAmbientAction,
   setSceneCameraAction,
+  setSceneLayoutAction,
   useLocalCameraAction,
 } from "@/app/actions/scene-camera";
 
@@ -52,8 +53,28 @@ export interface SceneCameraView {
   hasAmbient: boolean;
   ambientOn: boolean;
   composite: { available: boolean; reason: string; active: boolean };
+  /** A composited scene: each cut-out's size / standing line and the location's horizon (null = automatic). */
+  placement: {
+    subjects: { id: string; label: string; entityType: string; scale: number | null; floorY: number | null }[];
+    horizonY: number | null;
+  } | null;
   notes: string[];
 }
+
+/** Size of a cut-out within its layout box (1 = a standing person). "" = automatic. */
+const SIZES: [string, string][] = [
+  ["", "Tự động"],
+  ["0.3", "Rất nhỏ"],
+  ["0.45", "Nhỏ"],
+  ["0.6", "Vừa"],
+  ["0.8", "Lớn"],
+  ["1", "Cỡ người đứng"],
+];
+const share = (v: number | null) => (v === null ? "" : String(Number(v.toFixed(2))));
+const shareOf = (v: string): number | null => (v === "" ? null : Number(v));
+/** Lines every 5 % of the frame height, as option values. */
+const lines = (from: number, to: number) =>
+  Array.from({ length: Math.round((to - from) / 0.05) + 1 }, (_, i) => String(Number((from + i * 0.05).toFixed(2))));
 
 const usd = (n: number) => (n > 0 ? `~$${n.toFixed(2)}` : "$0");
 
@@ -254,6 +275,59 @@ export function SceneCameraPanel({ view }: { view: SceneCameraView }) {
         <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => enableCompositeAction(view.sceneId))}>
           GHÉP LỚP TẠI MÁY · $0
         </Button>
+      ) : view.composite.reason ? (
+        <p className="text-ink-500">Ghép lớp tại máy: {view.composite.reason}</p>
+      ) : null}
+      {view.composite.active && view.placement ? (
+        <div className="space-y-1.5 rounded border border-ink-800 p-2">
+          <p className="font-semibold text-ink-200">VỊ TRÍ TRONG KHUNG · $0</p>
+          {view.placement.subjects.map((sub) => (
+            <div key={sub.id} className="grid gap-1.5 sm:grid-cols-2">
+              <Field label={`Cỡ: ${sub.label}`}>
+                <Select
+                  value={share(sub.scale)}
+                  disabled={pending}
+                  onChange={(e) => run(() => setSceneLayoutAction(view.sceneId, { subjects: [{ id: sub.id, scale: shareOf(e.currentTarget.value) }] }))}
+                >
+                  {SIZES.map(([v, label]) => (
+                    <option key={v} value={v}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Chỗ đứng (đáy chủ thể)" hint="Sản phẩm trên bàn: chọn ngang mặt bàn trong ảnh.">
+                <Select
+                  value={share(sub.floorY)}
+                  disabled={pending}
+                  onChange={(e) => run(() => setSceneLayoutAction(view.sceneId, { subjects: [{ id: sub.id, floorY: shareOf(e.currentTarget.value) }] }))}
+                >
+                  <option value="">Tự động</option>
+                  {lines(0.4, 0.95).map((v) => (
+                    <option key={v} value={v}>
+                      {Math.round(Number(v) * 100)}% chiều cao khung
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          ))}
+          <Field label="Đường chân trời của bối cảnh" hint="Xe, người đi đường ở xa chạy trên đường này.">
+            <Select
+              value={share(view.placement.horizonY)}
+              disabled={pending}
+              onChange={(e) => run(() => setSceneLayoutAction(view.sceneId, { horizonY: shareOf(e.currentTarget.value) }))}
+            >
+              <option value="">Tự động</option>
+              {lines(0.35, 0.75).map((v) => (
+                <option key={v} value={v}>
+                  {Math.round(Number(v) * 100)}% từ trên xuống
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <p className="text-[11px] text-ink-500">Chỉ đổi cách ghép tại máy: bấm RENDER LẠI · $0 API để xem.</p>
+        </div>
       ) : null}
       {msg ? <Alert tone={msg.ok ? "ok" : "danger"} title={msg.text} /> : null}
     </div>

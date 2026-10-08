@@ -13,6 +13,7 @@ import {
   resetSceneCameraAuto,
   setSceneAmbient,
   setSceneCamera,
+  setSceneLayout,
   useLocalCamera,
 } from "@/services/scene-plan-service";
 import type { ActionResult } from "./idioms";
@@ -95,6 +96,24 @@ export async function reduceCameraMotionAction(sceneId: string): Promise<ActionR
     if (!plan) return { ok: false, message: "Cảnh chưa có kế hoạch camera." };
     await setSceneCamera(sceneId, reducedCamera(plan.camera));
     return done(sceneId, "Đã giảm chuyển động camera về mức làm được tại máy · $0.");
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+const Share = z.number().min(0.1).max(1.5).nullable().optional();
+const LayoutChange = z.object({
+  subjects: z.array(z.object({ id: z.string().max(40), scale: Share, floorY: z.number().min(0.2).max(1).nullable().optional() })).max(3).optional(),
+  horizonY: z.number().min(0.2).max(0.95).nullable().optional(),
+});
+
+/** VỊ TRÍ TRONG KHUNG: size / standing line of each cut-out and the location's horizon. Local, $0. */
+export async function setSceneLayoutAction(sceneId: string, change: z.infer<typeof LayoutChange>): Promise<ActionResult> {
+  const parsed = LayoutChange.safeParse(change);
+  if (!parsed.success) return { ok: false, message: "Giá trị vị trí không hợp lệ." };
+  try {
+    await setSceneLayout(sceneId, parsed.data);
+    return done(sceneId, "Đã đổi vị trí trong khung. Bấm RENDER LẠI · $0 API để xem - không tạo lại ảnh, giọng hay clip.");
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

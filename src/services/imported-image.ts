@@ -8,6 +8,8 @@ import { fileSha256 } from "@/services/asset-content";
 import { projectSubdir, toAbsolute, toRelative, uuidFilename } from "@/lib/paths";
 import { logger } from "@/lib/logger";
 import { ffmpeg, ffprobe } from "@/media/ffmpeg";
+import { pngHasAlpha } from "@/media/cutout";
+import { STILL_MATTE } from "@/media/render";
 import { targetForAspect, type RenderTarget } from "@/media/render";
 import { sniffImageType } from "@/lib/image-sniff";
 import { ALLOWED_IMAGE_EXTENSIONS } from "@/domain/storyboard";
@@ -189,8 +191,19 @@ async function writeWorkingCopy(
   target: Pick<RenderTarget, "width" | "height">,
 ): Promise<void> {
   const { width: W, height: H } = target;
-  const filter =
-    framing === "contain_blur"
+  // A transparent picture (a cut-out, a sticker) is laid on the light matte
+  // first: dropping its alpha would turn the empty area black. "Contain" then
+  // centres it on the matte - a blurred, enlarged copy of a lone subject
+  // behind itself reads as a smear, not a backdrop.
+  const alpha = pngHasAlpha(source);
+  const flat = `format=rgba,split=2[mb][mf];[mb]drawbox=c=${STILL_MATTE}@1:replace=1:t=fill[mc];[mc][mf]overlay=format=auto,format=rgb24`;
+  const filter = alpha
+    ? framing === "contain_blur"
+      ? `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,format=rgba,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black@0,${flat}`
+      : framing === "cover"
+        ? `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},${flat}`
+        : `[0:v]scale=${W * 2}:${H * 2}:force_original_aspect_ratio=decrease,${flat}`
+    : framing === "contain_blur"
       ? `[0:v]split=2[a][b];` +
         `[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=40:2[bg];` +
         `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease[fg];` +

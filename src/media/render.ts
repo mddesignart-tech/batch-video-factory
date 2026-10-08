@@ -2,7 +2,7 @@ import { splitByText, usesAuthorSubtitle } from "@/domain/scene-subtitles";
 import { effectiveFit, type FitMode } from "@/domain/platform-profile";
 import fs from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   ffmpeg,
   ffmpegAvailable,
@@ -15,6 +15,7 @@ import {
 import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
 import type { SubtitleLayout } from "@/domain/output-controls";
 import { renderSegmentCached } from "./segment-cache";
+import { pngHasAlpha } from "./cutout";
 import { buildLayeredSceneArgs, cameraZoompan, layerFiles, type LayerInputs, type LocalCameraSpec } from "./camera-motion";
 import { blendTails, buildTransitionJoinArgs, hasBlend, planJoins } from "./transitions";
 import type { Transition } from "@/domain/camera-grammar";
@@ -42,7 +43,7 @@ import {
   type MixMetrics,
   type MixWarning,
 } from "./audio-metrics";
-import { ensureProjectDirs, projectSubdir } from "@/lib/paths";
+import { DATA_ROOT, ensureProjectDirs, projectSubdir } from "@/lib/paths";
 import {
   DEFAULT_TIMING,
   resolveSceneDuration,
@@ -224,6 +225,29 @@ export interface RenderResult {
 // ------------------------------------------------------- pure arg builders ---
 // Exported separately from the side-effecting render so they can be unit tested
 // without FFmpeg present.
+
+/** Soft warm white behind a transparent still: reads as a studio backdrop, not a hole. */
+export const STILL_MATTE = "0xF1EEE8";
+
+/**
+ * The transparent still laid on STILL_MATTE, as an opaque PNG cached by the
+ * picture's content (data/cache/matte). Local, $0; the scene chain is unchanged.
+ */
+export async function stillOnMatte(file: string): Promise<string> {
+  const sha = createHash("sha256").update(fs.readFileSync(file)).digest("hex").slice(0, 32);
+  const dir = path.join(DATA_ROOT, "cache", "matte");
+  const out = path.join(dir, `${sha}.png`);
+  if (fs.existsSync(out) && fs.statSync(out).size > 0) return out;
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `${sha}.${randomUUID()}.png`);
+  await ffmpeg([
+    "-v", "error", "-y", "-i", file,
+    "-filter_complex", `[0:v]format=rgba,split=2[mb][mf];[mb]drawbox=c=${STILL_MATTE}@1:replace=1:t=fill[mc];[mc][mf]overlay=format=auto,format=rgb24`,
+    "-frames:v", "1", tmp,
+  ]);
+  fs.renameSync(tmp, out);
+  return out;
+}
 
 /**
  * Scale-and-crop to fill the frame, hold the last frame if the clip is short,
@@ -690,8 +714,11 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   for (let i = 0; i < usable.length; i += 1) {
     const scene = usable[i];
     if (!scene) continue;
-    const source = scene.videoPath ?? scene.imagePath;
-    if (!source) continue;
+    const original = scene.videoPath ?? scene.imagePath;
+    if (!original) continue;
+    // A transparent picture (a cut-out used as the scene's own picture) would
+    // render its empty area black: it goes on a light matte first (cached).
+    const source = !scene.videoPath && pngHasAlpha(original) ? await stillOnMatte(original) : original;
     const audio = sceneAudio[i];
     const name = `norm_${String(scene.sceneNumber).padStart(3, "0")}.mp4`;
     // The scene's own dialogue track when it has one; the legacy single file

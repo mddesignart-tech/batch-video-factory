@@ -12,12 +12,26 @@ import {
   createReference,
   setSceneReferences,
 } from "@/services/reference-assets";
+import { planProjectScenes } from "@/services/scene-plan-service";
 import type { ActionResult } from "./idioms";
 
 /**
  * Tài sản tham chiếu (QĐ-124). Every action here is $0: files go into the Asset
  * Library and rows are written - no provider is ever called.
  */
+
+/**
+ * A reference changed what stands in or behind the scenes (a location picture
+ * names the background and its ambient): AUTO scene plans are drawn again.
+ * USER plans stay as they are. $0; a failure here never fails the action.
+ */
+async function replan(projectId: string): Promise<void> {
+  try {
+    await planProjectScenes(projectId, { onlyPlanned: true });
+  } catch {
+    // The reference itself is saved; the plans refresh on the next change.
+  }
+}
 
 async function filesFrom(formData: FormData): Promise<{ bytes: Buffer; filename: string }[] | string> {
   const out: { bytes: Buffer; filename: string }[] = [];
@@ -44,6 +58,7 @@ export async function addReferenceAction(projectId: string, formData: FormData):
       uploads: files,
     });
     if (formData.get("assign") !== "off") await autoAssignReferences(projectId, { onlyEmpty: false });
+    await replan(projectId);
     revalidatePath(`/projects/${projectId}`);
     return { ok: true, message: "Đã thêm tham chiếu và gắn vào các cảnh phù hợp. Chi phí $0." };
   } catch (err) {
@@ -70,7 +85,10 @@ export async function updateReferenceAction(
 ): Promise<ActionResult> {
   try {
     const r = await changeReference(refId, change);
-    if (change.useThroughout !== undefined || change.enabled !== undefined) await autoAssignReferences(projectId);
+    if (change.useThroughout !== undefined || change.enabled !== undefined) {
+      await autoAssignReferences(projectId);
+      await replan(projectId);
+    }
     revalidatePath(`/projects/${projectId}`);
     const touched = [...r.invalidatedScenes, ...r.rephotographedScenes];
     return {
@@ -87,6 +105,7 @@ export async function updateReferenceAction(
 export async function setSceneReferencesAction(projectId: string, sceneId: string, ids: string[]): Promise<ActionResult> {
   try {
     const r = await setSceneReferences(sceneId, ids);
+    await replan(projectId);
     revalidatePath(`/projects/${projectId}`);
     return { ok: true, message: r.invalidated ? "Đã đổi tham chiếu của cảnh - cảnh này cần ảnh mới (xem chi phí trước khi tạo)." : "Đã lưu." };
   } catch (err) {
@@ -97,6 +116,7 @@ export async function setSceneReferencesAction(projectId: string, sceneId: strin
 export async function autoAssignReferencesAction(projectId: string): Promise<ActionResult> {
   try {
     await autoAssignReferences(projectId);
+    await replan(projectId);
     revalidatePath(`/projects/${projectId}`);
     return { ok: true, message: "Đã tự gắn tham chiếu theo nội dung từng cảnh. Bạn có thể bỏ/thêm thủ công." };
   } catch (err) {

@@ -98,6 +98,26 @@ describe("G1 — tách nền (loang từ mép, không key toàn ảnh)", () => {
     expect(edge.some((a) => a > 0 && a < 255)).toBe(true);
   });
 
+  it("G9: bóng sàn mượt cùng sắc xám với nền → bóng ĐEN bán trong suốt (không còn mảng trắng đục)", () => {
+    const soft = cutoutRaster(
+      raster((x, y) => {
+        if (x >= 60 && x < 140 && y >= 60) return [240, 200, 30];
+        if (y >= 250 && x >= 20 && x < 60) {
+          const v = 211 - (x - 20);
+          return [v, v - 1, v - 1];
+        }
+        return null;
+      }),
+      BG,
+    );
+    if (!("raster" in soft)) throw new Error("refused");
+    const i = (280 * W + 45) * 4;
+    expect([soft.raster.data[i], soft.raster.data[i + 1], soft.raster.data[i + 2]]).toEqual([0, 0, 0]);
+    expect(soft.raster.data[i + 3]).toBeGreaterThan(10);
+    expect(soft.raster.data[i + 3]).toBeLessThan(120);
+    expect(alphaAt(soft.raster, 100, 200)).toBe(255); // the body is untouched
+  });
+
   it("cắt sát chủ thể (+2 % lề): không còn lề trong suốt làm chủ thể nhỏ đi trong khung bố cục", () => {
     if (!("raster" in r)) throw new Error("refused");
     const t = trimToSubject(r.raster);

@@ -24,7 +24,7 @@ import { resolveFfmpeg } from "./ffmpeg";
  * subject at all are all REFUSED with a reason.
  */
 
-export const CUTOUT_VERSION = "cutout-v5";
+export const CUTOUT_VERSION = "cutout-v6";
 
 /** Colour distance (RGB, 0..441) below which a pixel is fully backdrop. */
 const T_INNER = 18;
@@ -44,6 +44,14 @@ const T_OUTER = 46;
 const MAX_BORDER_SPREAD = 10;
 /** Corners must agree (a gradient or vignette fails this). */
 const MAX_CORNER_DELTA = 22;
+/** Floor shadow: grey like the backdrop (channel spread vs the backdrop's, 0..255) ... */
+const SHADOW_CHROMA = 8;
+/** ... no darker than this share of the backdrop's brightness (dark trousers are not a shadow) ... */
+const SHADOW_MIN_LUM = 0.5;
+/** ... and only in the lower part of the picture, where a floor is. */
+const SHADOW_FLOOR_FROM = 0.6;
+/** Shadow opacity per unit of darkening. */
+const SHADOW_STRENGTH = 1.8;
 /** Long side the mask is computed at; the result keeps the source size. */
 const WORK_LONG_SIDE = 1600;
 
@@ -241,6 +249,44 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
     }
     ring = next;
   }
+  // FLOOR SHADOW: the backdrop's own grey, only darker, smooth, reached from
+  // the backdrop in the lower part of the picture. Kept as an opaque grey it
+  // reads as a white puddle on a new background; it becomes a black shadow
+  // whose strength is how much darker it was. The edge barrier keeps a shoe's
+  // outline (and so the shoe) out of it.
+  const shadow = new Uint8Array(n);
+  const bgLum = 0.299 * backdrop[0] + 0.587 * backdrop[1] + 0.114 * backdrop[2];
+  const neutral = (p: number) => {
+    const i = p * 4;
+    const dr = data[i]! - backdrop[0];
+    const dg = data[i + 1]! - backdrop[1];
+    const db = data[i + 2]! - backdrop[2];
+    return Math.max(Math.abs(dr - dg), Math.abs(dg - db), Math.abs(dr - db)) <= SHADOW_CHROMA;
+  };
+  const floorTop = Math.floor(h * SHADOW_FLOOR_FROM);
+  const isShadow = (q: number) =>
+    !seen[q] && !shadow[q] && q >= floorTop * w && lum[q]! < bgLum - 2 && lum[q]! >= bgLum * SHADOW_MIN_LUM && neutral(q) && edge(q) <= EDGE_BARRIER;
+  const sq: number[] = [];
+  for (let p = floorTop * w; p < n; p += 1) {
+    if (!seen[p]) continue;
+    const x = p % w;
+    for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
+      if (q >= 0 && q < n && isShadow(q)) {
+        shadow[q] = 1;
+        sq.push(q);
+      }
+    }
+  }
+  for (let k = 0; k < sq.length; k += 1) {
+    const p = sq[k]!;
+    const x = p % w;
+    for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
+      if (q >= 0 && q < n && isShadow(q)) {
+        shadow[q] = 1;
+        sq.push(q);
+      }
+    }
+  }
   // A band across the whole width (letterbox, blurred fill, a table edge to edge)
   // is not a subject on a backdrop: refuse rather than keep it as "subject".
   for (let y = 0; y < h; y += 2) {
@@ -251,6 +297,14 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
   const out = new Uint8Array(data);
   let subject = 0;
   for (let p = 0; p < n; p += 1) {
+    if (shadow[p]) {
+      const i = p * 4;
+      alpha[p] = Math.round(Math.min(1, ((bgLum - lum[p]!) / bgLum) * SHADOW_STRENGTH) * 255);
+      out[i] = 0;
+      out[i + 1] = 0;
+      out[i + 2] = 0;
+      continue;
+    }
     if (!seen[p]) {
       subject += 1;
       continue;
@@ -388,4 +442,17 @@ export async function cutoutImage(file: string): Promise<CutoutResult> {
   if ("refusal" in cut) return { ok: false, reason: cut.refusal, message: VI_CUTOUT_REFUSAL[cut.refusal] };
   await writePng(trimToSubject(cut.raster), out);
   return { ok: true, path: out, cached: false, subjectShare: cut.subjectShare, backdrop: color };
+}
+
+/** PNG with an alpha channel (colour type 4 or 6). */
+export function pngHasAlpha(file: string): boolean {
+  try {
+    const fd = fs.openSync(file, "r");
+    const head = Buffer.alloc(26);
+    fs.readSync(fd, head, 0, 26, 0);
+    fs.closeSync(fd);
+    return head.toString("latin1", 1, 4) === "PNG" && (head[25] === 6 || head[25] === 4);
+  } catch {
+    return false;
+  }
 }

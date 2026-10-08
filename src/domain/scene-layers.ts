@@ -54,18 +54,19 @@ export const AMBIENT_KINDS: readonly AmbientKind[] = [
 ];
 
 /** A location suggests its quiet background life even when the script does not list it. */
-const LOCATION_AMBIENT: { match: RegExp; label: string; prompt: string; ambient: string[] }[] = [
-  { match: /\b(street|city|town|road|crossroads|sidewalk|downtown)\b/i, label: "Đường phố", prompt: "a city street", ambient: ["traffic", "pedestrians"] },
-  { match: /\b(kitchen)\b/i, label: "Gian bếp", prompt: "a bright kitchen", ambient: ["steam"] },
-  { match: /\b(park|garden|playground)\b/i, label: "Công viên", prompt: "a green park", ambient: ["leaves", "birds"] },
-  { match: /\b(forest|jungle|woods)\b/i, label: "Rừng", prompt: "a forest", ambient: ["leaves", "birds"] },
-  { match: /\b(classroom|school)\b/i, label: "Lớp học", prompt: "a classroom", ambient: [] },
-  { match: /\b(cafe|café|coffee shop|restaurant)\b/i, label: "Quán cà phê", prompt: "a cozy cafe", ambient: ["pedestrians"] },
-  { match: /\b(bedroom|living room|home|house)\b/i, label: "Trong nhà", prompt: "a home interior", ambient: ["curtain"] },
-  { match: /\b(beach|sea|ocean)\b/i, label: "Bãi biển", prompt: "a beach", ambient: ["water", "clouds"] },
-  { match: /\b(sky|mountain|field|farm|countryside)\b/i, label: "Ngoài trời", prompt: "open countryside", ambient: ["clouds"] },
-  { match: /\b(office|studio|shop|store|market)\b/i, label: "Không gian làm việc", prompt: "an office interior", ambient: [] },
-  { match: /\b(construction site)\b/i, label: "Công trường", prompt: "a construction site", ambient: ["pedestrians"] },
+/** `vi`: the same place in Vietnamese - a location picture is often named "Gian bếp", "Công viên". */
+const LOCATION_AMBIENT: { match: RegExp; vi: RegExp; label: string; prompt: string; ambient: string[] }[] = [
+  { match: /\b(street|city|town|road|crossroads|sidewalk|downtown)\b/i, vi: /(?<!\p{L})(?:đường phố|phố|vỉa hè|ngã tư|thành phố|thị trấn)(?!\p{L})/iu, label: "Đường phố", prompt: "a city street", ambient: ["traffic", "pedestrians"] },
+  { match: /\b(kitchen)\b/i, vi: /(?<!\p{L})(?:bếp|nhà bếp|gian bếp)(?!\p{L})/iu, label: "Gian bếp", prompt: "a bright kitchen", ambient: ["steam"] },
+  { match: /\b(park|garden|playground)\b/i, vi: /(?<!\p{L})(?:công viên|khu vườn|vườn|sân chơi)(?!\p{L})/iu, label: "Công viên", prompt: "a green park", ambient: ["leaves", "birds"] },
+  { match: /\b(forest|jungle|woods)\b/i, vi: /(?<!\p{L})(?:rừng|khu rừng)(?!\p{L})/iu, label: "Rừng", prompt: "a forest", ambient: ["leaves", "birds"] },
+  { match: /\b(classroom|school)\b/i, vi: /(?<!\p{L})(?:lớp học|trường học|sân trường)(?!\p{L})/iu, label: "Lớp học", prompt: "a classroom", ambient: [] },
+  { match: /\b(cafe|café|coffee shop|restaurant)\b/i, vi: /(?<!\p{L})(?:quán cà phê|cà phê|quán cafe|nhà hàng)(?!\p{L})/iu, label: "Quán cà phê", prompt: "a cozy cafe", ambient: ["pedestrians"] },
+  { match: /\b(bedroom|living room|home|house)\b/i, vi: /(?<!\p{L})(?:phòng ngủ|phòng khách|trong nhà|ngôi nhà|căn nhà)(?!\p{L})/iu, label: "Trong nhà", prompt: "a home interior", ambient: ["curtain"] },
+  { match: /\b(beach|sea|ocean)\b/i, vi: /(?<!\p{L})(?:bãi biển|bờ biển|biển cả)(?!\p{L})/iu, label: "Bãi biển", prompt: "a beach", ambient: ["water", "clouds"] },
+  { match: /\b(sky|mountain|field|farm|countryside)\b/i, vi: /(?<!\p{L})(?:bầu trời|núi|cánh đồng|nông trại|đồng quê|làng quê)(?!\p{L})/iu, label: "Ngoài trời", prompt: "open countryside", ambient: ["clouds"] },
+  { match: /\b(office|studio|shop|store|market)\b/i, vi: /(?<!\p{L})(?:văn phòng|cửa hàng|siêu thị|chợ)(?!\p{L})/iu, label: "Không gian làm việc", prompt: "an office interior", ambient: [] },
+  { match: /\b(construction site)\b/i, vi: /(?<!\p{L})(?:công trường)(?!\p{L})/iu, label: "Công trường", prompt: "a construction site", ambient: ["pedestrians"] },
 ];
 
 const MIDGROUND = /\b(table|counter|desk|bench|sofa|couch|shelf|branch(?:es)?|fence|parked car|stall|chair)\b/i;
@@ -91,7 +92,11 @@ export type SceneComplexity = "LOW" | "MEDIUM" | "HIGH";
 /** Infer the layers. The foreground always exists (the existing picture at minimum). */
 /** The place a scene's words describe ("Đường phố", "Gian bếp"...), or null. */
 export function locationOf(text: string): string | null {
-  return LOCATION_AMBIENT.find((l) => l.match.test(text))?.label ?? null;
+  return locationFor(text)?.label ?? null;
+}
+
+function locationFor(text: string) {
+  return LOCATION_AMBIENT.find((l) => l.match.test(text) || l.vi.test(text));
 }
 
 export function inferLayers(input: LayerInput): SceneLayer[] {
@@ -181,7 +186,8 @@ export function inferLayers(input: LayerInput): SceneLayer[] {
 
   // ---- BACKGROUND: the location (environment reference first).
   const envRef = refs.find((r) => r.type === "ENVIRONMENT");
-  const location = LOCATION_AMBIENT.find((l) => l.match.test(words));
+  // The location picture's own name counts ("Gian bếp" implies the kitchen's steam).
+  const location = locationFor(words) ?? (envRef ? locationFor(envRef.name) : undefined);
   if (envRef || location) {
     layers.push(
       layer({
