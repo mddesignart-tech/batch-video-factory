@@ -6,7 +6,7 @@ import { legacyScenePlan, VI_LAYER_TYPE, VI_MOTION_ROUTE, type LayerMotion, type
 import { sceneCharacters } from "@/domain/scene-characters";
 import { storedProfile } from "@/domain/video-model-profile";
 import type { SceneCameraView } from "@/app/projects/[id]/scene-camera-panel";
-import { compositeOption, suggestedPlans } from "./scene-plan-service";
+import { compositeOption, INTERACTION_OFF, sceneInteraction, suggestedPlans } from "./scene-plan-service";
 
 /**
  * The "Camera & lớp cảnh" panel for every scene of a project, in plain words:
@@ -82,10 +82,17 @@ export async function sceneCameraViews(projectId: string, videoCostBySceneNumber
       ambientOn: (current ?? entry.suggestion).layers.some((l) => l.layerType === "AMBIENT" && l.enabled),
       composite: composite ? { available: true, reason: "", active: true } : { ...(await compositeOption(scene.id)), active: false },
       placement: composite ? placementView(plan) : null,
-      notes: (current ?? entry.suggestion).notes.filter((n) => n !== "ambient-off"),
+      notes: (current ?? entry.suggestion).notes.filter((n) => n !== "ambient-off" && n !== INTERACTION_OFF),
+      interaction: interactionView(await sceneInteraction(scene, models)),
     };
   }
   return out;
+}
+
+/** G11: only what a person needs - the notice, the hint, the choices. Null = the subjects do not touch. */
+function interactionView(r: Awaited<ReturnType<typeof sceneInteraction>>): SceneCameraView["interaction"] {
+  if (r.interaction !== "COMPLEX_INTERACTION" || !r.notice) return null;
+  return { notice: r.notice, hint: r.hint ?? "", choices: r.choices };
 }
 
 /**

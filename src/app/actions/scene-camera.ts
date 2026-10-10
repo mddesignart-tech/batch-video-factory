@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { errorMessage } from "@/lib/utils";
 import {
   applySuggestedPlan,
+  dropInteraction,
   enableComposite,
   resetSceneCameraAuto,
   setSceneAmbient,
@@ -114,6 +115,16 @@ export async function setSceneLayoutAction(sceneId: string, change: z.infer<type
   try {
     await setSceneLayout(sceneId, parsed.data);
     return done(sceneId, "Đã đổi vị trí trong khung. Bấm RENDER LẠI · $0 API để xem - không tạo lại ảnh, giọng hay clip.");
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/** BỎ TƯƠNG TÁC: stage the subjects apart; local layers stay. $0. */
+export async function dropInteractionAction(sceneId: string): Promise<ActionResult> {
+  try {
+    await dropInteraction(sceneId);
+    return done(sceneId, "Đã bỏ tương tác: các chủ thể đứng tách rời, ghép lớp tại máy · $0.");
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

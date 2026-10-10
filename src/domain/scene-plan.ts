@@ -88,6 +88,8 @@ export const LayerSchema = z.object({
   scale: z.number().min(0.1).max(1.5).optional(),
   /** G8: where a cut-out stands (its bottom edge, share of the frame height): a product on a counter top. */
   floorY: z.number().min(0.2).max(1).optional(),
+  /** G10: the subject flies (a bird in flight): no contact shadow, not stood on the ground. Absent = from its label. */
+  airborne: z.boolean().optional(),
   /** G8: on a BACKGROUND layer, where its far ground line is (share of height) - distant cars / passers-by stand there. */
   horizonY: z.number().min(0.2).max(0.95).optional(),
 });
@@ -118,6 +120,8 @@ export const ScenePlanSchema = z.object({
   notes: z.array(z.string().max(200)).max(10).default([]),
   /** G5: how strongly local ambient loops show (the motion preset's choice); absent = full. */
   ambientIntensity: z.number().min(0).max(1).optional(),
+  /** G11: the subjects touch / hand things over (physical-interaction.ts); absent = not planned yet. */
+  interaction: z.enum(["LOCAL_OK", "COMPLEX_INTERACTION"]).optional(),
 });
 export type ScenePlan = z.infer<typeof ScenePlanSchema>;
 

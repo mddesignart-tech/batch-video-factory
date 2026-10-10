@@ -112,7 +112,8 @@ describe("G2 — graph ghép lớp", () => {
     expect(graph).toMatch(/format=gbrap,zoompan=z='1\+0\.0400\*/); // midground 0.08 x 0.5
     expect(graph).toMatch(/format=gbrap,zoompan=z='1\+0\.0800\*/); // foreground 0.08 x 1.0
     // Separate subjects: the side ones first, centre in front.
-    expect(graph).toContain("pad=360:640");
+    // G10: every plate is a transparent full-frame canvas the cut-outs (and their contact shadows) are laid on.
+    expect(graph).toContain("scale=360:640,colorchannelmixer=aa=0");
   });
 
   it("chủ thể cũ (một foreground) vẫn đọc được: FULL", () => {

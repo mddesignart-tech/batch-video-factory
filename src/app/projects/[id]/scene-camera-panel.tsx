@@ -25,6 +25,7 @@ import {
 } from "@/domain/camera-grammar";
 import {
   applySuggestedCameraAction,
+  dropInteractionAction,
   enableCompositeAction,
   reduceCameraMotionAction,
   resetSceneCameraAction,
@@ -59,6 +60,12 @@ export interface SceneCameraView {
     horizonY: number | null;
   } | null;
   notes: string[];
+  /** G11: the subjects touch / hand things over - separate layers may look pasted on. */
+  interaction: {
+    notice: string;
+    hint: string;
+    choices: { id: "SIMPLER_SCENE" | "KEEP_SEPARATE" | "VIDEO_AI" | "DROP_INTERACTION"; label: string; available: boolean; note?: string }[];
+  } | null;
 }
 
 /** Size of a cut-out within its layout box (1 = a standing person). "" = automatic. */
@@ -268,6 +275,40 @@ export function SceneCameraPanel({ view }: { view: SceneCameraView }) {
           </p>
         ))}
       </div>
+
+      {view.interaction ? (
+        <Alert tone="warn" title={view.interaction.notice}>
+          <p className="text-ink-400">{view.interaction.hint}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {view.interaction.choices.map((c) =>
+              c.id === "VIDEO_AI" ? (
+                <a key={c.id} href="#video-ai" title={c.note} className={`self-center underline ${c.available ? "text-ink-300" : "text-ink-600"}`}>
+                  {c.label.toUpperCase()}
+                  {c.note ? ` · ${c.note}` : ""}
+                </a>
+              ) : (
+                <Button
+                  key={c.id}
+                  size="sm"
+                  variant="outline"
+                  disabled={pending || (c.id === "KEEP_SEPARATE" && !view.composite.available && !view.composite.active)}
+                  onClick={() =>
+                    run(() =>
+                      c.id === "SIMPLER_SCENE"
+                        ? useLocalCameraAction(view.sceneId)
+                        : c.id === "KEEP_SEPARATE"
+                          ? enableCompositeAction(view.sceneId)
+                          : dropInteractionAction(view.sceneId),
+                    )
+                  }
+                >
+                  {c.label.toUpperCase()}
+                </Button>
+              ),
+            )}
+          </div>
+        </Alert>
+      ) : null}
 
       {view.composite.active ? (
         <p className="text-ok-300">Ghép lớp tại máy đang bật · $0.</p>

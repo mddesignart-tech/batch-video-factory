@@ -24,7 +24,7 @@ import { resolveFfmpeg } from "./ffmpeg";
  * subject at all are all REFUSED with a reason.
  */
 
-export const CUTOUT_VERSION = "cutout-v6";
+export const CUTOUT_VERSION = "cutout-v8";
 
 /** Colour distance (RGB, 0..441) below which a pixel is fully backdrop. */
 const T_INNER = 18;
@@ -52,6 +52,8 @@ const SHADOW_MIN_LUM = 0.5;
 const SHADOW_FLOOR_FROM = 0.6;
 /** Shadow opacity per unit of darkening. */
 const SHADOW_STRENGTH = 1.8;
+/** G10: beyond the subject's width the kept floor shadow fades out over this share of the picture width. */
+const SHADOW_FADE = 0.03;
 /** Long side the mask is computed at; the result keeps the source size. */
 const WORK_LONG_SIDE = 1600;
 
@@ -287,6 +289,13 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
       }
     }
   }
+  // G10: the soft edge band also walks a few px into a floor shadow (e.g.
+  // between two feet) and un-mixed it into an opaque grey patch. A band pixel
+  // in the floor area that is neutral, smooth and darker than the backdrop is
+  // shadow, not subject edge (a shoe's outline is neither neutral nor smooth).
+  for (let p = floorTop * w; p < n; p += 1) {
+    if (seen[p] && !shadow[p] && lum[p]! < bgLum - 2 && lum[p]! >= bgLum * SHADOW_MIN_LUM && neutral(p) && edge(p) <= EDGE_BARRIER) shadow[p] = 1;
+  }
   // A band across the whole width (letterbox, blurred fill, a table edge to edge)
   // is not a subject on a backdrop: refuse rather than keep it as "subject".
   for (let y = 0; y < h; y += 2) {
@@ -294,12 +303,25 @@ export function cutoutRaster(img: Raster, backdrop: [number, number, number]): {
     for (let x = 0; x < w; x += 1) if (!seen[y * w + x]) row += 1;
     if (row / w > 0.95) return { refusal: "SUBJECT_FILLS_FRAME" };
   }
+  // G10: the kept floor shadow fades out beyond the subject's own width, so a
+  // long cast shadow neither widens the trimmed cut-out (which shrank and
+  // off-centred the subject in its box) nor ends in a hard trim edge.
+  let sx0 = w;
+  let sx1 = -1;
+  for (let p = 0; p < n; p += 1) {
+    if (seen[p] || shadow[p]) continue;
+    const x = p % w;
+    if (x < sx0) sx0 = x;
+    if (x > sx1) sx1 = x;
+  }
+  const fade = Math.max(4, Math.round(w * SHADOW_FADE));
+  const reach = (x: number) => (x < sx0 ? Math.max(0, 1 - (sx0 - x) / fade) : x > sx1 ? Math.max(0, 1 - (x - sx1) / fade) : 1);
   const out = new Uint8Array(data);
   let subject = 0;
   for (let p = 0; p < n; p += 1) {
     if (shadow[p]) {
       const i = p * 4;
-      alpha[p] = Math.round(Math.min(1, ((bgLum - lum[p]!) / bgLum) * SHADOW_STRENGTH) * 255);
+      alpha[p] = Math.round(Math.min(1, ((bgLum - lum[p]!) / bgLum) * SHADOW_STRENGTH) * reach(p % w) * 255);
       out[i] = 0;
       out[i + 1] = 0;
       out[i + 2] = 0;

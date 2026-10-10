@@ -25,7 +25,8 @@
 import { localFallbackMove, localSupport, type CameraEasing, type CameraMove, type CameraSpeed } from "@/domain/camera-grammar";
 import type { RenderTarget } from "./render";
 import { PARALLAX_FACTOR } from "@/domain/scene-plan";
-import { frameShape, subjectBoxes, subtitleTopLine, type SubjectSlot } from "./layer-layout";
+import { frameShape, subjectBoxes, subtitleTopLine, TOP_SAFE, type SubjectSlot } from "./layer-layout";
+import type { SubjectKind } from "@/domain/subject-grounding";
 import type { AmbientBand } from "@/domain/scene-layers";
 import { SPEAKER_FOCUS, type BiasKey } from "@/domain/speaker-focus";
 
@@ -237,6 +238,10 @@ export interface PlacedSubject {
   scale?: number;
   /** Bottom edge of the subject, share of the frame height (default: the floor line). */
   floorY?: number;
+  /** G10: what it is - sets the depth rules and the contact shadow. Absent = OBJECT. */
+  kind?: SubjectKind;
+  /** G10: flies (no contact shadow, not stood on the ground). */
+  airborne?: boolean;
 }
 
 export interface LayerInputs {
@@ -256,6 +261,8 @@ export interface LayerInputs {
   ambient?: AmbientInput[];
   /** The background's far ground line (share of height); absent = the frame shape's default. */
   horizonY?: number;
+  /** G10: very light depth of field behind the subjects (Gaussian sigma at 1080 px wide). */
+  backgroundSoftness?: number;
 }
 
 export interface AmbientInput {
@@ -295,10 +302,58 @@ const SMALL_SUBJECT = 0.7;
 const SLOT_ORDER: Record<SubjectSlot, number> = { LEFT: 0, RIGHT: 1, CENTER: 2, FULL: 3 };
 
 /**
+ * G10 grounding constants.
+ *  - EYE_LINE: share of a standing person's height above the eyes. At eye level
+ *    the horizon passes through the eyes, so people sized from the horizon sit
+ *    IN the picture instead of towering over it (never below MIN_PERSON of the box).
+ *  - Contact shadow: the subject's own silhouette squashed flat, black, soft and
+ *    faint, under its standing point. Never under a flying subject.
+ *  - Edge: alpha only, eroded by at most EDGE_ERODE levels and softened a hair -
+ *    takes a light halo off without eating hair, fingers or a logo.
+ */
+const EYE_LINE = 0.12;
+const MIN_PERSON = 0.75;
+const SHADOW: Record<SubjectKind, { opacity: number; width: number }> = {
+  PERSON: { opacity: 0.32, width: 0.75 },
+  PRODUCT: { opacity: 0.38, width: 1.05 },
+  ANIMAL: { opacity: 0.3, width: 0.85 },
+  OBJECT: { opacity: 0.3, width: 0.95 },
+};
+const SHADOW_HEIGHT = 0.12;
+const EDGE_ERODE = 80;
+const EDGE_SOFT = 0.5;
+
+/** Where a subject's bottom edge stands (share of height), from its kind, the horizon and the subtitles. */
+export function standingLine(subject: PlacedSubject, opts: { box: number; horizon?: number; subtitleTop: number; size: number }): number {
+  const small = (subject.scale ?? 1) < SMALL_SUBJECT;
+  // A small subject (a bird, a product) never stands under the words, even when told to.
+  if (subject.floorY !== undefined) return small ? Math.min(subject.floorY, opts.subtitleTop) : subject.floorY;
+  if (subject.airborne) {
+    // In the air: above the far ground line (or the upper middle), never under the words.
+    const h = opts.horizon ?? 0.55;
+    return Math.max(TOP_SAFE + opts.size, Math.min(h - 0.12, opts.subtitleTop));
+  }
+  if (small && opts.horizon !== undefined && opts.horizon < opts.subtitleTop) {
+    // A small grounded subject (a bird on the grass): on the near ground, between
+    // the far ground line and the subtitles - not on the horizon, not under the words.
+    return opts.horizon + 0.6 * (opts.subtitleTop - opts.horizon);
+  }
+  // A small subject stands above the subtitle block, never under the words.
+  return small ? Math.min(opts.box, opts.subtitleTop) : opts.box;
+}
+
+/** Person size from the horizon (eye level), as a factor of the box (MIN_PERSON..1). */
+export function personScale(floor: number, horizon: number, boxShare: number): number {
+  const tall = (floor - horizon) / (1 - EYE_LINE);
+  return Math.min(1, Math.max(MIN_PERSON, tall / boxShare));
+}
+
+/**
  * One depth group (midground or foreground) as a transparent full-frame
- * PLATE: each cut-out scaled into its box and stood on the floor line. The
- * plate then takes the camera move scaled by its parallax, so near things
- * move more than far ones - real depth on a push-in, not just a slide.
+ * PLATE: each cut-out scaled into its box and stood on its standing line,
+ * with a faint contact shadow when it touches the ground. The plate then
+ * takes the camera move scaled by its parallax, so near things move more than
+ * far ones - real depth on a push-in, not just a slide.
  */
 function plateChain(opts: {
   inputs: { idx: number; subject: PlacedSubject }[];
@@ -307,8 +362,11 @@ function plateChain(opts: {
   /** Floor line / size scale for the group (midground stands a little higher and smaller). */
   floor?: number;
   size?: number;
+  /** The background's far ground line, when known. */
+  horizon?: number;
 }): { chains: string[]; out: string } {
   const { width: W, height: H } = opts.target;
+  const L = opts.label;
   const items = [...opts.inputs].sort((a, b) => SLOT_ORDER[a.subject.slot ?? "CENTER"] - SLOT_ORDER[b.subject.slot ?? "CENTER"]);
   // Person-sized subjects set the height; a product / bird beside them is extra.
   const fullSize = items.filter((i) => (i.subject.scale ?? 1) >= SMALL_SUBJECT).length || 1;
@@ -316,30 +374,68 @@ function plateChain(opts: {
   const subtitleTop = subtitleTopLine(opts.target);
   const size = opts.size ?? 1;
   const chains: string[] = [];
-  let plate = "";
+  // A transparent full-frame canvas (made from the first input - no extra
+  // source): subjects and shadows are overlaid on it and may hang past its edges.
+  chains.push(`[${items[0]!.idx}:v]format=rgba,split=2[${L}i0][${L}cv]`);
+  chains.push(`[${L}cv]scale=${W}:${H},colorchannelmixer=aa=0[${L}p]`);
+  let plate = `${L}p`;
   items.forEach((item, k) => {
     const b = boxes[k]!;
-    const s = size * (item.subject.scale ?? 1);
+    const subject = item.subject;
+    const kind = subject.kind ?? "OBJECT";
+    const boxShare = b.maxH / H;
+    let s = size * (subject.scale ?? 1);
+    let floor =
+      opts.floor !== undefined && subject.floorY === undefined
+        ? opts.floor
+        : standingLine(subject, { box: b.bottom / H, horizon: opts.horizon, subtitleTop, size: boxShare * s });
+    if (kind === "PERSON" && subject.scale === undefined && !subject.airborne && opts.horizon !== undefined && opts.horizon < floor) {
+      s *= personScale(floor, opts.horizon, boxShare * size);
+    }
+    floor = Math.min(1, floor);
     const bw = Math.max(2, Math.round((b.maxW * s) / 2) * 2);
     const bh = Math.max(2, Math.round((b.maxH * s) / 2) * 2);
-    let floor = item.subject.floorY ?? opts.floor ?? b.bottom / H;
-    // A small subject stands above the subtitle block, never under the words.
-    if ((item.subject.scale ?? 1) < SMALL_SUBJECT) floor = Math.min(floor, subtitleTop);
     const bottom = Math.round(H * floor);
     const cx = Math.round(b.cx);
-    const fit = `[${item.idx}:v]format=rgba,scale=${bw}:${bh}:force_original_aspect_ratio=decrease`;
-    if (k === 0) {
-      plate = `${opts.label}p0`;
-      chains.push(`${fit},pad=${W}:${H}:x='${cx}-iw/2':y='${bottom}-ih':color=black@0[${plate}]`);
+    const sub = `${L}s${k}`;
+    // Fit (aspect kept), then the light edge clean-up on the alpha plane only.
+    const fit =
+      `${k === 0 ? `[${L}i0]` : `[${item.idx}:v]format=rgba,`}scale=${bw}:${bh}:force_original_aspect_ratio=decrease:flags=lanczos,format=gbrap,` +
+      `erosion=threshold0=0:threshold1=0:threshold2=0:threshold3=${EDGE_ERODE},gblur=sigma=${EDGE_SOFT}:planes=8,format=rgba`;
+    if (subject.airborne) {
+      chains.push(`${fit}[${sub}]`);
     } else {
-      const s = `${opts.label}s${k}`;
-      const next = `${opts.label}p${k}`;
-      chains.push(`${fit}[${s}]`);
-      chains.push(`[${plate}][${s}]overlay=x='${cx}-w/2':y='${bottom}-h':format=rgb[${next}]`);
-      plate = next;
+      // Contact shadow: the silhouette squashed flat under the standing point.
+      const sh = SHADOW[kind];
+      const sigma = Math.max(2, Math.round(bw * 0.2) / 10);
+      const pad = Math.ceil(sigma * 3);
+      chains.push(`${fit},split=2[${sub}][${L}k${k}]`);
+      chains.push(
+        `[${L}k${k}]scale=w='trunc(iw*${sh.width}/2)*2':h='max(4,trunc(iw*${SHADOW_HEIGHT}/2)*2)',` +
+          `colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0:aa=${sh.opacity},` +
+          `pad=w='iw+${pad * 2}':h='ih+${pad * 2}':x=${pad}:y=${pad}:color=black@0,format=gbrap,gblur=sigma=${sigma}:planes=8,format=rgba[${L}h${k}]`,
+      );
+      chains.push(`[${plate}][${L}h${k}]overlay=x='${cx}-w/2':y='${bottom}-h*0.85':format=rgb[${L}q${k}]`);
+      plate = `${L}q${k}`;
     }
+    chains.push(`[${plate}][${sub}]overlay=x='${cx}-w/2':y='${bottom}-h':format=rgb[${L}p${k}]`);
+    plate = `${L}p${k}`;
   });
   return { chains, out: plate };
+}
+
+/**
+ * G10: a scene that shows ONLY products stands them on the counter / table
+ * line. When that line is high in the frame the product would have to be tiny
+ * (or poke out of the top): the background is framed closer instead - scaled
+ * up from its top so the counter lands just above the subtitles. Standing
+ * lines given in the picture's coordinates move with it.
+ */
+export function productFraming(layers: LayerInputs, target: Pick<RenderTarget, "width" | "height">): number {
+  const fgs = foregroundsOf(layers);
+  if (!fgs.length || !fgs.every((f) => f.kind === "PRODUCT") || layers.horizonY === undefined) return 1;
+  const k = (subtitleTopLine(target) - 0.04) / layers.horizonY;
+  return k > 1.02 ? Math.min(1.6, Math.round(k * 100) / 100) : 1;
 }
 
 /**
@@ -359,8 +455,18 @@ export function buildLayeredSceneArgs(opts: {
   camera: LocalCameraSpec;
   output: string;
 }): string[] {
-  const { layers, target, camera } = opts;
+  const { target, camera } = opts;
   const { width, height, fps } = target;
+  // G10: a products-only scene frames its background closer (see productFraming).
+  const zoom = productFraming(opts.layers, target);
+  const layers: LayerInputs =
+    zoom === 1
+      ? opts.layers
+      : {
+          ...opts.layers,
+          horizonY: opts.layers.horizonY! * zoom,
+          foregrounds: foregroundsOf(opts.layers).map((f) => (f.floorY !== undefined ? { ...f, floorY: Math.min(1, f.floorY * zoom) } : f)),
+        };
   const dur = Math.max(0.5, Number(opts.duration.toFixed(3)));
   const fgs = foregroundsOf(layers);
   const mids = (layers.midground ?? []).slice(0, 3);
@@ -391,6 +497,8 @@ export function buildLayeredSceneArgs(opts: {
   // Background: far away, so it moves least.
   chains.push(
     `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}` +
+      (zoom > 1 ? `,scale=${Math.round((width * zoom) / 2) * 2}:${Math.round((height * zoom) / 2) * 2}:flags=lanczos,crop=${width}:${height}:(iw-${width})/2:0` : "") +
+      (inFront && layers.backgroundSoftness ? `,gblur=sigma=${((layers.backgroundSoftness * width) / 1080).toFixed(2)}` : "") +
       `${cameraZoompan({ ...camera, critical: false }, { durationSec: dur, target, amplitudeScale: inFront ? PARALLAX_FACTOR.BACKGROUND : 1 })},fps=${fps},` +
       `tpad=stop_mode=clone:stop_duration=${dur},format=yuv420p[bg0]`,
   );
@@ -449,7 +557,7 @@ export function buildLayeredSceneArgs(opts: {
     }
     last = `mix${i}`;
   });
-  const group = (inputs: { idx: number; subject: PlacedSubject }[], label: string, factor: number, place: { floor?: number; size?: number }) => {
+  const group = (inputs: { idx: number; subject: PlacedSubject }[], label: string, factor: number, place: { floor?: number; size?: number; horizon?: number }) => {
     if (inputs.length === 0) return;
     const plate = plateChain({ inputs, target, label, ...place });
     chains.push(...plate.chains);
@@ -459,8 +567,8 @@ export function buildLayeredSceneArgs(opts: {
     chains.push(`[${last}][${label}m]overlay=0:0:format=auto[${label}c]`);
     last = `${label}c`;
   };
-  group(midIdx, "mid", PARALLAX_FACTOR.MIDGROUND, { floor: 0.9, size: 0.6 });
-  group(fgIdx, "fg", PARALLAX_FACTOR.FOREGROUND, {});
+  group(midIdx, "mid", PARALLAX_FACTOR.MIDGROUND, { floor: 0.9, size: 0.6, horizon: layers.horizonY });
+  group(fgIdx, "fg", PARALLAX_FACTOR.FOREGROUND, { horizon: layers.horizonY });
   chains.push(`[${last}]fps=${fps},tpad=stop_mode=clone:stop_duration=10,setsar=1,format=yuv420p[v]`);
   chains.push(`[${audioIdx}:a]aresample=48000,apad[a]`);
 

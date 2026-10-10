@@ -7,10 +7,12 @@ import { parseJson, round } from "@/lib/utils";
 import { projectContent } from "@/domain/content-legacy";
 import { sceneCharacters } from "@/domain/scene-characters";
 import { directVideo, presetMotion, type DirectorContext, type SceneSemantics } from "@/domain/camera-director";
-import { CameraPlanSchema, cameraPromptPhrase, localSupport, type CameraPlan, type Transition } from "@/domain/camera-grammar";
+import { CameraPlanSchema, cameraPromptPhrase, localSupport, type CameraPlan, type ShotSize, type Transition } from "@/domain/camera-grammar";
 import { inferLayers, layersPromptPhrase, locationOf, sceneComplexity } from "@/domain/scene-layers";
 import { LayerSchema, parseScenePlan, ScenePlanSchema, type MotionRoute, type ScenePlan, type SceneLayer } from "@/domain/scene-plan";
 import type { ScriptDoc } from "@/domain/script";
+import { defaultScale, isAirborne, subjectKind } from "@/domain/subject-grounding";
+import { classifyInteraction, routeInteraction, type InteractionRoute, type ReferenceCaps } from "@/domain/physical-interaction";
 import { ambientLoopFor, availableAmbientKinds } from "./ambient-library";
 import { cutoutImage } from "@/media/cutout";
 import type { AmbientInput, LayerInputs, LocalCameraSpec, PlacedSubject } from "@/media/camera-motion";
@@ -19,6 +21,7 @@ import { sideFromSlot, type ScreenSide } from "@/domain/speaker-focus";
 import { listProjectReferences, projectReferenceAssets, sceneReferenceIds, type UniversalReference } from "./reference-assets";
 import { pngHasAlpha, resolveSubjects, subjectCandidates } from "./composite-subjects";
 import { projectFormat } from "./output-profile";
+import { storedProfile } from "@/domain/video-model-profile";
 
 /**
  * SCENE PLANS for a project (QĐ-128): the AI Camera Director + the layer
@@ -109,6 +112,7 @@ function buildPlan(scene: Scene, l: Loaded, camera: CameraPlan, kept: ScenePlan 
   // G5: the preset's ambient level; "Tĩnh" (0) plans no background life at all.
   const intensity = presetMotion(l.ctx).ambient;
   const ambientOff = (kept?.notes.includes("ambient-off") ?? false) || intensity === 0;
+  const interactionOff = kept?.notes.includes(INTERACTION_OFF) ?? false;
   const layers = inferLayers({
     visualDescription: scene.visualDescription,
     characterAction: scene.characterAction,
@@ -120,6 +124,7 @@ function buildPlan(scene: Scene, l: Loaded, camera: CameraPlan, kept: ScenePlan 
   });
   const notes = [
     ...(ambientOff ? ["ambient-off"] : []),
+    ...(interactionOff ? [INTERACTION_OFF] : []),
     ...layers
       .filter((x) => x.layerType === "AMBIENT" && x.motionType !== "AMBIENT_VIDEO")
       .map((x) => `${x.label}: chưa có file loop tại máy - chỉ mô tả trong prompt ảnh/video.`),
@@ -135,7 +140,16 @@ function buildPlan(scene: Scene, l: Loaded, camera: CameraPlan, kept: ScenePlan 
     cameraNeedsVideoAi: localSupport(camera.cameraMovement) === "NONE" || camera.focusStyle === "RACK_FOCUS",
     notes,
     ambientIntensity: intensity,
+    interaction: interactionOff ? "LOCAL_OK" : classifyInteraction(interactionText(scene)).kind,
   });
+}
+
+/** G11: the person chose "Bỏ tương tác" - the scene is staged without subjects touching. */
+export const INTERACTION_OFF = "interaction-off";
+
+/** What the subjects DO in the scene (not what is said: narration may mention drinking without anyone drinking). */
+function interactionText(scene: Pick<Scene, "visualDescription" | "characterAction">): string {
+  return `${scene.visualDescription ?? ""} ${scene.characterAction ?? ""}`;
 }
 
 /**
@@ -384,14 +398,19 @@ export function renderInputsFor(scene: Pick<Scene, "scenePlanJson" | "imagePath"
  * size by what it is - a person fills their box, a product beside a presenter
  * is smaller, an animal (a bird) smaller still.
  */
-function placement(layer: SceneLayer, count: number, horizonY?: number): Pick<PlacedSubject, "scale" | "floorY"> {
-  const byType = layer.entityType === "ANIMAL" ? 0.45 : layer.entityType === "PRODUCT" ? (count > 1 ? 0.4 : 0.6) : undefined;
-  const scale = layer.scale ?? byType;
+function placement(layer: SceneLayer, horizonY?: number): Pick<PlacedSubject, "scale" | "floorY" | "kind" | "airborne"> {
+  // G10: size by what it is AND what it is called (a bird is far smaller than a horse).
+  const kind = subjectKind(layer.entityType);
+  const scale = layer.scale ?? defaultScale(kind, layer.label);
   // A product with no standing line of its own stands on the location's horizon
   // once one is set: in an eye-level shot that is the counter / table top.
-  const floorY = layer.floorY ?? (layer.entityType === "PRODUCT" ? horizonY : undefined);
-  return { ...(scale !== undefined ? { scale } : {}), ...(floorY !== undefined ? { floorY } : {}) };
+  const floorY = layer.floorY ?? (kind === "PRODUCT" ? horizonY : undefined);
+  const airborne = isAirborne(layer.label, layer.airborne);
+  return { kind, ...(airborne ? { airborne } : {}), ...(scale !== undefined ? { scale } : {}), ...(floorY !== undefined ? { floorY } : {}) };
 }
+
+/** G10: depth of field by shot size (Gaussian sigma at 1080 px wide) - very light, only behind subjects. */
+const BACKGROUND_SOFTNESS: Partial<Record<ShotSize, number>> = { EXTREME_CLOSE_UP: 1.8, CLOSE_UP: 1.6, MEDIUM_CLOSE_UP: 1.2, MEDIUM: 0.8, MEDIUM_WIDE: 0.5 };
 
 /** Lean sizes (share of frame width): exact sides on separate cut-outs, smaller on a drawn picture. */
 const LEAN_EXACT = 0.015;
@@ -459,8 +478,8 @@ function renderStill(
       ? ["FULL"]
       : slotsForNames(fg.map((x) => x.layer.label), plan.camera.screenLeft, plan.camera.screenRight);
   const horizonY = plan.layers.find((x) => x.layerType === "BACKGROUND" && x.horizonY !== undefined)?.horizonY;
-  const foregrounds: PlacedSubject[] = fg.map((x, i) => ({ path: x.path, slot: fgSlots[i], critical: x.layer.critical, ...placement(x.layer, fg.length, horizonY) }));
-  const midground: PlacedSubject[] = cutouts("MIDGROUND").map((x) => ({ path: x.path, critical: x.layer.critical, ...placement(x.layer, 1, horizonY) }));
+  const foregrounds: PlacedSubject[] = fg.map((x, i) => ({ path: x.path, slot: fgSlots[i], critical: x.layer.critical, ...placement(x.layer, horizonY) }));
+  const midground: PlacedSubject[] = cutouts("MIDGROUND").map((x) => ({ path: x.path, critical: x.layer.critical, ...placement(x.layer, horizonY) }));
   const foreground = foregrounds.length > 0;
   const ambient = ambientLayers
     .map((x): AmbientInput | null => {
@@ -476,9 +495,18 @@ function renderStill(
     })
     .filter((a): a is AmbientInput => a !== null);
   if (!foreground && midground.length === 0 && ambient.length === 0) return { localCamera };
+  // Very light depth of field behind subjects, by shot size (a wide shot stays sharp).
+  const soft = foreground ? BACKGROUND_SOFTNESS[plan.camera.shotSize] : undefined;
   return {
     localCamera,
-    layers: { background: picture, ...(foregrounds.length ? { foregrounds } : {}), ...(midground.length ? { midground } : {}), ambient, ...(horizonY !== undefined ? { horizonY } : {}) },
+    layers: {
+      background: picture,
+      ...(foregrounds.length ? { foregrounds } : {}),
+      ...(midground.length ? { midground } : {}),
+      ambient,
+      ...(horizonY !== undefined ? { horizonY } : {}),
+      ...(soft ? { backgroundSoftness: soft } : {}),
+    },
   };
 }
 
@@ -588,4 +616,49 @@ export async function enableComposite(sceneId: string): Promise<ScenePlan> {
 /** DÙNG CAMERA LOCAL: this scene moves on this machine ($0); free always wins. */
 export async function useLocalCamera(sceneId: string): Promise<void> {
   await prisma.scene.update({ where: { id: sceneId }, data: { motionMode: "LOCAL_MOTION", motionSource: "LOCAL_MOTION" } });
+}
+
+/**
+ * G11 - PHYSICAL INTERACTION: does this scene need its subjects to touch, and
+ * if so where should its movement come from (physical-interaction.ts)? Read
+ * only, $0: a recommendation and the choices for the Scene Editor - paid
+ * Video AI still goes through the router + approval, never from here.
+ */
+export async function sceneInteraction(
+  scene: Scene,
+  models: { modelId: string; capabilityProfileJson: string | null }[],
+): Promise<InteractionRoute> {
+  const plan = parseScenePlan(scene.scenePlanJson);
+  const critical = sceneSubjectRefs(scene, await listProjectReferences(scene.projectId))
+    .filter((r) => r.priority === "CRITICAL" && r.type !== "ENVIRONMENT")
+    .map((r) => r.type);
+  const pool = scene.videoModelPinned && scene.videoModel ? models.filter((m) => m.modelId === scene.videoModel) : models;
+  return routeInteraction({
+    text: interactionText(scene),
+    dropped: plan?.notes.includes(INTERACTION_OFF) ?? false,
+    nativeClip: Boolean(existingAbsolute(scene.videoPath)),
+    // After the composite is switched on the scene's picture is the location, not the scene.
+    scenePicture: plan?.route !== "COMPOSITE" && Boolean(existingAbsolute(scene.imagePath)),
+    critical,
+    models: pool.map((m) => referenceCaps(m.capabilityProfileJson)),
+    paidApproved: scene.motionSource === "AI_VIDEO",
+  });
+}
+
+function referenceCaps(json: string | null): ReferenceCaps {
+  const p = storedProfile(json);
+  return p
+    ? { referenceImage: p.referenceImage, characterReference: p.characterReference, productReference: p.productReference, directReference: p.directReference, maxReferenceImages: p.maxReferenceImages }
+    : {};
+}
+
+/** BỎ TƯƠNG TÁC: the scene is staged with its subjects apart (beside, pointing) - local layers are fine. $0. */
+export async function dropInteraction(sceneId: string): Promise<ScenePlan> {
+  const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
+  const base = parseScenePlan(scene.scenePlanJson) ?? (await suggestedPlans(scene.projectId)).get(sceneId)!.suggestion;
+  const notes = [...base.notes.filter((n) => n !== INTERACTION_OFF), INTERACTION_OFF].slice(-10);
+  const plan = ScenePlanSchema.parse({ ...base, notes, interaction: "LOCAL_OK" });
+  await prisma.scene.update({ where: { id: sceneId }, data: { scenePlanJson: JSON.stringify(plan) } });
+  await logger.info({ event: "scene_plan.interaction_off", projectId: scene.projectId, message: `Cảnh ${scene.sceneNumber}: bỏ tương tác vật lý - các chủ thể đứng tách rời.` });
+  return plan;
 }

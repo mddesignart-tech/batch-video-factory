@@ -433,7 +433,10 @@ async function restoreMockPrices(): Promise<void> {
   }
 }
 
-describe("batch generation", () => {
+// Each expansion runs the whole mock pipeline on the suite's shared SQLite
+// file, which grows over a full run: these took 36 s alone but up to ~300 s
+// late in a full suite and timed out at the global 300 s (2026-10-01, 10-08, 10-10).
+describe("batch generation", { timeout: 600_000 }, () => {
   /** A batch row plus a costed plan, with no approval attached yet. */
   async function planOnlyBatch(amount: number, maxCostPerVideo: number) {
     const idioms = await prisma.idiom.findMany({ take: amount + 1 });
