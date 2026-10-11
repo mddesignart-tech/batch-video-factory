@@ -1,7 +1,78 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-01 (**V1.2.0 RELEASED** — tag `batch-video-factory-v1.2.0`, QĐ-116, $0; không bắt đầu V1.3)
-**Cột mốc hiện tại:** **FIRST REAL STORYBOARD PRODUCTION RUN: PASSED — baseline v1.1.0.**
+**Cập nhật:** 2026-10-11 (**V1.3 CODE FREEZE** — `main` = `origin/main` = `b79fd3d`; chờ người dùng xác nhận tag
+`batch-video-factory-v1.3.0`. Chưa tag, chưa GitHub Release.)
+**Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## 🔒 V1.3 CODE FREEZE — QĐ-117 → QĐ-131 (2026-10-02 → 2026-10-11, $0, không POST trả phí)
+
+```
+main = origin/main = b79fd3d   (fix: 30 fps ambient loops and same-shot continuity cut)
+FULL SUITE  113/113 file · 1715/1715 test PASS   (một process vitest, ~2,4 giờ, 2026-10-11)
+lint PASS · typecheck PASS · build PASS
+PAID API POST trong toàn bộ V1.3 = 0   (Mock Mode + FFmpeg tại máy)
+Release notes: RELEASE_NOTES_V1.3.md
+```
+
+Từ v1.2.0: 38 commit. Migration mới (đều đã áp lên `data/app.db` production sau sao lưu, số liệu không đổi):
+`20261002000000_project_output_profile`, `20261003000000_multi_content`, `20261004000000_reference_assets`,
+`20261005000000_output_controls`, `20261006000000_creative_style`, `20261007000000_scene_plan`. QĐ-129 → QĐ-131 không thêm
+migration (lưu trong JSON của cảnh). Chi tiết từng quyết định: `.ai/DECISIONS.md`.
+
+**Voice / chi phí / định dạng (QĐ-117 → QĐ-122).** Nghe thử giọng và dùng lại giọng đã tạo (không mua TTS lần hai;
+file giọng mất → báo `VOICE_MISSING_LOCAL_FILE`, không âm thầm mua lại). Quyền chi DRAFT không còn bị đọc thành trần $0.
+Thẻ NGÂN SÁCH VIDEO, lỗi ngân sách dễ hiểu, nhãn giá trên nút trả phí. Không có model Video AI tự chọn → cảnh
+CẦN CHỌN (chọn model / LOCAL MOTION / bỏ qua), không phải lỗi. Preset nền tảng + `Project.outputProfileJson` (khung TẠO ≠
+khung XUẤT). Cảnh nhiều người nói: phụ đề lấy từ chính danh sách câu của giọng.
+
+**Multi-Content Engine (QĐ-123).** Không chỉ thành ngữ: Idiom / Product Review / AI / Custom / Toys / Animals / Story /
+Knowledge / Ads, nguồn từ prompt hoặc văn bản, đối tượng/ngôn ngữ/giọng điệu. Trang TẠO VIDEO 4 bước + xem trước kịch bản
++ DUYỆT KỊCH BẢN. Bảng `Idiom` thành Content Library (`contentType`, project cũ NULL = ENGLISH_IDIOM). Hệ provider Video AI
+mở rộng (adapter + capability). Routing production không đổi khi model chưa có capability profile.
+
+**Universal Reference Assets (QĐ-124).** `ReferenceAsset` cho nhân vật, sản phẩm, đồ vật, đồ chơi, động vật, logo,
+phong cách, bối cảnh; gắn theo cảnh (`Scene.referenceIdsJson`) hoặc xuyên suốt video. Nhân vật vẫn ở `CharacterReference`,
+chỉ ánh xạ khi đọc. Đổi ảnh tham chiếu → chỉ cảnh phụ thuộc mất ảnh/clip GENERATED. Logo/style không gửi làm ảnh cho model.
+
+**Subtitle / Voice controls (QĐ-125, QĐ-126).** Bật/tắt và chỉnh phụ đề, nhạc nền, SFX tổng hợp tại máy, âm lượng, giọng
+thuyết minh (Narrator). Đổi phụ đề/âm thanh = render lại tại máy $0; chỉ đổi giọng mới cần TTS (báo giá + xác nhận).
+Phụ đề đồng nhất toàn video: xuống 2 dòng → chia màn hình theo dấu câu → chỉ thu chữ khi cần, tối thiểu 0,85.
+
+**Creative Style Engine (QĐ-127).** Preset / tone / mức hài 0–5 / nhịp / punchline / cảm xúc dùng chung mọi loại nội dung
+(`Project.creativeStyleJson`). Idiom "Tự động" giữ prompt idiom-v1 byte-for-byte.
+
+**Camera Grammar / AI Camera Director (QĐ-128).** Thư viện ngôn ngữ camera, `Scene.scenePlanJson` (cỡ cảnh, góc, chuyển
+động, tốc độ, lấy nét, lý do). Director chọn theo loại cảnh + Creative Style + preset camera + khổ khung; continuity pass
+(cùng hướng lia, hiệu ứng mạnh ≤ 1/3 cảnh, người nói giữ bên màn hình). Panel "Camera & lớp cảnh": người dùng sửa = USER,
+không bị ghi đè. Project cũ không có plan = render như V1.2.
+
+**Chuyển cảnh + camera mượt (QĐ-129, QĐ-130).** Xfade giữ đồng hồ (phụ đề, giọng không lệch); CUT/NONE = concat copy như
+V1. Camera tại máy chạy trên mọi khung (không giữ cuối, không bậc thang), đuôi blend vẫn chuyển động, cùng nhân vật → cắt.
+Sửa treo loudnorm (LRA=0), `socket_timeout=60`, các P3 giao diện của V1.2.
+
+**Multi-Layer Scene Composer (QĐ-131 G1 → G11).**
+- Lớp FOREGROUND / MIDGROUND / BACKGROUND / AMBIENT: tách nền chủ thể tại máy (ảnh nền phẳng), 1–3 chủ thể
+  trái/giữa/phải, compositor một graph FFmpeg với parallax theo độ sâu (nền 0,2 / trung 0,5 / tiền 1,0).
+- Ambient: loop sáng-trên-đen (screen blend) và loop trong suốt (.webm VP9 alpha) theo dải SKY / HORIZON / GROUND / FULL;
+  preset quyết định mức ambient và xu hướng chuyển cảnh. Nghiêng nhẹ về người đang nói, giữ two-shot.
+- Đặt chủ thể đứng vững: cỡ theo loại (chim, mèo/chó, ngựa, người), bóng tiếp xúc từ silhouette, nền mờ theo cỡ cảnh,
+  khung riêng cho cảnh chỉ có sản phẩm; khối VỊ TRÍ TRONG KHUNG (cỡ / chỗ đứng / chân trời).
+- Hybrid local / Video AI: preflight tách phần chuyển động $0 tại máy và phần Video AI trả phí, không cộng hai lần.
+- Định tuyến theo tương tác vật lý (`domain/physical-interaction.ts`): clip gốc → ảnh nguyên cảnh → Video AI chỉ khi đã
+  duyệt và vẫn giữ tham chiếu bắt buộc → hỏi người dùng; có lựa chọn "Bỏ tương tác".
+- Kiểm tra trên UI thật (bản sao cô lập `data/.qa-131`, mock) và bằng mắt (g8-v2: camera, street, animal được duyệt).
+- 2026-10-11 (`b79fd3d`): loop ambient chuẩn hoá 30 fps (= tốc độ render; 24 fps lặp 6 khung/giây), `data/ambient/*` đã tạo
+  lại; continuity: cảnh tĩnh cùng nhân vật + cùng bối cảnh sau PUSH_IN → PULL_BACK cùng tốc độ thay vì lia từ mép (hết
+  lệch ~39 px khi cắt).
+
+**Tiền.** Không POST trả phí nào trong V1.3. Hạn mức toàn cục $15,00 (người dùng đặt 2026-10-04); sổ production
+$10,824435 (đọc lần cuối 2026-10-05).
+
+**Giới hạn đã biết:** xem `RELEASE_NOTES_V1.3.md` mục Known limitations; backlog sau v1.3.0: `.ai/NEXT_TASKS.md`.
+
+---
+
+## Baseline sản xuất thật (v1.1.0)
 
 ```
 FIRST REAL STORYBOARD PRODUCTION RUN: PASSED   (2026-09-25, lô 62e9322b)

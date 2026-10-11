@@ -1,6 +1,31 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-01 — **V1.2.0 RELEASED** (tag `batch-video-factory-v1.2.0`, QĐ-116). Không bắt đầu V1.3 khi chưa được yêu cầu.
+**Cập nhật:** 2026-10-11 — **V1.3 CODE FREEZE** (`b79fd3d`, full suite 1715/1715). Chờ người dùng xác nhận tag
+`batch-video-factory-v1.3.0`. Backlog dưới đây là SAU v1.3.0 — không làm khi chưa được yêu cầu.
+
+---
+
+## Backlog SAU v1.3.0 (CHƯA làm, chờ duyệt từng mục)
+
+**P1 / P2**
+
+- [ ] **Thư viện ambient loop có alpha chất lượng production** — traffic / pedestrians / birds / leaves hiện là hình
+      minh hoạ tự sinh bằng FFmpeg. Cần loop thật (.webm VP9 alpha / .mov) đặt vào `data/ambient/`, chuẩn 30 fps.
+- [ ] **Capability Video AI cho tham chiếu trực tiếp bắt buộc** — xác minh provider/model nào giữ được sản phẩm/nhân vật
+      tham chiếu (direct reference) đủ an toàn để định tuyến AUTO; hiện đường này luôn hỏi người dùng.
+- [ ] **Chất lượng tương tác vật lý phức tạp** — cầm, rót, ôm, chạm sản phẩm: local multi-layer không làm được;
+      cần clip gốc hoặc Video AI đã kiểm chứng.
+- [ ] **Kiểm tra toggle "Xuyên suốt video"** (`reference-panel.tsx`) — bật/tắt có reset gán tham chiếu thủ công theo
+      cảnh hay không; chưa kiểm.
+- [ ] **LOGO Reference → overlay thật trong final render** — hiện logo chỉ là tham chiếu, chưa đặt lên video xuất.
+- [ ] **Trích nội dung từ URL** làm nguồn kịch bản.
+- [ ] **Nhập clip video người dùng tải lên** làm cảnh (clip gốc).
+- [ ] **Creative Style trong luồng lô thành ngữ (batch idiom)** — hiện chỉ ở luồng TẠO VIDEO / project.
+- [ ] **UI song ngữ nâng cao.**
+- [ ] **Kiểm thử thật bằng người dùng** cho kéo thả / gán lớp thủ công (drag/drop, manual layer UI).
+- [ ] **Hiệu năng SQLite / bộ test** — full suite ~2,4 giờ; "batch generation" trong `pipeline.e2e` chập chờn timeout
+      (100–300 s trên SQLite chung); điều tra trước khi nâng thêm timeout.
+- [ ] **Portable / LAN packaging** — kế hoạch 2026-10-01 đang TẠM DỪNG, chưa có code.
 
 ---
 
@@ -14,13 +39,11 @@
 
 ## ✅ V1.2 Final QA COMPLETE (QĐ-115) — việc còn mở
 
-- [ ] P2 (vận hành): còn ~1 "Socket timeout" SQLite mỗi lượt chạy khi trang làm việc mở. Đề xuất: thêm
-      `?socket_timeout=60` vào DATABASE_URL production (sửa .env — cần đồng ý); WAL là quyết định riêng (sao lưu phải
-      chép -wal).
-- [ ] P3: trang `/` tràn ngang ở 390 px (bảng dự án gần đây / hàng đợi).
-- [ ] P3: "dùng lại tiết kiệm" trên thẻ (gồm ảnh nhập) ≠ "Giá trị dùng lại" ở tổng kết (chỉ REUSED) — thống nhất nhãn.
-- [ ] P3: `/queue` hiện APPROVED cho video chưa được phủ, COMPLETED cho video giọng hỏng (trang làm việc đúng).
-- [ ] P3: trang asset hiện kích thước đã ghi, không phải kích thước thật trên đĩa của file INVALID.
+- [x] P2 (vận hành): "Socket timeout" SQLite — XONG QĐ-129 (`?socket_timeout=60`); WAL vẫn là quyết định riêng.
+- [x] P3: trang `/` tràn ngang ở 390 px — XONG QĐ-129.
+- [x] P3: nhãn "dùng lại tiết kiệm" / "Giá trị dùng lại" — XONG QĐ-129.
+- [x] P3: `/queue` APPROVED / COMPLETED sai — XONG QĐ-129.
+- [x] P3: trang asset hiện kích thước thật trên đĩa — XONG QĐ-129.
 - [ ] MANUAL QA (người dùng): làm theo `docs/MANUAL_QA_V1.2.md` — kéo thư mục, kéo ZIP, chọn nhiều JSON,
       COPY PATH, bấm DUYỆT & CHẠY / TIẾP TỤC bằng chuột thật, xem video bằng mắt.
 
