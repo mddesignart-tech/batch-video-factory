@@ -8,7 +8,8 @@
  * blur, which also keeps the shapes soft.
  */
 
-export const AMBIENT_LOOP = { width: 720, height: 1280, fps: 24, seconds: 6 } as const;
+/** 30 fps = the render rate: a 24 fps loop would repeat 6 frames a second (judder). */
+export const AMBIENT_LOOP = { width: 720, height: 1280, fps: 30, seconds: 6 } as const;
 
 /** Phase that completes exactly one turn per loop. */
 const P = `(2*PI*T/${AMBIENT_LOOP.seconds})`;

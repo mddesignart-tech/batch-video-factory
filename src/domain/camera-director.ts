@@ -423,8 +423,16 @@ export function continuityPass(
     } else {
       const fam = moveFamily(p.cameraMovement);
       if (prevStill && fam !== "OTHER" && fam === moveFamily(prevStill.cameraMovement)) {
-        const varied = variedMove(fam, scenes[i]!.semantics.duration, direction);
-        if (varied) {
+        // Same cast, same place: the join is a CUT. A pan here would start
+        // off-centre right after a push ended centred - a jump in the frame.
+        // Pull back instead: it starts where the push ended.
+        const sameShot = i > 0 && out[i - 1] === prevStill && sharesCharacter(scenes[i - 1]!.semantics, scenes[i]!.semantics) && (scenes[i - 1]!.semantics.location ?? null) === (scenes[i]!.semantics.location ?? null);
+        const varied: CameraMove | null = fam === "IN" && sameShot ? "PULL_BACK" : variedMove(fam, scenes[i]!.semantics.duration, direction);
+        if (varied === "PULL_BACK" && sameShot) {
+          p.cameraMovement = varied;
+          p.cameraSpeed = prevStill.cameraSpeed;
+          p.reason += " Cùng nhân vật, cùng bối cảnh: kéo máy ra từ đúng khung cảnh trước kết thúc để cắt cảnh không giật.";
+        } else if (varied) {
           p.cameraMovement = varied;
           p.cameraSpeed = varied.startsWith("PAN_") ? "VERY_SLOW" : p.cameraSpeed;
           if (varied.startsWith("PAN_")) direction = direction ?? (varied === "PAN_LEFT" ? "L" : "R");

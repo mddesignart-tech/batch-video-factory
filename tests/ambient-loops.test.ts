@@ -41,6 +41,11 @@ describe("AMBIENT LOOPS (tạo tại máy)", () => {
     }
   });
 
+  it("loop tạo ở 30 fps (= tốc độ render), không 24 fps gây lặp khung", () => {
+    expect(AMBIENT_LOOP.fps).toBe(30);
+    expect(buildAmbientLoopArgs("clouds", "x.mp4").join(" ")).toContain(":r=30:");
+  });
+
   it("mây: render thật, đúng thời lượng, sáng trên nền đen (nửa dưới gần như đen)", async () => {
     const out = file("clouds.mp4");
     await ffmpeg(buildAmbientLoopArgs("clouds", out), { timeoutMs: 120_000 });

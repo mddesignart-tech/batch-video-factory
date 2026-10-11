@@ -157,6 +157,18 @@ describe("CAMERA DIRECTOR — đa dạng + liên tục", () => {
     expect(renderInputsFor({ scenePlanJson: plan, imagePath: null, videoPath: "clip.mp4" }).localCamera).toBeUndefined();
   });
 
+  it("cùng nhân vật + cùng bối cảnh sau cảnh đẩy máy → kéo máy ra (không lia lệch khung khi cắt)", () => {
+    const street = { location: "street", charactersPresent: ["Leo", "Mia"], speakingCharacters: ["Leo", "Mia"], sceneRole: "dialogue" };
+    const plans = directVideo([s(1, street), s(2, street)], ctx).map((x) => x.plan);
+    expect(plans[0]!.cameraMovement).toBe("PUSH_IN");
+    expect(plans[1]!.transitionIn).toBe("CUT");
+    expect(plans[1]!.cameraMovement).toBe("PULL_BACK");
+    expect(plans[1]!.cameraSpeed).toBe(plans[0]!.cameraSpeed);
+    // Different place: the old variety (a slight pan) is kept.
+    const moved = directVideo([s(1, street), s(2, { ...street, location: "park" })], ctx).map((x) => x.plan.cameraMovement);
+    expect(moved[1]).toMatch(/^PAN_/);
+  });
+
   it("cảnh cảm xúc cùng nhân vật với cảnh trước → CẮT, không hoà tan", () => {
     const emotional = { sceneRole: "moment", visualDescription: "Leo looks sad and quiet." };
     const same = directVideo([s(1), s(2, emotional)], ctx);
