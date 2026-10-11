@@ -10,10 +10,14 @@ import {
   changeReference,
   confirmSceneWithoutReferences,
   createReference,
+  heldMessage,
   setSceneReferences,
 } from "@/services/reference-assets";
 import { planProjectScenes } from "@/services/scene-plan-service";
 import type { ActionResult } from "./idioms";
+
+/** `confirm`: nothing was saved yet - the change would make a bought picture stale. Ask, then call again with `{ confirm: true }`. */
+export type ReferenceActionResult = ActionResult & { confirm?: boolean };
 
 /**
  * Tài sản tham chiếu (QĐ-124). Every action here is $0: files go into the Asset
@@ -49,7 +53,7 @@ export async function addReferenceAction(projectId: string, formData: FormData):
   const files = await filesFrom(formData);
   if (typeof files === "string") return { ok: false, message: files };
   try {
-    await createReference({
+    const created = await createReference({
       projectId,
       type,
       name: String(formData.get("name") ?? ""),
@@ -57,10 +61,11 @@ export async function addReferenceAction(projectId: string, formData: FormData):
       useThroughout: formData.get("useThroughout") === "on",
       uploads: files,
     });
-    if (formData.get("assign") !== "off") await autoAssignReferences(projectId, { onlyEmpty: false });
+    // Only the NEW reference is added where it fits; every existing list stays.
+    const assigned = formData.get("assign") !== "off" ? await autoAssignReferences(projectId, { onlyRefIds: [created.id] }) : null;
     await replan(projectId);
     revalidatePath(`/projects/${projectId}`);
-    return { ok: true, message: "Đã thêm tham chiếu và gắn vào các cảnh phù hợp. Chi phí $0." };
+    return { ok: true, message: `Đã thêm tham chiếu và gắn vào các cảnh phù hợp. Chi phí $0.${assigned ? heldMessage(assigned.held) : ""}` };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }
@@ -82,29 +87,45 @@ export async function updateReferenceAction(
   projectId: string,
   refId: string,
   change: { primaryAssetId?: string; enabled?: boolean; useThroughout?: boolean; name?: string; description?: string; priority?: "CRITICAL" | "IMPORTANT" | "OPTIONAL" },
-): Promise<ActionResult> {
+  opts: { confirm?: boolean } = {},
+): Promise<ReferenceActionResult> {
   try {
-    const r = await changeReference(refId, change);
-    if (change.useThroughout !== undefined || change.enabled !== undefined) {
-      await autoAssignReferences(projectId);
-      await replan(projectId);
+    const r = await changeReference(refId, { ...change, confirmInvalidate: opts.confirm === true });
+    if (r.needsConfirmation) {
+      return {
+        ok: false,
+        confirm: true,
+        message: `Cảnh ${r.staleScenes!.join(", ")} đã có ảnh tạo sẵn với tham chiếu này. Đổi thì các ảnh đó không còn khớp: cảnh cần ảnh mới (trả phí - xem chi phí ở PREFLIGHT trước khi tạo). Chưa lưu gì.`,
+      };
     }
+    // "Xuyên suốt video" ON adds this reference where it is missing; OFF and
+    // "Đang dùng" never touch a scene's list (a hand-made assignment stays).
+    const assigned = change.useThroughout === true ? await autoAssignReferences(projectId, { onlyRefIds: [refId] }) : null;
+    if (change.useThroughout !== undefined || change.enabled !== undefined) await replan(projectId);
     revalidatePath(`/projects/${projectId}`);
     const touched = [...r.invalidatedScenes, ...r.rephotographedScenes];
     return {
       ok: true,
-      message: touched.length
-        ? `Đã cập nhật. Chỉ cảnh ${touched.join(", ")} cần ảnh mới - xem chi phí ở PREFLIGHT trước khi tạo. Giọng và phụ đề giữ nguyên.`
-        : "Đã cập nhật. Không cảnh nào cần tạo lại.",
+      message:
+        (touched.length
+          ? `Đã cập nhật. Chỉ cảnh ${touched.join(", ")} cần ảnh mới - xem chi phí ở PREFLIGHT trước khi tạo. Giọng và phụ đề giữ nguyên.`
+          : "Đã cập nhật. Không cảnh nào cần tạo lại.") + (assigned ? heldMessage(assigned.held) : ""),
     };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }
 }
 
-export async function setSceneReferencesAction(projectId: string, sceneId: string, ids: string[]): Promise<ActionResult> {
+export async function setSceneReferencesAction(projectId: string, sceneId: string, ids: string[], opts: { confirm?: boolean } = {}): Promise<ReferenceActionResult> {
   try {
-    const r = await setSceneReferences(sceneId, ids);
+    const r = await setSceneReferences(sceneId, ids, { confirmInvalidate: opts.confirm === true });
+    if (r.needsConfirmation) {
+      return {
+        ok: false,
+        confirm: true,
+        message: `Cảnh ${r.sceneNumber} đã có ảnh tạo sẵn. Đổi tham chiếu thì ảnh đó không còn khớp: cảnh cần ảnh mới (trả phí - xem chi phí ở PREFLIGHT trước khi tạo). Chưa lưu gì.`,
+      };
+    }
     await replan(projectId);
     revalidatePath(`/projects/${projectId}`);
     return { ok: true, message: r.invalidated ? "Đã đổi tham chiếu của cảnh - cảnh này cần ảnh mới (xem chi phí trước khi tạo)." : "Đã lưu." };
@@ -115,10 +136,10 @@ export async function setSceneReferencesAction(projectId: string, sceneId: strin
 
 export async function autoAssignReferencesAction(projectId: string): Promise<ActionResult> {
   try {
-    await autoAssignReferences(projectId);
+    const assigned = await autoAssignReferences(projectId);
     await replan(projectId);
     revalidatePath(`/projects/${projectId}`);
-    return { ok: true, message: "Đã tự gắn tham chiếu theo nội dung từng cảnh. Bạn có thể bỏ/thêm thủ công." };
+    return { ok: true, message: `Đã tự gắn tham chiếu cho các cảnh chưa có. Cảnh đã gắn tay giữ nguyên.${heldMessage(assigned.held)}` };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

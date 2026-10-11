@@ -431,7 +431,7 @@ export async function generateContentProjectScript(projectId: string): Promise<S
   await applyContentScenePlan(projectId, script, request);
   // Reference intent the writer returned, then deterministic auto-assignment
   // for every scene it left empty. Visible and editable on the storyboard.
-  await autoAssignReferences(projectId, { onlyEmpty: true });
+  await autoAssignReferences(projectId);
   // QĐ-128: AI Camera Director + layers for the new script ($0, no media).
   await planProjectScenes(projectId);
 

@@ -924,7 +924,7 @@ export async function preflightImportedBatch(
       lifecycle = "COMPLETED";
     } else if ((referenceIssues = await referenceProblems(project.id)).length > 0) {
       // QĐ-124: a reference a scene must show is gone (file deleted, reference
-      // removed or switched off). Never re-made on its own - a person re-uploads.
+      // removed). Never re-made on its own - a person re-uploads.
       lifecycle = "BLOCKED";
       blockedReason = referenceIssues.map((p) => p.message).join(" ");
     } else if (badVoices.has(project.id)) {

@@ -49,11 +49,21 @@ export function ReferencePanel({ projectId, references, scenes, title }: { proje
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [adding, setAdding] = useState(false);
   const [type, setType] = useState<ReferenceType>("PRODUCT");
+  // A change that would make a bought picture stale: nothing saved yet, the
+  // person confirms (or cancels) here first.
+  const [ask, setAsk] = useState<{ text: string; run: () => Promise<{ ok: boolean; message: string }> } | null>(null);
   const own = references.filter((r) => r.source === "REFERENCE");
 
-  const act = (fn: () => Promise<{ ok: boolean; message: string }>) =>
+  type Result = { ok: boolean; message: string; confirm?: boolean };
+  const act = (fn: () => Promise<Result>, confirmed?: () => Promise<Result>) =>
     start(async () => {
       const r = await fn();
+      if (r.confirm && confirmed) {
+        setAsk({ text: r.message, run: confirmed });
+        setMsg(null);
+        return;
+      }
+      setAsk(null);
       setMsg({ ok: r.ok, text: r.message });
       router.refresh();
     });
@@ -128,6 +138,18 @@ export function ReferencePanel({ projectId, references, scenes, title }: { proje
         ) : null}
 
         {msg ? <Alert tone={msg.ok ? "ok" : "danger"} title={msg.text} /> : null}
+        {ask ? (
+          <Alert tone="warn" title={ask.text}>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="sm" variant="primary" disabled={pending} onClick={() => act(ask.run)}>
+                XÁC NHẬN ĐỔI · cảnh cần ảnh mới
+              </Button>
+              <Button size="sm" variant="ghost" disabled={pending} onClick={() => setAsk(null)}>
+                Huỷ - giữ ảnh hiện có
+              </Button>
+            </div>
+          </Alert>
+        ) : null}
 
         {REFERENCE_TYPES.map((t) => {
           const list = references.filter((r) => r.type === t);
@@ -153,7 +175,12 @@ export function ReferencePanel({ projectId, references, scenes, title }: { proje
                           type="button"
                           title={img.primary ? "Ảnh chính" : r.source === "REFERENCE" ? "Đặt làm ảnh chính" : img.filename}
                           disabled={pending || img.primary || r.source !== "REFERENCE"}
-                          onClick={() => act(() => updateReferenceAction(projectId, r.id, { primaryAssetId: img.assetId }))}
+                          onClick={() =>
+                            act(
+                              () => updateReferenceAction(projectId, r.id, { primaryAssetId: img.assetId }),
+                              () => updateReferenceAction(projectId, r.id, { primaryAssetId: img.assetId }, { confirm: true }),
+                            )
+                          }
                           className={`relative h-14 w-14 overflow-hidden rounded border ${img.primary ? "border-brand-500" : "border-ink-700"}`}
                         >
                           {img.exists ? (
@@ -225,7 +252,10 @@ export function ReferencePanel({ projectId, references, scenes, title }: { proje
                         disabled={pending || !r.enabled}
                         onChange={(e) => {
                           const next = e.currentTarget.checked ? [...s.referenceIds, r.id] : s.referenceIds.filter((x) => x !== r.id);
-                          act(() => setSceneReferencesAction(projectId, s.id, next));
+                          act(
+                            () => setSceneReferencesAction(projectId, s.id, next),
+                            () => setSceneReferencesAction(projectId, s.id, next, { confirm: true }),
+                          );
                         }}
                       />
                       {r.name}

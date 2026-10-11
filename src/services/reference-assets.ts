@@ -235,7 +235,24 @@ function fidelityMotion(scene: Pick<Scene, "motionMode">, refs: UniversalReferen
 }
 
 /** Set exactly which references a scene shows. $0; only THIS scene's generated picture is invalidated. */
-export async function setSceneReferences(sceneId: string, ids: string[]): Promise<{ changed: boolean; invalidated: boolean }> {
+/**
+ * The scene has a picture (or clip) that was BOUGHT for its current references.
+ * Changing what it shows makes that picture stale, and the next run pays for a
+ * new one - so that is never done without the person saying yes first.
+ */
+function hasGeneratedMedia(scene: Pick<Scene, "imageSource" | "imagePath" | "videoPath">): boolean {
+  return scene.imageSource === "GENERATED" && Boolean(scene.imagePath || scene.videoPath);
+}
+
+export interface SceneReferencesResult {
+  sceneNumber: number;
+  changed: boolean;
+  invalidated: boolean;
+  /** Nothing was changed: the scene's GENERATED picture would go stale. Ask, then call again with `confirmInvalidate`. */
+  needsConfirmation: boolean;
+}
+
+export async function setSceneReferences(sceneId: string, ids: string[], opts: { confirmInvalidate?: boolean } = {}): Promise<SceneReferencesResult> {
   const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
   const own = await projectReferenceAssets(scene.projectId);
   const unknown = ids.filter((id) => !own.some((r) => r.id === id));
@@ -243,26 +260,42 @@ export async function setSceneReferences(sceneId: string, ids: string[]): Promis
   const next = own.filter((r) => ids.includes(r.id)).map((r) => r.id); // stable order
   const before = sceneReferenceIds(scene);
   const changed = before.join("|") !== next.join("|");
-  if (!changed) return { changed: false, invalidated: false };
+  const base = { sceneNumber: scene.sceneNumber, changed: false, invalidated: false, needsConfirmation: false };
+  if (!changed) return base;
+  if (hasGeneratedMedia(scene) && !opts.confirmInvalidate) return { ...base, needsConfirmation: true };
   await prisma.scene.update({
     where: { id: sceneId },
     data: { referenceIdsJson: JSON.stringify(next), ...fidelityMotion(scene, own.filter((r) => next.includes(r.id))) },
   });
   const invalidated = await invalidateGeneratedPicture(sceneId, "danh sách tham chiếu của cảnh đã đổi");
-  return { changed, invalidated };
+  return { ...base, changed: true, invalidated };
+}
+
+export interface AssignmentResult {
+  /** Scene number → its list after the pass, for each scene that gained a reference. */
+  added: Record<number, string[]>;
+  /** Scenes left exactly as they were: their GENERATED picture would go stale. */
+  held: { sceneNumber: number; names: string[] }[];
 }
 
 /**
  * Deterministic auto-assignment from each scene's words (and "dùng xuyên suốt
- * video"). `onlyEmpty` keeps every list a person has already set.
+ * video"). It only ever ADDS - a list a person set is never cut or replaced:
+ *  - default: fills the scenes that have no reference yet;
+ *  - `onlyRefIds`: adds just those references (a new one, or one switched to
+ *    "xuyên suốt video") to the scenes that should show them, keeping the
+ *    rest of every list.
+ * A scene with a GENERATED picture/clip is held, not changed, and reported:
+ * the person decides (ticking it on that scene asks first).
  */
-export async function autoAssignReferences(projectId: string, opts: { onlyEmpty?: boolean } = {}): Promise<Record<number, string[]>> {
+export async function autoAssignReferences(projectId: string, opts: { onlyRefIds?: string[] } = {}): Promise<AssignmentResult> {
   const [refs, scenes] = await Promise.all([
     projectReferenceAssets(projectId),
     prisma.scene.findMany({ where: { projectId }, orderBy: { sceneNumber: "asc" } }),
   ]);
-  const out: Record<number, string[]> = {};
+  const out: AssignmentResult = { added: {}, held: [] };
   if (refs.length === 0) return out;
+  const only = opts.onlyRefIds ? new Set(opts.onlyRefIds) : null;
   // A scene whose keyframe IS one of a reference's pictures shows that reference.
   const pictureOwner = new Map<string, string>();
   const shaOwner = new Map<string, string>();
@@ -277,17 +310,30 @@ export async function autoAssignReferences(projectId: string, opts: { onlyEmpty?
   });
   const assignable = refs.map((r) => ({ id: r.id, name: r.name, type: r.type, enabled: r.enabled, useThroughout: r.useThroughout, aliases: r.aliases }));
   for (const scene of scenes) {
-    if (opts.onlyEmpty && sceneReferenceIds(scene).length > 0) continue;
+    const current = sceneReferenceIds(scene);
+    if (!only && current.length > 0) continue;
     const text = [scene.visualDescription, scene.narration, scene.dialogue, scene.subtitle, scene.imagePrompt].join(" ");
     const ids = new Set(autoAssign(text, assignable));
     const kf = keyframes.find((k) => k.id === scene.imageAssetId);
     const owner = kf ? (pictureOwner.get(kf.id) ?? (kf.sha256 ? shaOwner.get(kf.sha256) : undefined)) : undefined;
     if (owner) ids.add(owner);
-    const list = refs.filter((r) => ids.has(r.id)).map((r) => r.id);
-    out[scene.sceneNumber] = list;
-    await setSceneReferences(scene.id, list);
+    const wanted = refs.filter((r) => ids.has(r.id) && (!only || only.has(r.id)) && !current.includes(r.id));
+    if (wanted.length === 0) continue;
+    if (hasGeneratedMedia(scene)) {
+      out.held.push({ sceneNumber: scene.sceneNumber, names: wanted.map((r) => r.name) });
+      continue;
+    }
+    const list = [...current, ...wanted.map((r) => r.id)];
+    if ((await setSceneReferences(scene.id, list)).changed) out.added[scene.sceneNumber] = refs.filter((r) => list.includes(r.id)).map((r) => r.id);
   }
   return out;
+}
+
+/** "Cảnh 2, 4 đã có ảnh tạo sẵn…" - the scenes an assignment pass held, in words. */
+export function heldMessage(held: AssignmentResult["held"]): string {
+  if (held.length === 0) return "";
+  const names = [...new Set(held.flatMap((h) => h.names))].map((n) => `"${n}"`).join(", ");
+  return ` Cảnh ${held.map((h) => h.sceneNumber).join(", ")} đã có ảnh tạo sẵn nên giữ nguyên, chưa thêm ${names} - muốn thêm thì tích ở cảnh đó (sẽ hỏi trước vì cảnh cần ảnh mới).`;
 }
 
 // ------------------------------------------------------- change / invalidate ---
@@ -326,6 +372,9 @@ export interface ReferenceChangeResult {
   invalidatedScenes: number[];
   /** Scenes whose own imported photo was swapped for the new main picture ($0). */
   rephotographedScenes: number[];
+  /** Nothing was saved: these scenes' GENERATED pictures would go stale. Ask, then call again with `confirmInvalidate`. */
+  needsConfirmation?: boolean;
+  staleScenes?: number[];
 }
 
 /**
@@ -343,12 +392,30 @@ export async function changeReference(
     priority?: ReferencePriority;
     enabled?: boolean;
     useThroughout?: boolean;
+    /** The person saw which GENERATED pictures go stale and said yes. */
+    confirmInvalidate?: boolean;
   },
 ): Promise<ReferenceChangeResult> {
   const ref = await prisma.referenceAsset.findUnique({ where: { id: refId } });
   if (!ref || !ref.projectId) throw new ReferenceError("NOT_FOUND", "Không tìm thấy tham chiếu.");
   const oldImages = await prisma.asset.findMany({ where: { referenceAssetId: refId } });
   const oldPrimary = ref.assetId;
+
+  // A new look (main photo, name, description, a photo removed) makes the
+  // GENERATED pictures of the scenes that show this reference stale. Ask
+  // first: nothing is saved until the person confirms. (Adding a photo alone
+  // changes no look, and an IMPORTED scene photo is swapped at $0.)
+  const willLookChange =
+    (change.primaryAssetId !== undefined && change.primaryAssetId !== oldPrimary) ||
+    (change.description !== undefined && change.description.trim() !== ref.description) ||
+    (change.name !== undefined && change.name.trim() !== ref.name) ||
+    Boolean(change.removeAssetIds?.length);
+  if (willLookChange && !change.confirmInvalidate) {
+    const stale = (await prisma.scene.findMany({ where: { projectId: ref.projectId }, orderBy: { sceneNumber: "asc" } }))
+      .filter((s) => sceneReferenceIds(s).includes(refId) && hasGeneratedMedia(s))
+      .map((s) => s.sceneNumber);
+    if (stale.length) return { version: ref.version, invalidatedScenes: [], rephotographedScenes: [], needsConfirmation: true, staleScenes: stale };
+  }
 
   const added = await attachPictures(refId, ref.projectId, change.uploads ?? [], []);
   if (change.removeAssetIds?.length) {
@@ -413,7 +480,7 @@ export async function changeReference(
 
 export interface ReferenceProblem {
   sceneNumber: number;
-  code: "REFERENCE_MISSING_LOCAL_FILE" | "REFERENCE_NOT_FOUND" | "REFERENCE_DISABLED";
+  code: "REFERENCE_MISSING_LOCAL_FILE" | "REFERENCE_NOT_FOUND";
   message: string;
 }
 
@@ -434,10 +501,9 @@ export async function referenceProblems(projectId: string): Promise<ReferencePro
         out.push({ sceneNumber: scene.sceneNumber, code: "REFERENCE_NOT_FOUND", message: `Cảnh ${scene.sceneNumber}: tham chiếu đã bị xoá.` });
         continue;
       }
-      if (!r.enabled) {
-        out.push({ sceneNumber: scene.sceneNumber, code: "REFERENCE_DISABLED", message: `Cảnh ${scene.sceneNumber}: tham chiếu "${r.name}" đang tắt.` });
-        continue;
-      }
+      // Switched off by the person: the scene keeps it in its list (so turning
+      // it back on restores the hand-made assignment) and simply leaves it out.
+      if (!r.enabled) continue;
       const main = r.images.find((i) => i.primary);
       if (main && !main.exists) {
         out.push({

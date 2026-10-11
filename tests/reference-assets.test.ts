@@ -183,7 +183,10 @@ describe("SCENE ASSIGNMENT + IMAGE / VIDEO REFERENCE + CHANGE", () => {
     // The new photo becomes the main one only when asked; here, make it so.
     const refNow = (await projectReferenceAssets(projectId)).find((r) => r.id === truckId)!;
     const newAsset = refNow.images.find((i) => i.filename === "truck-v2.png")!;
-    const swap = await changeReference(truckId, { primaryAssetId: newAsset.assetId });
+    // Scenes 2 and 3 already have bought pictures: asked first, nothing saved.
+    const ask = await changeReference(truckId, { primaryAssetId: newAsset.assetId });
+    expect(ask).toMatchObject({ needsConfirmation: true, staleScenes: [2, 3], invalidatedScenes: [], version: 1 });
+    const swap = await changeReference(truckId, { primaryAssetId: newAsset.assetId, confirmInvalidate: true });
     expect(change.invalidatedScenes).toEqual([]); // adding a picture alone changes nothing
     expect(swap.version).toBe(2);
     expect(swap.invalidatedScenes.sort()).toEqual([2, 3]);
@@ -369,6 +372,6 @@ describe("LEGACY", () => {
     expect(await referenceProblems(legacy.id)).toEqual([]);
     for (const s of legacy.scenes) expect(sceneReferenceIds(s)).toEqual([]);
     await expect(previewProjectCost(legacy.id)).resolves.toBeTruthy();
-    expect(await autoAssignReferences(legacy.id)).toEqual({});
+    expect(await autoAssignReferences(legacy.id)).toEqual({ added: {}, held: [] });
   });
 });
