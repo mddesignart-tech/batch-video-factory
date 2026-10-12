@@ -16,9 +16,12 @@ import type { ProjectCostPreview } from "@/services/project-service";
 export function CostPreview({
   preview,
   currentMode,
+  logoOverlay = false,
 }: {
   preview: ProjectCostPreview;
   currentMode: string;
+  /** LOGO OVERLAY is on: shown as a local, $0 line - never a paid one. */
+  logoOverlay?: boolean;
 }) {
   const { current, modes, budget } = preview;
   const rows = [
@@ -138,6 +141,12 @@ export function CostPreview({
                 </p>
               ))}
             <p className="text-ink-500">Không tính chi phí Video AI cho các cảnh này.</p>
+          </div>
+        ) : null}
+
+        {logoOverlay ? (
+          <div className="rounded-md border border-ok-500/30 bg-ok-500/10 px-3 py-2 text-xs text-ink-300">
+            <span className="font-semibold text-ink-200">Logo Overlay</span> — Local — {formatUSD(0)} (ghép tại máy khi render, không gọi Image/Video AI)
           </div>
         ) : null}
 

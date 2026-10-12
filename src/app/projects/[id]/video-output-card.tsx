@@ -24,6 +24,8 @@ import {
   VI_SUBTITLE_STYLE,
   type OutputControls,
 } from "@/domain/output-controls";
+import type { LogoReferenceOption, LogoState } from "@/services/logo-overlay";
+import { LogoOverlaySection } from "./logo-overlay-section";
 
 const media = (p: string) => `/api/media/${p.split(/[\\/]/).map(encodeURIComponent).join("/")}`;
 const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -38,11 +40,16 @@ export function VideoOutputCard({
   initial,
   music,
   frame,
+  logoOptions = [],
+  logoState,
 }: {
   projectId: string;
   initial: OutputControls;
   music: { filename: string; durationSec: number | null } | null;
   frame: { width: number; height: number };
+  /** The project's LOGO References (only those). */
+  logoOptions?: LogoReferenceOption[];
+  logoState?: LogoState;
 }) {
   const router = useRouter();
   const [c, setC] = useState(initial);
@@ -78,6 +85,11 @@ export function VideoOutputCard({
   const aud = (p: Partial<OutputControls["audio"]>, persist = true) => {
     setC((x) => ({ ...x, audio: { ...x.audio, ...p } }));
     if (persist) save({ audio: p });
+  };
+
+  const logo = (p: Partial<OutputControls["logo"]>, persist = true) => {
+    setC((x) => ({ ...x, logo: { ...x.logo, ...p } }));
+    if (persist) save({ logo: p });
   };
 
   const listenOrQuote = (confirm: boolean) =>
@@ -314,6 +326,15 @@ export function VideoOutputCard({
           </label>
         </section>
 
+        {/* ------------------------------------------------------------ LOGO */}
+        <LogoOverlaySection
+          logo={c.logo}
+          options={logoOptions}
+          state={logoState ?? { enabled: false, reference: null, missing: false, missingMessage: null, alphaWarning: null, placement: null, clash: null }}
+          frame={frame}
+          change={logo}
+        />
+
         <details className="rounded-lg border border-ink-800 px-3 py-2">
           <summary className="cursor-pointer text-xs text-ink-400">Nâng cao (không bắt buộc)</summary>
           <div className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -380,7 +401,7 @@ export function VideoOutputCard({
           >
             <RefreshCw className="h-3.5 w-3.5" /> RENDER LẠI · $0 API
           </Button>
-          <span className="text-xs text-ink-500">Render lại tại máy · $0 API (phụ đề, âm lượng, nhạc, hiệu ứng; không tạo lại giọng, ảnh, video).</span>
+          <span className="text-xs text-ink-500">Render lại tại máy · $0 API (phụ đề, logo, âm lượng, nhạc, hiệu ứng; không tạo lại giọng, ảnh, video).</span>
         </div>
         {msg ? <Alert tone={msg.ok ? "ok" : "danger"} title={msg.text} /> : null}
         {preview ? (

@@ -207,6 +207,22 @@ export interface RenderRequest {
    * clock (known only here, after voice-driven timing). Added to `sfx`.
    */
   sceneSfx?: { sceneNumber: number; path: string }[];
+  /** LOGO OVERLAY: a LOGO Reference laid over the finished frame. Absent = no logo (the final pass as before). */
+  logo?: RenderLogo;
+}
+
+/** A logo on the final frame, already placed (domain/logo-overlay.ts). Px on the output frame. */
+export interface RenderLogo {
+  path: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** 0..1. */
+  opacity: number;
+  /** Null = from the start / to the end. */
+  startSec?: number | null;
+  endSec?: number | null;
 }
 
 export interface FinalEncode {
@@ -514,6 +530,29 @@ export function finalVideoFilter(subtitleFile: string | null): string {
 }
 
 /**
+ * The logo, laid over the finished picture (after the subtitles) in the SAME
+ * graph as the final encode - no extra pass. Scaled as a whole to its placed
+ * size (shape kept, never cropped or stretched), its own alpha kept, the
+ * opacity only multiplied into that alpha (colours untouched). The picture
+ * below it has already been through every camera move, layer and transition,
+ * so the logo stays put on screen. `from` is the subtitled picture's label;
+ * the result is [v].
+ */
+export function logoOverlayFilter(logo: RenderLogo, inputIndex: number, from: string): string {
+  const fade = logo.opacity < 1 ? `,colorchannelmixer=aa=${Math.max(0, logo.opacity).toFixed(3)}` : "";
+  const start = logo.startSec ?? null;
+  const end = logo.endSec ?? null;
+  const enable =
+    start !== null || end !== null
+      ? `:enable='${start !== null && end !== null ? `between(t,${start},${end})` : start !== null ? `gte(t,${start})` : `lte(t,${end})`}'`
+      : "";
+  return (
+    `[${inputIndex}:v]scale=${logo.width}:${logo.height}:flags=lanczos,format=rgba${fade}[logo];` +
+    `[${from}][logo]overlay=x=${logo.x}:y=${logo.y}:format=auto${enable}[v]`
+  );
+}
+
+/**
  * The joined file's own audio (legacy path), cut by the same amount its picture
  * is moved. After a hard-cut join the audio starts at 0 with the encoder's
  * priming samples in front, and the real sound starts with the picture - so
@@ -540,22 +579,25 @@ export function buildFinalArgs(opts: {
   encode?: FinalEncode;
   /** When the joined picture starts (probed); its audio is cut by as much. */
   audioLeadSec?: number;
+  logo?: RenderLogo;
 }): string[] {
-  const { input, subtitleFile, musicFile, target, output } = opts;
+  const { input, subtitleFile, musicFile, target, output, logo } = opts;
   const audioRebase = finalAudioRebase(opts.audioLeadSec);
   const encode = opts.encode ?? DEFAULT_ENCODE;
 
   const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", input];
   if (musicFile) args.push("-stream_loop", "-1", "-i", musicFile);
+  if (logo) args.push("-i", logo.path);
 
   const videoFilter = finalVideoFilter(subtitleFile);
+  const video = logo ? `[0:v]${videoFilter}[base];${logoOverlayFilter(logo, musicFile ? 2 : 1, "base")}` : `[0:v]${videoFilter}[v]`;
   const audioFilter = musicFile ? buildDuckFilter(audioRebase) : null;
 
   if (audioFilter) {
-    args.push("-filter_complex", `[0:v]${videoFilter}[v];${audioFilter}`);
+    args.push("-filter_complex", `${video};${audioFilter}`);
     args.push("-map", "[v]", "-map", "[a]");
   } else {
-    args.push("-filter_complex", `[0:v]${videoFilter}[v];[0:a]${audioRebase}[a]`);
+    args.push("-filter_complex", `${video};[0:a]${audioRebase}[a]`);
     args.push("-map", "[v]", "-map", "[a]");
   }
 
@@ -606,8 +648,9 @@ export function buildFinalWithMixArgs(opts: {
   target: RenderTarget;
   output: string;
   encode?: FinalEncode;
+  logo?: RenderLogo;
 }): string[] {
-  const { videoInput, audioInput, subtitleFile, target, output } = opts;
+  const { videoInput, audioInput, subtitleFile, target, output, logo } = opts;
   const encode = opts.encode ?? DEFAULT_ENCODE;
   const args = [
     "-y",
@@ -621,9 +664,16 @@ export function buildFinalWithMixArgs(opts: {
   ];
 
   // The mix starts at 0; the picture is rebased to 0 too (finalVideoFilter).
-  args.push("-vf", finalVideoFilter(subtitleFile));
-  // Map video from input 0 and audio from input 1 - never input 0's audio.
-  args.push("-map", "0:v", "-map", "1:a");
+  if (logo) {
+    args.push("-i", logo.path);
+    args.push("-filter_complex", `[0:v]${finalVideoFilter(subtitleFile)}[base];${logoOverlayFilter(logo, 2, "base")}`);
+    // Video from the graph, audio from input 1 - never input 0's audio.
+    args.push("-map", "[v]", "-map", "1:a");
+  } else {
+    args.push("-vf", finalVideoFilter(subtitleFile));
+    // Map video from input 0 and audio from input 1 - never input 0's audio.
+    args.push("-map", "0:v", "-map", "1:a");
+  }
   args.push(
     "-c:v",
     "libx264",
@@ -945,6 +995,10 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     normalised.push(name);
   }
 
+  // A logo whose file went missing after it was chosen is left out rather than
+  // failing the whole video (services/output-controls.ts warns about it).
+  const liveLogo = req.logo && fs.existsSync(req.logo.path) ? req.logo : undefined;
+
   // ---- Pass 2 - join ------------------------------------------------------
   const listName = "concat.txt";
   fs.writeFileSync(path.join(tempDir, listName), buildConcatList(normalised), "utf8");
@@ -1112,6 +1166,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         target: req.target,
         output: outName,
         encode: req.encode,
+        ...(liveLogo ? { logo: liveLogo } : {}),
       }),
       { cwd: tempDir, timeoutMs: 20 * 60 * 1000 },
     );
@@ -1131,6 +1186,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         output: outName,
         encode: req.encode,
         audioLeadSec: await probeVideoStart(path.join(tempDir, joinedName)),
+        ...(liveLogo ? { logo: liveLogo } : {}),
       }),
       { cwd: tempDir, timeoutMs: 20 * 60 * 1000 },
     );

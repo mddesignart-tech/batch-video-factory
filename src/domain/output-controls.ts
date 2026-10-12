@@ -33,6 +33,20 @@ export const VI_SUBTITLE_STYLE: Record<SubtitleStyleId, string> = {
 
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 
+export const LOGO_POSITIONS = ["TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT", "TOP_CENTER", "BOTTOM_CENTER"] as const;
+export const LOGO_SIZES = ["SMALL", "MEDIUM", "LARGE", "CUSTOM"] as const;
+export type LogoPosition = (typeof LOGO_POSITIONS)[number];
+export type LogoSize = (typeof LOGO_SIZES)[number];
+export const VI_LOGO_POSITION: Record<LogoPosition, string> = {
+  TOP_LEFT: "Góc trên trái",
+  TOP_RIGHT: "Góc trên phải",
+  BOTTOM_LEFT: "Góc dưới trái",
+  BOTTOM_RIGHT: "Góc dưới phải",
+  TOP_CENTER: "Giữa trên",
+  BOTTOM_CENTER: "Giữa dưới",
+};
+export const VI_LOGO_SIZE: Record<LogoSize, string> = { SMALL: "Nhỏ", MEDIUM: "Vừa", LARGE: "Lớn", CUSTOM: "Tuỳ chỉnh" };
+
 export const OutputControlsSchema = z.object({
   subtitles: z
     .object({
@@ -79,6 +93,29 @@ export const OutputControlsSchema = z.object({
       fades: z.boolean().default(false),
     })
     .default({}),
+  /**
+   * LOGO OVERLAY: a LOGO Reference laid over the finished video by the local
+   * render ($0). Off unless a person turns it on and picks a LOGO Reference -
+   * never another reference picked on their behalf.
+   */
+  logo: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** ReferenceAsset id of type LOGO. */
+      referenceId: z.string().nullable().default(null),
+      position: z.enum(LOGO_POSITIONS).default("TOP_RIGHT"),
+      size: z.enum(LOGO_SIZES).default("MEDIUM"),
+      /** CUSTOM only: % of the frame's short side. */
+      customPct: z.number().min(4).max(30).default(12),
+      /** 0..1. */
+      opacity: z.number().min(0).max(1).default(0.88),
+      /** Distance from the edge, % of the short side (the platform safe area still applies). */
+      marginPct: z.number().min(0).max(15).default(4),
+      /** Null = from the start / to the end. */
+      startSec: z.number().min(0).nullable().default(null),
+      endSec: z.number().min(0).nullable().default(null),
+    })
+    .default({}),
   /** The project's narrator voice. Null fields = the Narrator character's own settings. */
   voice: z
     .object({
@@ -111,6 +148,7 @@ export function controlsOf(project: { contentType?: string | null; outputControl
     return OutputControlsSchema.parse({
       subtitles: { ...defaults.subtitles, ...(raw.subtitles ?? {}), advanced: { ...defaults.subtitles.advanced, ...(raw.subtitles?.advanced ?? {}) } },
       audio: { ...defaults.audio, ...(raw.audio ?? {}) },
+      logo: { ...defaults.logo, ...(raw.logo ?? {}) },
       voice: { ...defaults.voice, ...(raw.voice ?? {}) },
     });
   } catch {
@@ -123,6 +161,7 @@ export function mergeControls(current: OutputControls, patch: DeepPartial<Output
   return OutputControlsSchema.parse({
     subtitles: { ...current.subtitles, ...(patch.subtitles ?? {}), advanced: { ...current.subtitles.advanced, ...(patch.subtitles?.advanced ?? {}) } },
     audio: { ...current.audio, ...(patch.audio ?? {}) },
+    logo: { ...current.logo, ...(patch.logo ?? {}) },
     voice: { ...current.voice, ...(patch.voice ?? {}) },
   });
 }

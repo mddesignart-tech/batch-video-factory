@@ -25,7 +25,12 @@ import type { ActionResult } from "./idioms";
  * (reuse first; a new line only with the person's confirmation of its price).
  */
 
-type Patch = { subtitles?: Partial<OutputControls["subtitles"]>; audio?: Partial<OutputControls["audio"]>; voice?: Partial<OutputControls["voice"]> };
+type Patch = {
+  subtitles?: Partial<OutputControls["subtitles"]>;
+  audio?: Partial<OutputControls["audio"]>;
+  logo?: Partial<OutputControls["logo"]>;
+  voice?: Partial<OutputControls["voice"]>;
+};
 
 export async function saveOutputControlsAction(projectId: string, patch: Patch): Promise<ActionResult & { voiceChanged?: boolean }> {
   try {

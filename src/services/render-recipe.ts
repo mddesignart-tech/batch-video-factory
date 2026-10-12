@@ -50,6 +50,11 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
     // QĐ-125 VIDEO OUTPUT: any subtitle / level change is a new local render.
     subtitleLayout: req.subtitleLayout ?? undefined,
     voiceMix: req.voiceMix ?? undefined,
+    // LOGO OVERLAY: the logo BY CONTENT and where it sits. Absent when off, so
+    // a video without a logo keeps its recipe.
+    logo: req.logo
+      ? { sha: content(req.logo.path), x: req.logo.x, y: req.logo.y, w: req.logo.width, h: req.logo.height, op: req.logo.opacity, from: req.logo.startSec ?? null, to: req.logo.endSec ?? null }
+      : undefined,
     sceneSfx: req.sceneSfx?.length ? req.sceneSfx.map((e) => ({ n: e.sceneNumber, sha: content(e.path) })) : undefined,
     highlightPhrase: req.highlightPhrase ?? "",
     music: content(req.musicPath ?? null),

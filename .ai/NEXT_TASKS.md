@@ -16,7 +16,8 @@
 - [ ] **Chất lượng tương tác vật lý phức tạp** — cầm, rót, ôm, chạm sản phẩm: local multi-layer không làm được;
       cần clip gốc hoặc Video AI đã kiểm chứng.
 - [x] **Kiểm tra toggle "Xuyên suốt video"** — XONG 353c946 (gán tự động chỉ thêm, hỏi trước khi làm cũ ảnh GENERATED).
-- [ ] **LOGO Reference → overlay thật trong final render** — hiện logo chỉ là tham chiếu, chưa đặt lên video xuất.
+- [x] **LOGO Reference → overlay thật trong final render** — XONG QĐ-134 (bước encode cuối, local $0).
+  - [ ] Backlog logo: kéo-thả vị trí tự do; SVG (cần rasterize an toàn); logo động (GIF/WebP động); xem trước realtime trên video.
 - [ ] **Trích nội dung từ URL** làm nguồn kịch bản.
 - [x] **Nhập clip video người dùng tải lên** làm cảnh (clip gốc) — XONG QĐ-132 (2026-10-12).
 - [ ] **Clip người dùng làm MỘT LỚP trong Multi-layer** (QĐ-132 phần B) — hiện clip chỉ dùng làm toàn bộ hình cảnh.

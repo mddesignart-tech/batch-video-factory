@@ -4002,3 +4002,36 @@ Sau: 90 khung / 3,009 s / PTS 0 → 2,967, mọi khung khác nhau, flash 1,000 s
 **Kiểm chứng.** `tests/final-first-frame.test.ts` 11/11 (ảnh tĩnh, Local Motion, clip native + lời, upload 24→30,
 60→30, cắt thẳng + đồng bộ tiếng, crossfade, trim, lời + phụ đề burn, render lại dùng segment cache); trên code cũ 9/11
 FAIL. Test N của QĐ-132 không còn bỏ qua cặp khung đầu.
+
+## QĐ-134 — LOGO Reference → logo trên video cuối (2026-10-12, local, $0)
+
+**Lưu ở đâu.** Không thêm cột/migration: khối `logo` trong `Project.outputControlsJson` (QĐ-125) — `enabled`
+(mặc định false), `referenceId` (ReferenceAsset loại LOGO), `position` (6 vị trí, mặc định TOP_RIGHT), `size`
+(SMALL/MEDIUM/LARGE/CUSTOM), `customPct`, `opacity` (mặc định 0,88), `marginPct` (4 % cạnh ngắn), `startSec`/`endSec`
+(null = cả video). Project cũ không có khối → logo TẮT, render y như trước (lệnh FFmpeg + recipe không đổi).
+
+**Chỉ LOGO Reference.** Lưu thiết lập kiểm tra `referenceId` là LOGO của chính dự án; bật mà chưa chọn → lỗi. Bật trong
+UI chỉ tự điền LOGO Reference đầu tiên (không bao giờ ảnh sản phẩm/nhân vật). File logo là ảnh gốc của Asset (PNG/WebP
+giữ alpha; JPG được nhưng cảnh báo không có nền trong suốt; SVG chưa nhận vì hệ ảnh chưa rasterize).
+
+**Kích thước / vị trí (`domain/logo-overlay.ts`).** Diện tích logo = hình vuông cạnh 8/12/18 % (hoặc tuỳ chỉnh 4–30 %)
+cạnh NGẮN của khung → cùng cỡ tương đối trên 9:16 / 16:9 / 1:1 / 4:5; hai cạnh cùng một hệ số (không méo), chặn
+≤ 40 % rộng / 25 % cao. Lề = % cạnh ngắn; khung dọc (9:16) lấy `platformSafeArea` (cùng vùng an toàn phụ đề dùng) làm
+mức tối thiểu → không chạm thanh tìm kiếm / cột nút / chú thích nền tảng.
+
+**Phụ đề.** `logoSubtitleClash` so hộp logo với dải phụ đề thật (`subtitleLayout`) → cảnh báo + nút "Chuyển logo sang …"
+(phía đối diện). Không tự di chuyển lựa chọn của người dùng; render ghi cảnh báo vào log.
+
+**Render.** Overlay trong CÙNG graph của bước encode cuối (sau `setpts` + `subtitles`, trước encode) — không thêm lần
+encode: `scale=w:h:flags=lanczos,format=rgba[,colorchannelmixer=aa=op]` + `overlay=x:y:format=auto[:enable=between(t,a,b)]`.
+Opacity chỉ nhân vào alpha (màu không đổi). Logo đặt lên hình đã qua camera / multi-layer / chuyển cảnh → đứng yên trên
+màn hình, độc lập nguồn (ảnh, Local Motion, Video AI, clip tải lên). Recipe có `logo` (sha nội dung + vị trí) chỉ khi bật.
+
+**File mất.** `renderLogoFor` → không logo, video vẫn render, log "Không tìm thấy file logo."; thẻ Video output hiện
+cảnh báo với [Chọn lại logo] [Tắt logo]. Không gọi Image AI.
+
+**UI.** Thẻ Video output → mục "Logo trên video": bật/tắt, chọn LOGO Reference, vị trí, kích thước, độ rõ, cách mép,
+từ/đến (giây); sơ đồ vị trí theo tỷ lệ khung; XEM TRƯỚC (khung thật) có logo. PREFLIGHT: "Logo Overlay — Local — $0".
+
+**Kiểm chứng.** `tests/logo-overlay.test.ts` 19/19 (A–P + thời gian hiện); fixture 1080×1920 TOP_RIGHT và 1920×1080
+BOTTOM_RIGHT đo bằng ffprobe + điểm ảnh: lệch ≤ 1 px, tỷ lệ 2:1 giữ (1,98 / 2,02), SAR 1:1. PAID POST = 0.

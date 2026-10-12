@@ -39,7 +39,8 @@ import { VideoFormatCard } from "./video-format-card";
 import { ScriptReviewCard } from "./script-review-card";
 import { ReferencePanel } from "./reference-panel";
 import { VideoOutputCard } from "./video-output-card";
-import { controlsOf } from "@/domain/output-controls";
+import { controlsOf, subtitleLayout } from "@/domain/output-controls";
+import { logoState, projectLogoReferences } from "@/services/logo-overlay";
 import { listProjectReferences, referenceProblems, sceneReferenceIds } from "@/services/reference-assets";
 import { contentSummary } from "@/services/content-service";
 import { audienceOf, languageOf } from "@/domain/content-options";
@@ -116,6 +117,15 @@ export default async function ProjectDetailPage({
   const score = parseJson<ScriptScore | null>(project.scriptScoreJson, null);
   const budget = await videoBudget(id);
   const format = await projectFormat(id);
+  // LOGO OVERLAY: the project's LOGO References and where the chosen one lands. $0.
+  const outputControls = controlsOf(project);
+  const logoFrame = { width: format.profile.width, height: format.profile.height };
+  const logoOptions = await projectLogoReferences(id);
+  const logo = await logoState(
+    project,
+    logoFrame,
+    outputControls.subtitles.enabled ? subtitleLayout(outputControls.subtitles, logoFrame.width, logoFrame.height) : null,
+  );
   const projectBudgetProblem = budgetProblem(project.errorMessage);
   // Multi-content project: the script preview + DUYỆT KỊCH BẢN. A legacy idiom
   // project (contentType NULL) shows exactly what it always did.
@@ -333,6 +343,8 @@ export default async function ProjectDetailPage({
               initial={controlsOf(project)}
               music={musicAsset ? { filename: musicAsset.originalFilename ?? "music", durationSec: musicAsset.durationSec } : null}
               frame={{ width: format.profile.width, height: format.profile.height }}
+              logoOptions={logoOptions}
+              logoState={logo}
             />
           ) : null}
 
@@ -483,7 +495,7 @@ export default async function ProjectDetailPage({
               {previewError}
             </Alert>
           ) : preview ? (
-            <CostPreview preview={preview} currentMode={project.qualityMode} />
+            <CostPreview preview={preview} currentMode={project.qualityMode} logoOverlay={logo.enabled && !logo.missing} />
           ) : null}
 
           {score ? (

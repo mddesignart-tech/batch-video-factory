@@ -13,7 +13,7 @@ import {
   type OutputControls,
 } from "@/domain/output-controls";
 import { ffmpeg, probeDuration } from "@/media/ffmpeg";
-import type { RenderRequest } from "@/media/render";
+import { logoOverlayFilter, type RenderLogo, type RenderRequest } from "@/media/render";
 import { buildASS } from "@/media/subtitles";
 import { sfxFileFor } from "@/media/sfx-library";
 
@@ -42,6 +42,10 @@ export async function saveProjectControls(projectId: string, patch: Parameters<t
   const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
   const before = controlsOf(project);
   const controls = mergeControls(before, patch);
+  if (patch.logo) {
+    const { checkLogoChoice } = await import("./logo-overlay");
+    await checkLogoChoice(projectId, controls.logo);
+  }
   const changed = JSON.stringify(before) !== JSON.stringify(controls);
   if (!changed) return { controls, rerenderNeeded: false, voiceChanged: false };
   await prisma.project.update({
@@ -152,6 +156,12 @@ export async function applyOutputControls(
   if (a.narrationVolume !== 1 || a.normalizeNarration || a.fades) {
     request.voiceMix = { gain: a.narrationVolume, normalize: a.normalizeNarration, fadeSec: a.fades ? 0.3 : 0 };
   }
+  // LOGO OVERLAY (local, $0). Off = nothing set, the render as before.
+  if (c.logo.enabled) {
+    const { renderLogoFor } = await import("./logo-overlay");
+    const logo = await renderLogoFor(project, request.target, request.burnSubtitles ? request.subtitleLayout : null);
+    if (logo) request.logo = logo;
+  }
 }
 
 // ---------------------------------------------------------------- preview ---
@@ -193,8 +203,18 @@ export async function subtitlePreviewFrame(
     : "";
   const fitFilter = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
   const input = scene ? ["-i", toAbsolute(scene.imagePath!)] : ["-f", "lavfi", "-i", `color=c=0x3a3f4b:s=${width}x${height}`];
+  // The logo exactly as the render lays it (same placement, same filter).
+  let logo: RenderLogo | undefined;
+  if (c.logo.enabled) {
+    const { renderLogoFor } = await import("./logo-overlay");
+    logo = await renderLogoFor({ ...project, outputControlsJson: JSON.stringify(c) }, { width, height }, c.subtitles.enabled ? layout : null);
+  }
   // The filter runs inside the renders folder so the .ass path needs no escaping.
-  await ffmpeg(["-y", "-hide_banner", "-loglevel", "error", ...input, "-vf", `${fitFilter}${guide},subtitles=preview.ass`, "-frames:v", "1", path.basename(out)], { cwd: dir });
+  const picture = `${fitFilter}${guide},subtitles=preview.ass`;
+  const graph = logo
+    ? ["-i", logo.path, "-filter_complex", `[0:v]${picture}[base];${logoOverlayFilter({ ...logo, startSec: null, endSec: null }, 1, "base")}`, "-map", "[v]"]
+    : ["-vf", picture];
+  await ffmpeg(["-y", "-hide_banner", "-loglevel", "error", ...input, ...graph, "-frames:v", "1", path.basename(out)], { cwd: dir });
   // Keep only the latest few previews.
   for (const old of fs.readdirSync(dir).filter((f) => f.startsWith("preview-") && f.endsWith(".png")).sort().slice(0, -3)) {
     fs.rmSync(path.join(dir, old), { force: true });
