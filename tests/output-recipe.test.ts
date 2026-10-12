@@ -47,7 +47,7 @@ const withScene = (patch: Partial<RenderRequest["scenes"][number]>) => ({ ...bas
 describe("QĐ-113 — output recipe hash", () => {
   it("cùng media + nhịp + âm thanh + phụ đề + cài đặt → cùng recipe; file cùng nội dung khác tên cũng vậy", () => {
     const r = renderRecipeHash(base);
-    expect(r).toMatch(/^recipe:r1:[0-9a-f]{64}$/);
+    expect(r).toMatch(/^recipe:r2:[0-9a-f]{64}$/);
     expect(renderRecipeHash({ ...base })).toBe(r);
     const renamed = path.join(tmp, "renamed-image.png");
     fs.copyFileSync(base.scenes[0]!.imagePath!, renamed);

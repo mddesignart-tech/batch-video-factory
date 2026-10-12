@@ -16,7 +16,9 @@ import { fileSha256OrNull } from "./asset-content";
  * Bump RENDER_RECIPE_VERSION whenever the renderer's own output changes for the
  * same inputs (a new filter chain, encoder settings, timing engine).
  */
-export const RENDER_RECIPE_VERSION = "r1";
+// r2: the final pass rebases the joined picture to 0 (no duplicated first frame
+// after a hard cut, QĐ-133) - a finished video renders again on request, locally.
+export const RENDER_RECIPE_VERSION = "r2";
 
 const content = (p: string | null | undefined): string | null =>
   p ? (fileSha256OrNull(p) ?? "missing") : null;

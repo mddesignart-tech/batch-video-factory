@@ -239,9 +239,8 @@ describe("RENDER (local FFmpeg)", () => {
     const hashes = await frameHashes(r.videoPath);
     expect(hashes.length).toBeGreaterThanOrEqual(89);
     expect(hashes.length).toBeLessThanOrEqual(91);
-    // The final pass (shared by every render, V1's) repeats the very first frame
-    // once; from there on every output frame is a new source frame.
-    for (let i = 2; i < hashes.length; i += 1) expect(hashes[i]).not.toBe(hashes[i - 1]);
+    // Every output frame is a new source frame - the very first one included.
+    for (let i = 1; i < hashes.length; i += 1) expect(hashes[i]).not.toBe(hashes[i - 1]);
     const info = await streamInfo(r.videoPath);
     expect(Math.abs(Number(info.format.duration) - 3)).toBeLessThan(0.1);
   }, 300_000);

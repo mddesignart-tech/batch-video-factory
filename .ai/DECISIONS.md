@@ -3981,3 +3981,24 @@ mọi video) lặp khung đầu tiên một lần (+33 ms) — chưa sửa để
 
 **Kiểm chứng.** `tests/uploaded-clip-media.test.ts` 14/14 (A, B, C, K, L, M, N, O, P, Q, R, trim/thời lượng, LOOP),
 `tests/uploaded-clip-pipeline.test.ts` 7/7 (D, E, F, G, H, I, J, S, xoá an toàn, chống trùng). PAID POST = 0.
+
+## QĐ-133 — Sửa lỗi V1: bước encode cuối lặp khung đầu (2026-10-12, local, $0)
+
+**Nguyên nhân.** Mỗi file cảnh (pass 1) có video bắt đầu ở 0 và AAC bắt đầu ở −0,021333 s (1024 mẫu priming, 48 kHz).
+Ghép cắt thẳng (`buildConcatArgs`: concat demuxer + `-c copy`) dời gói sớm nhất của mỗi file về 0 → video của
+`joined.mp4` bắt đầu ở +0,021029 s, còn audio giữ priming như âm thanh thật ở 0. Bước cuối (`buildFinalArgs` /
+`buildFinalWithMixArgs`) mã hoá với `-r 30` (CFR) nên lấp khoảng 0 → 0,021 bằng một bản sao khung đầu: +1 khung
+(+33 ms), cả hình trễ 1 khung. Đường lời thoại (mix riêng, `-shortest`) giữ 90 khung nhưng MẤT khung thật cuối cùng.
+Ghép có chuyển cảnh (xfade, `trim,setpts=PTS-STARTPTS`) bắt đầu ở 0 → không bị.
+
+**Sửa (tối thiểu, chỉ bước cuối).** `finalVideoFilter`: `setpts=PTS-STARTPTS` trước `subtitles=` ở cả hai bước cuối.
+Đường cũ (âm thanh của file ghép): `atrim=start=<lúc hình bắt đầu, ffprobe>` + `asetpts=PTS-STARTPTS` — cắt đúng phần
+priming, hình và tiếng cùng dời. File cảnh/segment cache KHÔNG đổi. `RENDER_RECIPE_VERSION` r1 → r2: video đã xong
+chỉ render lại khi người dùng bấm (tại máy, $0); không có gì tự chạy.
+
+**Kết quả (fixture 3 s, 30 fps).** Trước: 91 khung / 3,034 s / PTS 0 → 3,000, khung 0 = khung 1, flash ở 1,033 s.
+Sau: 90 khung / 3,009 s / PTS 0 → 2,967, mọi khung khác nhau, flash 1,000 s, tiếng 1,000 s. Crossfade y như trước.
+
+**Kiểm chứng.** `tests/final-first-frame.test.ts` 11/11 (ảnh tĩnh, Local Motion, clip native + lời, upload 24→30,
+60→30, cắt thẳng + đồng bộ tiếng, crossfade, trim, lời + phụ đề burn, render lại dùng segment cache); trên code cũ 9/11
+FAIL. Test N của QĐ-132 không còn bỏ qua cặp khung đầu.

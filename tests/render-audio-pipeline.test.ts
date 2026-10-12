@@ -363,7 +363,7 @@ describe("final mix arguments", () => {
       target: DEFAULT_TARGET,
       output: "out.mp4",
     });
-    expect(args[args.indexOf("-vf") + 1]).toBe("subtitles=subs.ass");
+    expect(args[args.indexOf("-vf") + 1]).toBe("setpts=PTS-STARTPTS,subtitles=subs.ass");
   });
 });
 

@@ -10,6 +10,7 @@ import {
   FfmpegError,
   probeDimensions,
   probeDuration,
+  probeVideoStart,
   supportsSubtitleBurn,
 } from "./ffmpeg";
 import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
@@ -483,15 +484,43 @@ const MUSIC_BED_GAIN = DEFAULT_MIX.musicGain;
  * processed itself. Attack is fast enough to catch a word's start; release is
  * slow enough that the bed does not pump between syllables.
  */
-export function buildDuckFilter(): string {
+export function buildDuckFilter(rebase?: string): string {
   return [
-    `[0:a]asplit=2[voice][key]`,
+    `[0:a]${rebase ? `${rebase},` : ""}asplit=2[voice][key]`,
     `[1:a]volume=${MUSIC_BED_GAIN}[bed]`,
     `[bed][key]sidechaincompress=threshold=${thresholdForDuck(DEFAULT_MIX.duckDb)}` +
       `:ratio=${DUCK_RATIO}:attack=${DEFAULT_MIX.attackMs}:release=${DEFAULT_MIX.releaseMs}:makeup=1[ducked]`,
     // normalize=0 keeps the voice at full level. Without it amix halves both.
     `[voice][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`,
   ].join(";");
+}
+
+/**
+ * The joined picture, rebased to start at 0 - then subtitles.
+ *
+ * A hard-cut join is the concat demuxer with `-c copy`. Each scene file's AAC
+ * track starts at -0.021 s (encoder priming, 1024 samples at 48 kHz); the
+ * demuxer moves every file's earliest packet to 0, so the joined VIDEO starts
+ * at +0.021 s. The final pass encodes at a constant `-r`, which filled that
+ * gap with a copy of the first frame: one duplicated frame (+33 ms at 30 fps)
+ * at the head of every hard-cut render, and the picture one frame behind the
+ * mix. Rebasing here removes the gap without touching any scene file (the
+ * segment cache stays valid). A join that already starts at 0 (xfade) is
+ * unchanged. Subtitles come after, so cues sit on the 0-based clock they
+ * were timed on.
+ */
+export function finalVideoFilter(subtitleFile: string | null): string {
+  return subtitleFile ? `setpts=PTS-STARTPTS,subtitles=${subtitleFile}` : "setpts=PTS-STARTPTS";
+}
+
+/**
+ * The joined file's own audio (legacy path), cut by the same amount its picture
+ * is moved. After a hard-cut join the audio starts at 0 with the encoder's
+ * priming samples in front, and the real sound starts with the picture - so
+ * the first `leadSec` (the picture's start, probed) is dropped. 0 = unchanged.
+ */
+function finalAudioRebase(leadSec = 0): string {
+  return leadSec > 0.0005 ? `atrim=start=${leadSec.toFixed(6)},asetpts=PTS-STARTPTS` : "asetpts=PTS-STARTPTS";
 }
 
 /**
@@ -509,25 +538,25 @@ export function buildFinalArgs(opts: {
   target: RenderTarget;
   output: string;
   encode?: FinalEncode;
+  /** When the joined picture starts (probed); its audio is cut by as much. */
+  audioLeadSec?: number;
 }): string[] {
   const { input, subtitleFile, musicFile, target, output } = opts;
+  const audioRebase = finalAudioRebase(opts.audioLeadSec);
   const encode = opts.encode ?? DEFAULT_ENCODE;
 
   const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", input];
   if (musicFile) args.push("-stream_loop", "-1", "-i", musicFile);
 
-  const videoFilter = subtitleFile ? `subtitles=${subtitleFile}` : null;
-  const audioFilter = musicFile ? buildDuckFilter() : null;
+  const videoFilter = finalVideoFilter(subtitleFile);
+  const audioFilter = musicFile ? buildDuckFilter(audioRebase) : null;
 
-  if (videoFilter && audioFilter) {
+  if (audioFilter) {
     args.push("-filter_complex", `[0:v]${videoFilter}[v];${audioFilter}`);
     args.push("-map", "[v]", "-map", "[a]");
-  } else if (videoFilter) {
-    args.push("-vf", videoFilter, "-map", "0:v", "-map", "0:a");
-  } else if (audioFilter) {
-    args.push("-filter_complex", audioFilter, "-map", "0:v", "-map", "[a]");
   } else {
-    args.push("-map", "0:v", "-map", "0:a");
+    args.push("-filter_complex", `[0:v]${videoFilter}[v];[0:a]${audioRebase}[a]`);
+    args.push("-map", "[v]", "-map", "[a]");
   }
 
   args.push(
@@ -591,9 +620,8 @@ export function buildFinalWithMixArgs(opts: {
     audioInput,
   ];
 
-  if (subtitleFile) {
-    args.push("-vf", `subtitles=${subtitleFile}`);
-  }
+  // The mix starts at 0; the picture is rebased to 0 too (finalVideoFilter).
+  args.push("-vf", finalVideoFilter(subtitleFile));
   // Map video from input 0 and audio from input 1 - never input 0's audio.
   args.push("-map", "0:v", "-map", "1:a");
   args.push(
@@ -1102,6 +1130,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         target: req.target,
         output: outName,
         encode: req.encode,
+        audioLeadSec: await probeVideoStart(path.join(tempDir, joinedName)),
       }),
       { cwd: tempDir, timeoutMs: 20 * 60 * 1000 },
     );

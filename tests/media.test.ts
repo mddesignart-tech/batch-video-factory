@@ -148,8 +148,9 @@ describe("final render arguments", () => {
       target: DEFAULT_TARGET,
       output: "final.mp4",
     });
-    const vf = args[args.indexOf("-vf") + 1]!;
-    expect(vf).toBe("subtitles=subs.ass");
+    const vf = args[args.indexOf("-filter_complex") + 1]!;
+    // Rebased to 0 first: a hard-cut join starts the picture at +0.021 s.
+    expect(vf).toBe("[0:v]setpts=PTS-STARTPTS,subtitles=subs.ass[v];[0:a]asetpts=PTS-STARTPTS[a]");
     // A Windows absolute path here would need double-escaping and is a bug.
     expect(vf).not.toMatch(/[A-Z]:/);
   });

@@ -22,7 +22,7 @@
 - [ ] **Clip người dùng làm MỘT LỚP trong Multi-layer** (QĐ-132 phần B) — hiện clip chỉ dùng làm toàn bộ hình cảnh.
 - [ ] **Smart crop clip theo mặt / sản phẩm** — hiện COVER / CONTAIN tất định; chưa có tracking.
 - [ ] **Liên kết clip người dùng với tham chiếu** (nhân vật / sản phẩm) — chưa có.
-- [ ] **Bước encode cuối lặp khung đầu một lần** (+1 khung, có từ V1, mọi video) — sửa cần đổi render recipe.
+- [x] **Bước encode cuối lặp khung đầu một lần** (+1 khung, có từ V1, mọi video cắt thẳng) — XONG QĐ-133 (recipe r2).
 - [ ] **Creative Style trong luồng lô thành ngữ (batch idiom)** — hiện chỉ ở luồng TẠO VIDEO / project.
 - [ ] **UI song ngữ nâng cao.**
 - [ ] **Kiểm thử thật bằng người dùng** cho kéo thả / gán lớp thủ công (drag/drop, manual layer UI).

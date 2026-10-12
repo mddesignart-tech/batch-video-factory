@@ -81,7 +81,7 @@ describe("QĐ-113 — reuse xuyên dự án an toàn khi xoá", () => {
 
   it("SAME_RENDER_INPUT: render lại B khi không có gì đổi → không render, không tạo asset final mới", async () => {
     const before = await prisma.project.findUniqueOrThrow({ where: { id: B.projectId } });
-    expect(before.renderRecipe).toMatch(/^recipe:r1:/);
+    expect(before.renderRecipe).toMatch(/^recipe:r2:/);
     const finals = await prisma.asset.count({ where: { projectId: B.projectId, kind: "final" } });
     const mtime = fs.statSync(toAbsolute(before.finalVideoPath!)).mtimeMs;
     await renderProjectNow(B.projectId);

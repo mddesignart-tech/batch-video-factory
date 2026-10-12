@@ -66,7 +66,7 @@ describe("QĐ-113 — dự án cũ vẫn dùng được", () => {
     const p = await prisma.project.findUniqueOrThrow({ where: { id: P.projectId } });
     expect(p.status).toBe("completed");
     expect(fs.existsSync(toAbsolute(p.finalVideoPath!))).toBe(true);
-    expect(p.renderRecipe).toMatch(/^recipe:r1:/);
+    expect(p.renderRecipe).toMatch(/^recipe:r2:/);
     expect(await prisma.providerJob.count()).toBe(jobs);
     expect(await prisma.costEntry.count()).toBe(costs);
   });

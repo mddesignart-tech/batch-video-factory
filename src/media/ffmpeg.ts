@@ -243,6 +243,17 @@ export async function probeDimensions(file: string): Promise<{ width: number; he
   }
 }
 
+/** When the first video stream starts, in seconds (its `start_time`); 0 when unreadable. */
+export async function probeVideoStart(file: string): Promise<number> {
+  try {
+    const { stdout } = await ffprobe(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=start_time", "-of", "default=noprint_wrappers=1:nokey=1", file]);
+    const value = Number.parseFloat(stdout.trim());
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
 let filterCache: Set<string> | null = null;
 
 /** Which optional filters this build has (libass for subtitle burn-in, etc). */
