@@ -92,7 +92,9 @@ export async function sceneCameraViews(projectId: string, videoCostBySceneNumber
 /** G11: only what a person needs - the notice, the hint, the choices. Null = the subjects do not touch. */
 function interactionView(r: Awaited<ReturnType<typeof sceneInteraction>>): SceneCameraView["interaction"] {
   if (r.interaction !== "COMPLEX_INTERACTION" || !r.notice) return null;
-  return { notice: r.notice, hint: r.hint ?? "", choices: r.choices };
+  // The person's own clip already shows the interaction: nothing to choose, $0.
+  if (r.route === "USER_VIDEO") return { notice: r.reason, hint: "", choices: [], resolved: true };
+  return { notice: r.notice, hint: `${r.hint ?? ""} Có clip quay thật? Tải lên ở "Nguồn hình ảnh / video" của cảnh: dùng lại clip đó, $0.`.trim(), choices: r.choices };
 }
 
 /**

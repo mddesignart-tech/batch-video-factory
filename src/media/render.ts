@@ -23,6 +23,7 @@ import { speakerBiasKeys, type ScreenSide } from "@/domain/speaker-focus";
 import {
   DEFAULT_MIX,
   DUCK_RATIO,
+  resolveMix,
   thresholdForDuck,
   type AudioMixSettings,
 } from "./mix-config";
@@ -152,6 +153,22 @@ export interface RenderScene {
    * `subtitle` field only stands in for a one-line scene.
    */
   spokenLines?: string[];
+  /**
+   * UPLOADED VIDEO CLIP: `videoPath` is the person's own clip. The part played
+   * (trim), what to do when it is shorter than the scene, its framing and its
+   * own sound. Absent on every other scene (an AI clip renders as before).
+   * Its native movement is kept: no local camera is ever laid over a clip.
+   */
+  clip?: RenderClip;
+}
+
+export interface RenderClip {
+  startSec: number;
+  lengthSec: number;
+  shortMode: "AUTO" | "HOLD" | "LOOP" | "SLOW";
+  frame: "AUTO" | "COVER" | "CONTAIN";
+  /** The clip's own sound level (0..1), ducked under the narration. Null = muted. */
+  audioGain: number | null;
 }
 
 export interface RenderRequest {
@@ -267,8 +284,14 @@ export function buildSceneNormalizeArgs(opts: {
    * argument for argument (legacy scenes and their segment cache are untouched).
    */
   camera?: LocalCameraSpec;
+  /**
+   * A person's clip: play `lengthSec` from `startSec` (input-side seek, one
+   * decode), or loop an already-cut window (`loop`), at `speed` (< 1 = slower).
+   * Absent = V1's chain, argument for argument.
+   */
+  clip?: { startSec: number; lengthSec: number; loop?: boolean; speed?: number };
 }): string[] {
-  const { videoInput, audioInput, duration, target, output } = opts;
+  const { videoInput, audioInput, duration, target, output, clip } = opts;
   const { width, height, fps } = target;
   const dur = Math.max(0.5, Number(duration.toFixed(3)));
 
@@ -281,6 +304,8 @@ export function buildSceneNormalizeArgs(opts: {
   // input frame: thousands, which is slow and can crash FFmpeg). V1's chain
   // (no plan) is unchanged.
   if (isStill && !opts.camera) args.push("-loop", "1", "-t", String(dur));
+  if (clip?.loop) args.push("-stream_loop", "-1");
+  else if (clip) args.push("-ss", String(clip.startSec), "-t", String(clip.lengthSec));
   args.push("-i", videoInput);
 
   if (audioInput) args.push("-i", audioInput);
@@ -296,18 +321,26 @@ export function buildSceneNormalizeArgs(opts: {
       ? cameraZoompan(opts.camera, { durationSec: dur, target: opts.target })
       : `,zoompan=z='min(zoom+${step},1.10)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
+  // A person's clip starts at its own zero (after the seek) and may play
+  // slower; a hold long enough for any scene. fps= then lands every source
+  // rate (24/25/30/60, variable) on the output clock with no drift.
+  const speed = clip?.speed && clip.speed > 0 && clip.speed < 1 ? clip.speed : 1;
+  const head = clip ? `[0:v]setpts=${speed < 1 ? `(PTS-STARTPTS)/${speed}` : "PTS-STARTPTS"}[cv];` : "";
+  const vin = clip ? "[cv]" : "[0:v]";
+  const hold = clip ? Math.max(10, Math.ceil(dur) + 1) : 10;
   // Never stretched. COVER fills and crops the centre (V1's chain, unchanged);
   // CONTAIN shows the whole source over a blurred, filled copy of itself.
   const videoChain =
-    opts.fit === "CONTAIN"
-      ? `[0:v]split=2[bgs][fgs];` +
+    head +
+    (opts.fit === "CONTAIN"
+      ? `${vin}split=2[bgs][fgs];` +
         `[bgs]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=20:2[bg];` +
         `[fgs]scale=${width}:${height}:force_original_aspect_ratio=decrease[fg];` +
         `[bg][fg]overlay=(W-w)/2:(H-h)/2${zoom},fps=${fps},` +
-        `tpad=stop_mode=clone:stop_duration=10,setsar=1,format=yuv420p[v]`
-      : `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
+        `tpad=stop_mode=clone:stop_duration=${hold},setsar=1,format=yuv420p[v]`
+      : `${vin}scale=${width}:${height}:force_original_aspect_ratio=increase,` +
         `crop=${width}:${height}${zoom},fps=${fps},` +
-        `tpad=stop_mode=clone:stop_duration=10,setsar=1,format=yuv420p[v]`;
+        `tpad=stop_mode=clone:stop_duration=${hold},setsar=1,format=yuv420p[v]`);
   // apad keeps the audio stream alive to the trim point when the voice clip is
   // shorter than the scene, which is the normal case.
   const audioChain = `[1:a]aresample=48000,apad[a]`;
@@ -343,6 +376,69 @@ export function buildSceneNormalizeArgs(opts: {
 }
 
 /** Join the normalised scenes. Relative names: cwd is the temp folder. */
+/**
+ * Cut a person's clip to the window it plays, once, so that window can loop
+ * (`-stream_loop` repeats a whole input, not a seek window). Only used for
+ * LOOP; every other clip is read straight from the source with an input seek.
+ */
+export function buildClipWindowArgs(opts: { input: string; startSec: number; lengthSec: number; output: string }): string[] {
+  return [
+    "-y", "-hide_banner", "-loglevel", "error",
+    "-ss", String(opts.startSec), "-t", String(opts.lengthSec), "-i", opts.input,
+    "-map", "0:v:0", "-map", "0:a:0?",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "192k",
+    opts.output,
+  ];
+}
+
+/**
+ * A scene's audio when the person keeps the clip's OWN sound: the clip at
+ * `gain`, ducked under the narration by the same sidechain settings as the
+ * music bed (the voice is never lowered; `normalize=0` keeps it at full
+ * level), on the work format of the dialogue track (24 kHz mono), exactly
+ * `durationSec` long. Without narration the clip's sound plays alone.
+ */
+export function buildClipAudioArgs(opts: {
+  clipInput: string;
+  /** The window, for a straight read. Absent = `clipInput` is already the looped window. */
+  window?: { startSec: number; lengthSec: number };
+  loop?: boolean;
+  voiceInput: string | null;
+  durationSec: number;
+  gain: number;
+  mix?: Partial<AudioMixSettings>;
+  output: string;
+}): string[] {
+  const mix = resolveMix(opts.mix ?? {});
+  const args = ["-y", "-hide_banner", "-loglevel", "error"];
+  if (opts.loop) args.push("-stream_loop", "-1");
+  else if (opts.window) args.push("-ss", String(opts.window.startSec), "-t", String(opts.window.lengthSec));
+  args.push("-i", opts.clipInput);
+  if (opts.voiceInput) args.push("-i", opts.voiceInput);
+  const gain = Math.min(1, Math.max(0, opts.gain)).toFixed(3);
+  const clip = `[0:a]aresample=${CLIP_AUDIO_RATE},aformat=channel_layouts=mono,volume=${gain},apad[c]`;
+  const graph = opts.voiceInput
+    ? [
+        clip,
+        `[1:a]aresample=${CLIP_AUDIO_RATE},aformat=channel_layouts=mono,apad,asplit=2[voice][key]`,
+        `[c][key]sidechaincompress=threshold=${thresholdForDuck(mix.duckDb)}:ratio=${DUCK_RATIO}:attack=${mix.attackMs}:release=${mix.releaseMs}:makeup=1[ducked]`,
+        `[voice][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[out]`,
+      ].join(";")
+    : `${clip};[c]anull[out]`;
+  args.push(
+    "-filter_complex", graph,
+    "-map", "[out]",
+    "-t", String(Math.max(0.1, Number(opts.durationSec.toFixed(3)))),
+    "-ar", String(CLIP_AUDIO_RATE), "-ac", "1", "-c:a", "pcm_s16le",
+    opts.output,
+  );
+  return args;
+}
+
+/** The dialogue track's work rate (scene-audio.ts WORK_SAMPLE_RATE). */
+const CLIP_AUDIO_RATE = 24000;
+
 export function buildConcatArgs(listFile: string, output: string): string[] {
   return [
     "-y",
@@ -577,7 +673,12 @@ async function sceneTimingFor(scene: RenderScene, config: TimingConfig): Promise
     voice = await probeDuration(scene.audioPath).catch(() => null);
   }
   const isClip = Boolean(scene.videoPath && /\.(mp4|mov|webm|mkv)$/i.test(scene.videoPath));
-  const clipDuration = isClip && fs.existsSync(scene.videoPath!) ? await probeDuration(scene.videoPath!).catch(() => null) : null;
+  // A person's clip plays only its trimmed window: that is its length here.
+  const clipDuration = scene.clip
+    ? scene.clip.lengthSec
+    : isClip && fs.existsSync(scene.videoPath!)
+      ? await probeDuration(scene.videoPath!).catch(() => null)
+      : null;
   return resolveSceneDuration(
     {
       sceneNumber: scene.sceneNumber,
@@ -588,6 +689,7 @@ async function sceneTimingFor(scene: RenderScene, config: TimingConfig): Promise
       voiceDuration: voice,
       motion: isClip ? "VIDEO_AI" : scene.motionSource === "LOCAL_MOTION" || scene.imagePath ? "LOCAL_MOTION" : "STATIC",
       clipDuration,
+      ...(scene.clip ? { userClip: true, clipShortMode: scene.clip.shortMode } : {}),
     },
     config,
   );
@@ -708,6 +810,41 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   const joins = planJoins(transitions, joinDurations, subjects);
   const tails = blendTails(joins, usable.length);
 
+  // ---- Pass 0b - a person's clip: the looped window, and its own sound ----
+  // Local FFmpeg only. A LOOP cuts its window once (so it can repeat); every
+  // other clip is read straight from the source. Kept sound is mixed under the
+  // narration HERE, so the rest of the pipeline sees one scene track as before.
+  const clipLoopFile: (string | null)[] = usable.map(() => null);
+  const clipAudio: (string | null)[] = usable.map(() => null);
+  for (let i = 0; i < usable.length; i += 1) {
+    const scene = usable[i]!;
+    if (!scene.clip || !scene.videoPath) continue;
+    const fill = sceneTimings[i]!.clipFill;
+    const tag = String(scene.sceneNumber).padStart(3, "0");
+    if (fill?.mode === "LOOP") {
+      const windowFile = path.join(tempDir, `clipwin_${tag}.mp4`);
+      await ffmpeg(buildClipWindowArgs({ input: scene.videoPath, startSec: scene.clip.startSec, lengthSec: scene.clip.lengthSec, output: windowFile }));
+      clipLoopFile[i] = windowFile;
+    }
+    if (scene.clip.audioGain !== null) {
+      const out = path.join(tempDir, `scene_${tag}_clipaudio.wav`);
+      if (fs.existsSync(out)) fs.rmSync(out);
+      const voice = sceneAudio[i]?.audioPath ?? (scene.audioPath && fs.existsSync(scene.audioPath) ? scene.audioPath : null);
+      await ffmpeg(
+        buildClipAudioArgs({
+          clipInput: clipLoopFile[i] ?? scene.videoPath,
+          ...(clipLoopFile[i] ? { loop: true } : { window: { startSec: scene.clip.startSec, lengthSec: scene.clip.lengthSec } }),
+          voiceInput: voice,
+          durationSec: sceneDurations[i] ?? scene.duration,
+          gain: scene.clip.audioGain,
+          mix: req.mixSettings,
+          output: out,
+        }),
+      );
+      clipAudio[i] = out;
+    }
+  }
+
   // ---- Pass 1 - normalise every scene to identical codec parameters -------
   const normalised: string[] = [];
   let segmentsReused = 0;
@@ -723,11 +860,20 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     const name = `norm_${String(scene.sceneNumber).padStart(3, "0")}.mp4`;
     // The scene's own dialogue track when it has one; the legacy single file
     // only when it has no lines at all.
-    const audioInput = audio ? audio.audioPath : scene.audioPath;
+    const audioInput = clipAudio[i] ?? (audio ? audio.audioPath : scene.audioPath);
     const output = path.join(tempDir, name);
     // AUTO decides per source: fill when the shapes are close, show-all when a
-    // crop would cut most of it (QĐ-121). Probed locally, $0.
-    const fit = effectiveFit(req.fit ?? "AUTO", req.fit === "COVER" || req.fit === "CONTAIN" ? null : await probeDimensions(source), req.target);
+    // crop would cut most of it (QĐ-121). Probed locally, $0. A person's clip
+    // may name its own framing; it is never stretched either way.
+    const wantedFit = scene.clip && scene.clip.frame !== "AUTO" ? scene.clip.frame : (req.fit ?? "AUTO");
+    const fit = effectiveFit(wantedFit, wantedFit === "COVER" || wantedFit === "CONTAIN" ? null : await probeDimensions(source), req.target);
+    const fill = sceneTimings[i]!.clipFill;
+    const clipInput = clipLoopFile[i] ?? source;
+    const clipSpec = scene.clip
+      ? clipLoopFile[i]
+        ? { startSec: 0, lengthSec: scene.clip.lengthSec, loop: true }
+        : { startSec: scene.clip.startSec, lengthSec: scene.clip.lengthSec, ...(fill?.mode === "SLOW" ? { speed: fill.speed } : {}) }
+      : undefined;
     // Identical segment work done before (same picture/clip, audio, length,
     // motion, codec) is copied from the local cache - compute saved, $0 either
     // way (QĐ-112).
@@ -753,17 +899,18 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
             output,
           })
         : buildSceneNormalizeArgs({
-            videoInput: source,
+            videoInput: clipInput,
             audioInput,
             duration: (sceneDurations[i] ?? scene.duration) + (tails[i] ?? 0),
             target: req.target,
             output,
             fit,
             ...(isStillSource && scene.localCamera ? { camera: camera(scene.localCamera) } : {}),
+            ...(clipSpec ? { clip: clipSpec } : {}),
           }),
       inputs: layered
         ? [...layerFiles(layered), ...(audioInput ? [audioInput] : [])]
-        : [source, ...(audioInput ? [audioInput] : [])],
+        : [clipInput, ...(audioInput ? [audioInput] : [])],
       output,
     });
     if (segment.reused) segmentsReused += 1;
@@ -868,6 +1015,12 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     const dialogueParts: string[] = [];
     for (let i = 0; i < sceneAudio.length; i += 1) {
       const audio = sceneAudio[i];
+      // The clip's own sound, already mixed under this scene's narration.
+      const withClip = clipAudio[i];
+      if (withClip) {
+        dialogueParts.push(withClip);
+        continue;
+      }
       if (audio) {
         dialogueParts.push(audio.audioPath);
         continue;

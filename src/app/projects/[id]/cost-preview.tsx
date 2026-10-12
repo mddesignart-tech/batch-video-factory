@@ -127,6 +127,20 @@ export function CostPreview({
           </div>
         </div>
 
+        {current.scenes.some((sc) => sc.mediaSource === "USER_VIDEO") ? (
+          <div className="space-y-0.5 rounded-md border border-ok-500/30 bg-ok-500/10 px-3 py-2 text-xs text-ink-300">
+            {current.scenes
+              .filter((sc) => sc.mediaSource === "USER_VIDEO")
+              .map((sc) => (
+                <p key={sc.sceneNumber}>
+                  <span className="font-semibold text-ink-200">Cảnh {sc.sceneNumber}</span> · Nguồn: Video của bạn · Tạo media: {formatUSD(0)} · Render tại máy:{" "}
+                  {formatUSD(0)}
+                </p>
+              ))}
+            <p className="text-ink-500">Không tính chi phí Video AI cho các cảnh này.</p>
+          </div>
+        ) : null}
+
         {current.errors.length > 0 ? (
           <div className="rounded-md border border-warn-500/30 bg-warn-500/10 px-3 py-2 text-xs text-warn-500">
             <p className="font-semibold">Cảnh báo định tuyến</p>

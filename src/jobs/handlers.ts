@@ -20,6 +20,8 @@ import { deferJob } from "./queue";
 import { applyOutputControls } from "@/services/output-controls";
 import { renderInputsFor, restoreCutouts } from "@/services/scene-plan-service";
 import { sceneCharacters } from "@/domain/scene-characters";
+import { MISSING_CLIP_MESSAGE, usesUserClip } from "@/domain/user-clip";
+import { clipFileExists, sceneClipRender } from "@/services/uploaded-clip";
 
 /**
  * Job handlers.
@@ -179,6 +181,23 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
     return { deferred: true };
   }
 
+  // UPLOADED VIDEO CLIP: the person's clip and how it plays. A clip whose
+  // file is gone stops the render with a clear message - it is never swapped
+  // for anything bought.
+  const clipAssets = new Map(
+    (
+      await prisma.asset.findMany({
+        where: { id: { in: active.map((s) => s.videoAssetId).filter((id): id is string => Boolean(id)) } },
+      })
+    ).map((a) => [a.id, a]),
+  );
+  const lostClips = active.filter((s) => usesUserClip(s) && !clipFileExists(s.videoAssetId ? clipAssets.get(s.videoAssetId) : null));
+  if (lostClips.length > 0) {
+    throw new Error(
+      `${MISSING_CLIP_MESSAGE} Cảnh ${lostClips.map((s) => s.sceneNumber).join(", ")}: chọn lại file, chọn clip khác, dùng Local Motion hoặc chủ động chọn Video AI. Không tự gọi Video AI.`,
+    );
+  }
+
   const settings = await getSettings();
   // Output preset (V1.2 Phase 6, QĐ-114): frame, subtitles burn, encoder. With
   // the defaults this is exactly V1's target + Settings' burn switch.
@@ -223,6 +242,8 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
       subjects: sceneCharacters(s).present,
       // The voice's own ordered lines: subtitles never re-parse (QĐ-122).
       spokenLines: spokenLines(s).map((l) => l.text),
+      // The person's own clip: trim, short-clip strategy, framing, its sound.
+      ...((clip) => (clip ? { clip } : {}))(sceneClipRender(s, s.videoAssetId ? (clipAssets.get(s.videoAssetId) ?? null) : null)),
     })),
   };
 

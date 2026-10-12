@@ -1,8 +1,15 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-11 (**V1.3 CODE FREEZE** — `main` = `origin/main` = `b79fd3d`; chờ người dùng xác nhận tag
-`batch-video-factory-v1.3.0`. Chưa tag, chưa GitHub Release.)
+**Cập nhật:** 2026-10-12 (**V1.3.0 RELEASED** — tag `batch-video-factory-v1.3.0` → `6524187` + GitHub Release.
+Sau v1.3: `353c946` Reference Assignment Safety; QĐ-132 Uploaded Video Clip Input — xem `.ai/DECISIONS.md`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.3.0
+
+- **Reference Assignment Safety** (`353c946`): gán tham chiếu tự động chỉ thêm; hỏi trước khi làm cũ ảnh GENERATED.
+- **QĐ-132 Uploaded Video Clip Input**: tải clip .mp4/.mov/.webm làm hình cảnh, REUSE $0, không bao giờ mua Video AI thay
+  thế; trim / âm thanh clip (ducking) / clip ngắn (giữ / lặp / chậm) / khung COVER-CONTAIN / 24-60 fps → 30 fps.
+  Migration `20261012000000_uploaded_video_clip` (chỉ thêm cột). Test 21/21 mới PASS; PAID POST = 0.
 
 ## 🔒 V1.3 CODE FREEZE — QĐ-117 → QĐ-131 (2026-10-02 → 2026-10-11, $0, không POST trả phí)
 

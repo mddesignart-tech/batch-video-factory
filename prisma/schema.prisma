@@ -668,6 +668,28 @@ model Scene {
   /// NO_REFERENCES_CONFIRMED = the person chose "tiếp tục không dùng tham chiếu"
   /// for a model that cannot take them. Null = references are required.
   referenceOverride String?
+
+  /// UPLOADED VIDEO CLIP INPUT. GENERATED = whatever the pipeline made or will
+  /// make (V1 behaviour). UPLOADED = a clip a PERSON supplied is this scene's
+  /// visual: it is reused as is - never routed, never bought, never replaced by
+  /// Video AI on a resume. A missing file stops the scene instead of buying one.
+  videoSource       String  @default("GENERATED")
+  /// The uploaded clip's Asset row (kind "video", source IMPORTED).
+  videoAssetId      String?
+  /// The part of the clip the scene plays, in seconds of the source. Null = from
+  /// the start / to the end.
+  clipStartSec      Float?
+  clipEndSec        Float?
+  /// The clip's own sound: OFF (default - narration alone) or ON (mixed under
+  /// the narration, ducked while it speaks).
+  clipAudio         String  @default("OFF")
+  /// Level of the clip's own sound when ON (0..1).
+  clipAudioGain     Float   @default(0.5)
+  /// A clip shorter than its scene: AUTO (hold the last frame up to 1 s, else
+  /// stop and ask), HOLD, LOOP or SLOW (play slower to fill the scene).
+  clipShortMode     String  @default("AUTO")
+  /// Framing for this clip: AUTO (the output profile's fit), COVER or CONTAIN.
+  clipFrame         String  @default("AUTO")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -735,6 +757,9 @@ model Asset {
   /// Universal reference system (QĐ-124): this picture is one of the images of
   /// a ReferenceAsset (front, side, box…). The file stays an ordinary Asset.
   referenceAssetId  String?
+  /// Measured facts of a video/audio file (ffprobe): fps, codec, pixel format,
+  /// audio stream, rotation, poster frame... "{}" when not measured.
+  mediaInfoJson     String    @default("{}")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   scene   Scene?  @relation(fields: [sceneId], references: [id], onDelete: Cascade)

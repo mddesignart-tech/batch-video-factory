@@ -12,6 +12,7 @@ import { inferLayers, layersPromptPhrase, locationOf, sceneComplexity } from "@/
 import { LayerSchema, parseScenePlan, ScenePlanSchema, type MotionRoute, type ScenePlan, type SceneLayer } from "@/domain/scene-plan";
 import type { ScriptDoc } from "@/domain/script";
 import { defaultScale, isAirborne, subjectKind } from "@/domain/subject-grounding";
+import { usesUserClip } from "@/domain/user-clip";
 import { classifyInteraction, routeInteraction, type InteractionRoute, type ReferenceCaps } from "@/domain/physical-interaction";
 import { ambientLoopFor, availableAmbientKinds } from "./ambient-library";
 import { cutoutImage } from "@/media/cutout";
@@ -637,6 +638,7 @@ export async function sceneInteraction(
     text: interactionText(scene),
     dropped: plan?.notes.includes(INTERACTION_OFF) ?? false,
     nativeClip: Boolean(existingAbsolute(scene.videoPath)),
+    userClip: usesUserClip(scene) && Boolean(existingAbsolute(scene.videoPath)),
     // After the composite is switched on the scene's picture is the location, not the scene.
     scenePicture: plan?.route !== "COMPOSITE" && Boolean(existingAbsolute(scene.imagePath)),
     critical,

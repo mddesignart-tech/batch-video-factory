@@ -5,6 +5,7 @@ import { round } from "@/lib/utils";
 import { budgetProblem, type BudgetProblem } from "@/domain/budget-message";
 import { NEEDS_SELECTION_STATUS } from "@/domain/video-selection";
 import { videoModelChoices, type VideoModelChoice } from "./generation";
+import { unassignClip } from "./uploaded-clip";
 import { budgetShortfall, videoBudget } from "./video-budget";
 
 /**
@@ -52,12 +53,16 @@ export async function chooseVideoModel(sceneId: string, provider: string, model:
   const choice = choices.find((c) => c.provider === provider && c.model === model);
   if (!choice) throw new Error(`Không có model ${provider}/${model}.`);
   if (!choice.selectable) throw new Error(`Không chọn được ${provider}/${model}: ${choice.unavailableReason ?? "không khả dụng"}`);
+  // Choosing Video AI for a scene that shows the person's clip is the person
+  // replacing it - only ever from this explicit choice. Nothing is bought here.
+  await unassignClip(sceneId);
   await clearSelection(sceneId, { videoProvider: provider, videoModel: model, videoModelPinned: true, motionMode: "VIDEO_AI", motionSource: "AI_VIDEO" });
   await logger.info({ event: "scene.video_model_chosen", sceneId, provider, model, message: `Người dùng chọn ${provider}/${model} (chưa gửi request).` });
   return choice;
 }
 
 export async function useLocalMotion(sceneId: string): Promise<void> {
+  await unassignClip(sceneId);
   await clearSelection(sceneId, { motionMode: "LOCAL_MOTION", motionSource: "LOCAL_MOTION", videoModelPinned: false, videoProvider: null, videoModel: null });
   await logger.info({ event: "scene.local_motion_chosen", sceneId, message: "Người dùng chọn LOCAL MOTION: $0, không gọi Video AI." });
 }

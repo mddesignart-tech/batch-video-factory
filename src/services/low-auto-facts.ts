@@ -8,6 +8,7 @@ import {
   type GuardedPrompt,
 } from "@/domain/video-prompt";
 import { decideMotion, effectiveMotionSource, type MotionResolution } from "@/domain/local-motion";
+import { USER_CLIP_REASON, usesUserClip } from "@/domain/user-clip";
 import { classifyMotionScale, type MotionScaleVerdict } from "@/domain/motion-scale";
 import { sceneCharacters } from "@/domain/scene-characters";
 import { extractSignals } from "./complexity";
@@ -71,6 +72,12 @@ export interface SceneFactsInput {
    * router's own choice into them when a clip succeeds.
    */
   videoModelPinned?: boolean;
+  /**
+   * UPLOADED = a person's own clip is this scene's visual. It wins over every
+   * other answer, a pin included: the clip is reused, no video model is called.
+   * Optional so every existing caller and fixture keeps working (= GENERATED).
+   */
+  videoSource?: string;
   charactersPresentJson: string;
   speakingCharactersJson: string;
   primaryCharactersJson: string;
@@ -168,16 +175,20 @@ export function deriveSceneVideoFacts(
       : (scene.videoModelPinned === true &&
           Boolean(scene.videoProvider && scene.videoModel)) ||
         scene.motionMode === "VIDEO_AI";
-  const motion = effectiveMotionSource(
-    scene.motionSource,
-    decideMotion({
-      qualityMode: opts.qualityMode as QualityMode,
-      complexity: scene.complexity as Complexity,
-      spendPriority: scene.spendPriority as SpendPriority,
-      characterCount,
-    }),
-    { manuallyPinned: pinned },
-  );
+  // USER VIDEO > EXISTING NATIVE VIDEO > LOCAL MOTION > PAID VIDEO AI: a clip
+  // the person supplied is never replaced by a purchase, pinned or not.
+  const motion: MotionResolution = usesUserClip(scene)
+    ? { source: "LOCAL_MOTION", diverged: false, reason: USER_CLIP_REASON }
+    : effectiveMotionSource(
+        scene.motionSource,
+        decideMotion({
+          qualityMode: opts.qualityMode as QualityMode,
+          complexity: scene.complexity as Complexity,
+          spendPriority: scene.spendPriority as SpendPriority,
+          characterCount,
+        }),
+        { manuallyPinned: pinned },
+      );
 
   return {
     facts: {

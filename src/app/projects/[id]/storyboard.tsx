@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Ban, Check, Image as ImageIcon, Mic, Video } from "lucide-react";
 import { ImageReview, type ImageModelChoice } from "./image-review";
 import { SceneImagePanel } from "./scene-image-panel";
+import { SceneClipPanel, type ClipView, type SceneClipView } from "./scene-clip-panel";
 import { SceneVoicePanel } from "./scene-voice-panel";
 import { SceneCameraPanel, type SceneCameraView } from "./scene-camera-panel";
 import { VideoSelectionPanel } from "./video-selection-panel";
@@ -80,6 +81,8 @@ export interface SceneView {
   /** The person's motion instruction: AUTO, LOCAL_MOTION or VIDEO_AI. */
   motionMode: string;
   videoPath: string | null;
+  /** GENERATED, or UPLOADED = the person's own clip ("Video của bạn", never AI). */
+  videoSource?: string;
   audioPath: string | null;
   qualityScore: number | null;
   status: string;
@@ -143,6 +146,8 @@ export function Storyboard({
   imageModels,
   allCharacters,
   qualityMode,
+  clipByScene = {},
+  clipLibrary = [],
 }: {
   projectId: string;
   /** The video's own budget (NGÂN SÁCH VIDEO), for the "Tăng ngân sách video" button. */
@@ -161,6 +166,9 @@ export function Storyboard({
   allCharacters: { id: string; name: string }[];
   /** Project quality mode, which decides whether alternatives are offered. */
   qualityMode: string;
+  /** UPLOADED VIDEO CLIP: each scene's clip settings, and the project's clips. */
+  clipByScene?: Record<string, SceneClipView>;
+  clipLibrary?: ClipView[];
 }) {
   const [selectedId, setSelectedId] = useState(scenes[0]?.id ?? "");
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -183,6 +191,12 @@ export function Storyboard({
     : routing?.needsSelection && !selected.videoPath
       ? needsSelectionMessage({ sceneNumber: selected.sceneNumber, complexity: selected.complexity, diagnostics: routing.needsSelection })
       : null;
+  // A person's clip previews only the part the scene plays (media fragment).
+  const clipNow = clipByScene[selected.id];
+  const clipFragment =
+    selected.videoSource === "UPLOADED" && clipNow && (clipNow.startSec !== null || clipNow.endSec !== null)
+      ? `#t=${clipNow.startSec ?? 0}${clipNow.endSec !== null ? `,${clipNow.endSec}` : ""}`
+      : "";
   const totalDuration = scenes
     .filter((s) => !s.skipped)
     .reduce((sum, s) => sum + s.duration, 0);
@@ -248,7 +262,8 @@ export function Storyboard({
                             ? "Ảnh AI"
                             : "Chưa có ảnh"}
                       </Badge>
-                      {scene.motionMode !== "AUTO" ? (
+                      {scene.videoSource === "UPLOADED" ? <Badge tone="ok">Video của bạn</Badge> : null}
+                      {scene.videoSource !== "UPLOADED" && scene.motionMode !== "AUTO" ? (
                         <Badge tone={scene.motionMode === "VIDEO_AI" ? "brand" : "neutral"}>
                           {scene.motionMode === "VIDEO_AI" ? "VIDEO_AI" : "LOCAL"}
                         </Badge>
@@ -281,8 +296,8 @@ export function Storyboard({
               <div className="relative overflow-hidden rounded-xl border border-ink-700 bg-black">
                 {selected.videoPath ? (
                   <video
-                    key={selected.videoPath}
-                    src={`/api/media/${selected.videoPath}`}
+                    key={`${selected.videoPath}${clipFragment}`}
+                    src={`/api/media/${selected.videoPath}${clipFragment}`}
                     controls
                     playsInline
                     style={{ aspectRatio: frameCss }}
@@ -413,6 +428,15 @@ export function Storyboard({
 
           {/* RIGHT: scene settings */}
           <div className="p-4">
+            <SceneClipPanel
+              key={`${selected.id}-${clipNow?.clip?.assetId ?? "none"}-${clipNow?.startSec ?? ""}-${clipNow?.endSec ?? ""}`}
+              sceneId={selected.id}
+              sceneNumber={selected.sceneNumber}
+              projectId={projectId}
+              view={clipNow ?? { using: false, clip: null, startSec: null, endSec: null, audio: "OFF", audioGain: 0.5, shortMode: "AUTO", frame: "AUTO" }}
+              library={clipLibrary}
+              onDone={setResult}
+            />
             <SceneImagePanel
               sceneId={selected.id}
               sceneNumber={selected.sceneNumber}

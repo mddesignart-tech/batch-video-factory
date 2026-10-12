@@ -22,6 +22,8 @@ import {
 import type { ScriptScore } from "@/domain/script";
 import { previewProjectCost } from "@/services/project-service";
 import { Storyboard } from "./storyboard";
+import type { ClipView, SceneClipView } from "./scene-clip-panel";
+import { projectClips } from "@/services/uploaded-clip";
 import { ProjectActions } from "./project-actions";
 import { ImportImagesCard } from "./import-images-card";
 import { OutputCard } from "./output-card";
@@ -126,6 +128,39 @@ export default async function ProjectDetailPage({
   const styleBadges = creativeBadges(writtenStyle ?? effectiveContent.creative);
   const canRewriteScript = (REWRITABLE_STATUSES as readonly string[]).includes(project.status);
   const hasMedia = project.scenes.some((s) => s.imagePath || s.videoPath || s.audioPath);
+  // UPLOADED VIDEO CLIP: the project's clips and each scene's settings. $0.
+  const clips = await projectClips(id);
+  const clipLibrary: ClipView[] = clips.map((c) => ({
+    assetId: c.asset.id,
+    filename: c.asset.originalFilename ?? "clip",
+    durationSec: c.info?.durationSec ?? c.asset.durationSec ?? 0,
+    width: c.info?.width ?? c.asset.width ?? 0,
+    height: c.info?.height ?? c.asset.height ?? 0,
+    fps: c.info?.fps ?? 0,
+    codec: c.info?.codec ?? "",
+    hasAudio: c.info?.hasAudio ?? false,
+    aspectRatio: c.info?.aspectRatio ?? "",
+    orientation: c.info?.orientation ?? "",
+    bytes: c.asset.bytes,
+    posterPath: c.info?.posterPath ?? null,
+    exists: c.exists,
+    usedBy: c.usedBy,
+  }));
+  const clipByScene: Record<string, SceneClipView> = Object.fromEntries(
+    project.scenes.map((scene) => [
+      scene.id,
+      {
+        using: scene.videoSource === "UPLOADED",
+        clip: clipLibrary.find((c) => c.assetId === scene.videoAssetId) ?? null,
+        startSec: scene.clipStartSec,
+        endSec: scene.clipEndSec,
+        audio: scene.clipAudio === "ON" ? "ON" : "OFF",
+        audioGain: scene.clipAudioGain,
+        shortMode: scene.clipShortMode,
+        frame: scene.clipFrame,
+      },
+    ]),
+  );
   // QĐ-128 Camera & lớp cảnh: read only, $0. The Video AI price per scene comes from the cost preview.
   const cameraByScene = project.scriptJson
     ? await sceneCameraViews(id, new Map((preview?.current.scenes ?? []).map((p) => [p.sceneNumber, p.video?.estimatedCost ?? 0])))
@@ -376,6 +411,7 @@ export default async function ProjectDetailPage({
                 imageSource: scene.imageSource,
                 motionMode: scene.motionMode,
                 videoPath: scene.videoPath,
+                videoSource: scene.videoSource,
                 audioPath: scene.audioPath,
                 qualityScore: scene.qualityScore,
                 status: scene.status,
@@ -387,6 +423,8 @@ export default async function ProjectDetailPage({
                 errorMessage: scene.errorMessage,
               }))}
               cameraByScene={cameraByScene}
+              clipByScene={clipByScene}
+              clipLibrary={clipLibrary}
               routingByScene={Object.fromEntries(
                 (preview?.current.scenes ?? []).map((plan) => [
                   plan.sceneNumber,

@@ -1,3 +1,4 @@
+import { MISSING_CLIP_MESSAGE, usesUserClip } from "@/domain/user-clip";
 import { narratorOverride } from "./output-controls";
 import { isNarrator } from "@/domain/scene-characters";
 import { limitMessage, planReferenceSend, type SendCandidate } from "@/domain/reference";
@@ -1097,6 +1098,13 @@ export async function generateSceneImage(
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
 
+  // A person's clip is this scene's visual: its frame is the keyframe, and no
+  // picture is ever bought for it - not even when that frame went missing.
+  if (usesUserClip(scene)) {
+    const frame = scene.imagePath ? toAbsolute(scene.imagePath) : null;
+    return frame && fs.existsSync(frame) ? frame : null;
+  }
+
   const lists = sceneCharacters(scene);
   const characterCount = lists.present.length || 1;
   // ECONOMY skips keyframes for simple scenes - but those are exactly the
@@ -2042,6 +2050,36 @@ export async function videoModelChoices(sceneId: string): Promise<{
 export async function generateSceneVideo(sceneId: string): Promise<string | null> {
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
+
+  // USER VIDEO (uploaded clip): the person's own clip IS this scene's video.
+  // Handed back before anything is derived or routed - no model is asked, no
+  // reservation made, $0. A clip whose file has gone missing stops the scene
+  // with a clear message: it is NEVER a reason to buy a clip instead (only a
+  // person choosing "Dùng Video AI" changes that).
+  if (usesUserClip(scene)) {
+    const asset = scene.videoAssetId ? await prisma.asset.findUnique({ where: { id: scene.videoAssetId } }) : null;
+    const file = asset?.filePath ?? scene.videoPath;
+    const absolute = file ? toAbsolute(file) : null;
+    if (!absolute || !fs.existsSync(absolute)) {
+      await prisma.scene.update({ where: { id: scene.id }, data: { status: "failed", errorMessage: `${MISSING_CLIP_MESSAGE} (${asset?.originalFilename ?? "clip"})` } });
+      throw new GenerationError(
+        `Cảnh ${scene.sceneNumber}: ${MISSING_CLIP_MESSAGE} Chọn lại file, chọn clip khác, dùng Local Motion hoặc chủ động chọn Video AI. KHÔNG tự gọi Video AI.`,
+        "video",
+        "upload",
+        false,
+      );
+    }
+    if (scene.videoPath !== file || scene.status !== "video_ready") {
+      await prisma.scene.update({ where: { id: scene.id }, data: { videoPath: file, status: scene.status === "skipped" ? scene.status : "video_ready", errorMessage: null } });
+    }
+    await logger.info({
+      event: "scene.user_clip_reused",
+      projectId: project.id,
+      sceneId: scene.id,
+      message: `Cảnh ${scene.sceneNumber} dùng Video của bạn - không gọi Video AI. Chi phí video: $0,00.`,
+    });
+    return absolute;
+  }
 
   // Everything the routing gate will be asked about this scene, derived ONCE
   // and shared with the dry-run and the proof script - see

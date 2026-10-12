@@ -46,6 +46,18 @@ export const IMAGE_FITS: readonly ImageFit[] = ["auto", "cover", "contain"];
 /** How the picture was made to fit the frame. Reported, never guessed. */
 export type Framing = "as_is" | "cover" | "contain_blur";
 
+/** A scene's uploaded-clip columns, back to "no clip" (uploaded-clip.ts `clearedClip`). */
+export const CLIP_CLEARED = {
+  videoSource: "GENERATED",
+  videoAssetId: null,
+  clipStartSec: null,
+  clipEndSec: null,
+  clipAudio: "OFF",
+  clipAudioGain: 0.5,
+  clipShortMode: "AUTO",
+  clipFrame: "AUTO",
+} as const;
+
 /** Refuse anything bigger. A storyboard frame is never 40 MB. */
 export const IMPORT_MAX_BYTES = 40 * 1024 * 1024;
 /** Beyond this on either side a working copy is made, so FFmpeg stays quick. */
@@ -353,6 +365,9 @@ export async function attachImportedImage(
       imagePath: stored.imagePath,
       imageAssetId: stored.asset.id,
       ...(clipDropped ? { videoPath: null } : {}),
+      // A person's clip gives way to the picture they chose instead (the clip
+      // asset stays in the project).
+      ...(changed && scene.videoSource === "UPLOADED" && stored.asset.model !== "clip-poster" ? CLIP_CLEARED : {}),
       ...(changed && ["completed", "pending", "failed"].includes(scene.status)
         ? { status: "image_ready", errorMessage: null }
         : {}),
@@ -416,6 +431,7 @@ export async function removeSceneImage(sceneId: string): Promise<Scene> {
       imagePath: null,
       imageAssetId: null,
       videoPath: null,
+      ...CLIP_CLEARED,
       status: scene.status === "skipped" ? scene.status : "pending",
       errorMessage: null,
     },

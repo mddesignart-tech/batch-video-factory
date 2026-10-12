@@ -87,6 +87,9 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
       subjects: s.transitionIn ? (s.subjects ?? []) : undefined,
       // G4 lean towards the speaker; absent when there is none.
       speakerFocus: s.speakerFocus ?? undefined,
+      // A person's clip: trim / short strategy / framing / its sound. Absent on
+      // every other scene, so an unchanged video keeps its recipe.
+      clip: s.clip ?? undefined,
       layers: s.layers
         ? {
             bg: content(s.layers.background),

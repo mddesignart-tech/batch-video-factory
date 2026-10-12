@@ -1,3 +1,4 @@
+import { usesUserClip } from "@/domain/user-clip";
 import { generationAspectFor, type OutputProfile } from "@/domain/platform-profile";
 import { needsScriptApproval } from "@/domain/content-legacy";
 import { criticalPictureCount, sceneReferences } from "./reference-assets";
@@ -370,6 +371,8 @@ export async function buildPlannedScenes(
     // treating it as one would forecast $0 for a clip the run really does buy -
     // the one direction an estimate must never be wrong in. QĐ-071.
     hasExistingVideo: fileOnDisk(scene.videoPath),
+    // The person's own clip (UPLOADED): $0 media, never a Video AI price.
+    userClip: usesUserClip(scene),
     hasExistingImage: paidImages.has(scene.id) && fileOnDisk(scene.imagePath),
     // EVERY current line, not any: a scene with two lines and one file still
     // buys the second, and calling that "reused" under-states the bill.

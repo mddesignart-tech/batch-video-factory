@@ -83,6 +83,10 @@ export const TIMING_REASONS = [
   "CLIP_FREEZE_EXTENDED", // last frame held (<= maxFreezeExtension)
   "CLIP_CAPPED_NO_VOICE", // no voice, planned longer than clip + hold: capped
   "CLIP_TOO_SHORT_FOR_VOICE", // BLOCKED: only a new clip would fit
+  "USER_CLIP_LOOPED", // the person's clip, shorter than the scene, loops (chosen)
+  "USER_CLIP_SLOWED", // the person's clip plays slower to fill the scene (chosen)
+  "USER_CLIP_HELD", // the person's clip holds its last frame (chosen)
+  "USER_CLIP_TOO_SHORT", // BLOCKED: the person's clip is too short - choose loop / slow / hold / a longer part
 ] as const;
 export type TimingReason = (typeof TIMING_REASONS)[number];
 
@@ -103,6 +107,14 @@ export interface SceneTimingInput {
   motion: "VIDEO_AI" | "LOCAL_MOTION" | "STATIC";
   /** Measured length of the paid clip, when there is one on disk. */
   clipDuration?: number | null;
+  /**
+   * The clip is the person's OWN upload (its trimmed length is `clipDuration`).
+   * `clipShortMode` says what to do when it is shorter than the scene: AUTO
+   * (V1's paid-clip rule: hold the last frame up to `maxFreezeExtension`, else
+   * stop and ask - never a long silent freeze), HOLD, LOOP or SLOW.
+   */
+  userClip?: boolean;
+  clipShortMode?: "AUTO" | "HOLD" | "LOOP" | "SLOW";
 }
 
 export interface SceneTiming {
@@ -120,6 +132,11 @@ export interface SceneTiming {
   freezeSec: number;
   /** Seconds cut off the end of a paid clip, locally. 0 when none. */
   trimmedSec: number;
+  /**
+   * How a person's clip fills a scene longer than it (absent = it does not need
+   * to: trimmed, or held for at most a second). `speed` < 1 = played slower.
+   */
+  clipFill?: { mode: "LOOP" | "SLOW" | "HOLD"; speed: number };
   blocked: boolean;
   change: TimingChange;
   /** Human sentence, Vietnamese, for logs and the UI. */
@@ -128,6 +145,8 @@ export interface SceneTiming {
 }
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
+/** A person's clip is never played slower than half speed. */
+export const MIN_USER_CLIP_SPEED = 0.5;
 
 export function parseDurationMode(value: unknown): DurationMode {
   const v = String(value ?? "").trim().toUpperCase();
@@ -215,8 +234,29 @@ export function resolveSceneDuration(
   let freeze = 0;
   let trimmed = 0;
   let blocked = false;
+  let clipFill: SceneTiming["clipFill"];
   const clip = input.motion === "VIDEO_AI" && input.clipDuration && input.clipDuration > 0 ? input.clipDuration : null;
-  if (clip !== null) {
+  const chosen = input.userClip ? (input.clipShortMode ?? "AUTO") : "AUTO";
+  if (clip !== null && chosen !== "AUTO" && final > clip + 0.05) {
+    // A person's clip, shorter than the scene, with a strategy THEY chose. The
+    // scene keeps the length the voice needs; nothing is bought.
+    const speed = Math.max(MIN_USER_CLIP_SPEED, clip / final);
+    if (chosen === "SLOW" && clip / final < MIN_USER_CLIP_SPEED) {
+      // Slower than half speed reads as broken: slow to the limit, then hold.
+      freeze = final - clip / MIN_USER_CLIP_SPEED;
+      warnings.push(
+        `Cảnh ${input.sceneNumber}: clip ${clip.toFixed(2)}s quá ngắn để phát chậm vừa ${final.toFixed(2)}s — chậm tối đa ${MIN_USER_CLIP_SPEED}× rồi giữ khung cuối ${freeze.toFixed(2)}s.`,
+      );
+    }
+    if (chosen === "HOLD") {
+      freeze = final - clip;
+      if (freeze > config.maxFreezeExtension) {
+        warnings.push(`Cảnh ${input.sceneNumber}: giữ khung cuối của clip ${freeze.toFixed(2)}s (bạn đã chọn "Giữ khung cuối").`);
+      }
+    }
+    reason = chosen === "LOOP" ? "USER_CLIP_LOOPED" : chosen === "SLOW" ? "USER_CLIP_SLOWED" : "USER_CLIP_HELD";
+    clipFill = { mode: chosen, speed: chosen === "SLOW" ? r3(speed) : 1 };
+  } else if (clip !== null) {
     if (final <= clip) {
       trimmed = clip - final;
       if (trimmed > 0.05) reason = "CLIP_TRIMMED_LOCAL";
@@ -235,7 +275,7 @@ export function resolveSceneDuration(
         reason = "CLIP_FREEZE_EXTENDED";
       } else {
         blocked = true;
-        reason = "CLIP_TOO_SHORT_FOR_VOICE";
+        reason = input.userClip ? "USER_CLIP_TOO_SHORT" : "CLIP_TOO_SHORT_FOR_VOICE";
         final = tight;
         freeze = final - clip;
       }
@@ -263,7 +303,10 @@ export function resolveSceneDuration(
   }
 
   const finalDuration = r3(final);
-  const message = blocked
+  const message = blocked && input.userClip
+    ? `Cảnh ${input.sceneNumber}: lời thoại cần ${finalDuration.toFixed(2)}s nhưng đoạn clip của bạn chỉ ${clip!.toFixed(2)}s. ` +
+      `Chọn "Lặp lại clip", "Phát chậm", "Giữ khung cuối" hoặc một đoạn dài hơn. Không gọi Video AI.`
+    : blocked
     ? `Cảnh ${input.sceneNumber}: lời thoại cần ${finalDuration.toFixed(2)}s nhưng clip đã mua chỉ ${clip!.toFixed(2)}s ` +
       `(giữ khung cuối tối đa ${config.maxFreezeExtension.toFixed(1)}s). MEDIA_REGEN_REQUIRED — cần clip mới, ` +
       `phải duyệt lại; hệ thống KHÔNG tự mua.`
@@ -285,6 +328,7 @@ export function resolveSceneDuration(
     timingReason: reason,
     freezeSec: r3(Math.max(0, freeze)),
     trimmedSec: r3(Math.max(0, trimmed)),
+    ...(clipFill ? { clipFill } : {}),
     blocked,
     change: blocked ? "MEDIA_REGEN_REQUIRED" : "RENDER_ONLY_CHANGE",
     message,

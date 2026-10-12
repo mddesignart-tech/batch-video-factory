@@ -65,6 +65,8 @@ export interface SceneCameraView {
     notice: string;
     hint: string;
     choices: { id: "SIMPLER_SCENE" | "KEEP_SEPARATE" | "VIDEO_AI" | "DROP_INTERACTION"; label: string; available: boolean; note?: string }[];
+    /** The scene's own uploaded clip shows the interaction: nothing to choose. */
+    resolved?: boolean;
   } | null;
 }
 
@@ -277,8 +279,8 @@ export function SceneCameraPanel({ view }: { view: SceneCameraView }) {
       </div>
 
       {view.interaction ? (
-        <Alert tone="warn" title={view.interaction.notice}>
-          <p className="text-ink-400">{view.interaction.hint}</p>
+        <Alert tone={view.interaction.resolved ? "ok" : "warn"} title={view.interaction.notice}>
+          {view.interaction.hint ? <p className="text-ink-400">{view.interaction.hint}</p> : null}
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {view.interaction.choices.map((c) =>
               c.id === "VIDEO_AI" ? (

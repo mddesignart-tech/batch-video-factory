@@ -1,3 +1,4 @@
+import { USER_CLIP_REASON } from "@/domain/user-clip";
 import type { ModelRegistry } from "@prisma/client";
 import type {
   Complexity,
@@ -93,6 +94,12 @@ export interface PlannedSceneInput {
   hasExistingVideo?: boolean;
 
   /**
+   * The scene's visual is the person's OWN uploaded clip: media generation $0,
+   * render local $0, no Video AI priced - whatever the mode says.
+   */
+  userClip?: boolean;
+
+  /**
    * The keyframe was BOUGHT earlier and is still on disk.
    *
    * The generated counterpart of `hasSuppliedKeyframe`, and the same test
@@ -144,6 +151,8 @@ export interface ScenePlan {
   /** Where this scene's movement comes from, and why. */
   motionSource: MotionSource;
   motionReason: string;
+  /** USER_VIDEO = the person's own clip (shown as "Video của bạn", never as AI video). */
+  mediaSource?: "USER_VIDEO";
   /**
    * What length would really be sent to the chosen video model.
    *
@@ -516,7 +525,9 @@ export function planScene(opts: {
   // was priced at $0.00 by this function while `generateSceneVideo` went on to
   // buy the clip - the same failure QĐ-060 closed for the LOW_AUTO facts, in
   // the one place that still re-derived instead of being told.
-  const motion = scene.lowAutoFacts?.motionSource
+  const motion = scene.userClip
+    ? { source: "LOCAL_MOTION" as MotionSource, reason: USER_CLIP_REASON }
+    : scene.lowAutoFacts?.motionSource
     ? { source: scene.lowAutoFacts.motionSource, reason: "theo dẫn xuất của pipeline" }
     : decideMotion({
         qualityMode,
@@ -525,7 +536,8 @@ export function planScene(opts: {
         characterCount: scene.characterCount,
       });
 
-  const ownsKeyframe = scene.hasSuppliedKeyframe === true || scene.hasExistingImage === true;
+  // A person's clip carries its own frame: no picture is ever bought for it.
+  const ownsKeyframe = scene.hasSuppliedKeyframe === true || scene.hasExistingImage === true || scene.userClip === true;
   const wantsKeyframe =
     ownsKeyframe
       ? false
@@ -883,6 +895,7 @@ export function planScene(opts: {
     quality,
     motionSource: motion.source,
     motionReason: motion.reason,
+    ...(scene.userClip ? { mediaSource: "USER_VIDEO" as const } : {}),
     duration_plan: durationPlan,
     needsProvider,
     errorCode,

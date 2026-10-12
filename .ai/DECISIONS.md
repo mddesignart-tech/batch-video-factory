@@ -3935,3 +3935,49 @@ tay–thân, giữa hai chân không còn được xoá → bỏ, giữ luật v
 **Giới hạn còn lại.** Chủ thể TRẮNG trên nền TRẮNG (giày, tay áo trắng) vẫn có chỗ bị loang — tách bằng màu không
 phân biệt được; cần ảnh chủ thể trên nền xám/màu tương phản. Loop xe / người / lá / chim vẫn là hình minh hoạ tự sinh;
 muốn thật cần file loop alpha thật (.webm VP9 / .mov) đặt vào `data/ambient/`.
+
+## QĐ-132 — Uploaded Video Clip Input (2026-10-12, local + mock, $0)
+
+**Quyết định.** Người dùng tải clip thật (.mp4 / .mov / .webm / .m4v) lên dự án và dùng làm hình của cảnh.
+`USER VIDEO = REUSE = $0`: clip không bao giờ được định tuyến, không bao giờ bị mua lại / thay bằng Video AI.
+Thứ tự ưu tiên: **Video của bạn > clip sẵn có > Local Motion > Video AI trả phí**.
+
+**Dữ liệu (migration `20261012000000_uploaded_video_clip`, chỉ thêm cột có mặc định).**
+- `Scene.videoSource` (`GENERATED` mặc định = V1 / `UPLOADED`), `videoAssetId`, `clipStartSec`, `clipEndSec`,
+  `clipAudio` (`OFF` mặc định / `ON`), `clipAudioGain` (0,5), `clipShortMode` (`AUTO`/`HOLD`/`LOOP`/`SLOW`),
+  `clipFrame` (`AUTO`/`COVER`/`CONTAIN`).
+- `Asset.mediaInfoJson` — số đo ffprobe (fps, codec, pixel format, có âm thanh, xoay, hướng, tỷ lệ, poster).
+- Clip = `Asset` kind `video`, source `IMPORTED`, provider `upload` (tận dụng hệ asset sẵn có, không thêm enum mới),
+  lưu ở `data/projects/<id>/videos/upload-*.ext` (đường dẫn tương đối). Trùng nội dung (sha256) trong dự án → dùng lại
+  asset cũ; file của asset đó đã mất → bytes mới đặt lại file.
+
+**Kiểm tra (không tin đuôi file).** Tên → phần đầu file (ftyp / moov / EBML-webm) → ffprobe đọc được vùng chứa khớp →
+có luồng hình + độ dài → giải mã thật 1 khung. Lỗi nói rõ bằng tiếng Việt (`ClipUploadError`).
+
+**Một pipeline.** Clip đi qua đúng `buildSceneNormalizeArgs` / `resolveSceneDuration` / mixer như clip AI:
+- cắt bằng seek đầu vào (`-ss/-t`, giải mã một lần); LOOP cắt cửa sổ một lần rồi `-stream_loop`; SLOW `setpts` (≥ 0,5×);
+- `fps=` đưa 24/25/30/60/VFR về 30 fps không trôi thời lượng; không camera local nào đè lên clip (giữ chuyển động gốc);
+- khung AUTO theo Output Profile, COVER / CONTAIN, không bao giờ kéo méo; `probeDimensions` tính cả xoay của clip điện thoại;
+- âm thanh clip ON: trộn dưới lời đọc ở 24 kHz mono, sidechain cùng thông số ducking của nhạc nền, `normalize=0` (lời
+  không bị hạ); OFF mặc định.
+- Clip ngắn hơn cảnh: AUTO = luật clip trả phí (giữ khung cuối ≤ 1 s, dài hơn → dừng render và hỏi, KHÔNG gọi Video AI);
+  HOLD / LOOP / SLOW chỉ khi người dùng chọn. Clip dài hơn → cắt.
+- Cảnh không có clip người dùng: lệnh FFmpeg và render recipe y như trước (test R).
+
+**Định tuyến / chi phí / resume.** `deriveSceneVideoFacts` trả LOCAL_MOTION cho cảnh UPLOADED kể cả khi ghim VIDEO_AI;
+`generateSceneVideo` trả clip trước mọi bước định tuyến; `generateSceneImage` không bao giờ mua ảnh cho cảnh có clip
+(khung đầu clip làm keyframe IMPORTED). Ước tính: `mediaSource: USER_VIDEO`, video null, ảnh $0; PREFLIGHT hiện
+"Nguồn: Video của bạn · Tạo media $0 · Render tại máy $0". Physical Interaction: route `USER_VIDEO` đứng trước
+NATIVE_CLIP. File clip mất → cảnh/ render dừng với "Không tìm thấy video nguồn."; chọn lại file / clip khác /
+Local Motion / Video AI (chỉ ghi lựa chọn, giá ở PREFLIGHT, cần duyệt).
+
+**An toàn.** Thay clip / trim / âm thanh = render lại tại máy, không đụng lời, giọng, phụ đề. Thay bằng ảnh, bỏ ảnh,
+"Dùng Local Motion", "Chọn Video AI" → bỏ gán clip (clip vẫn ở thư viện dự án). Xoá clip đang dùng → hỏi trước
+("Video này đang được sử dụng ở X scene"). Đổi tham chiếu không làm mất clip (cảnh UPLOADED có ảnh IMPORTED).
+
+**Giới hạn / backlog.** Clip làm MỘT LỚP trong Multi-layer (B) chưa làm. Chưa có smart crop theo mặt/sản phẩm (dùng
+COVER/CONTAIN tất định). Chưa liên kết clip với tham chiếu (nhân vật/sản phẩm). Bước encode cuối (có từ V1, dùng chung
+mọi video) lặp khung đầu tiên một lần (+33 ms) — chưa sửa để không đổi render cũ.
+
+**Kiểm chứng.** `tests/uploaded-clip-media.test.ts` 14/14 (A, B, C, K, L, M, N, O, P, Q, R, trim/thời lượng, LOOP),
+`tests/uploaded-clip-pipeline.test.ts` 7/7 (D, E, F, G, H, I, J, S, xoá an toàn, chống trùng). PAID POST = 0.

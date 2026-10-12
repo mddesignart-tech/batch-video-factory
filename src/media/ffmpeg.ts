@@ -213,7 +213,11 @@ export async function probeDuration(file: string): Promise<number> {
   return Number.isFinite(value) ? value : 0;
 }
 
-/** Width and height of the first video stream (or image), null when unreadable. */
+/**
+ * DISPLAYED width and height of the first video stream (or image), null when
+ * unreadable. A phone clip stored landscape with a 90° rotation is portrait on
+ * screen - and FFmpeg turns it upright when it decodes - so the sizes swap.
+ */
 export async function probeDimensions(file: string): Promise<{ width: number; height: number } | null> {
   try {
     const { stdout } = await ffprobe([
@@ -221,14 +225,19 @@ export async function probeDimensions(file: string): Promise<{ width: number; he
       "error",
       "-select_streams",
       "v:0",
-      "-show_entries",
-      "stream=width,height",
+      // Whole stream entry: the rotation sits in side data on newer builds and
+      // in a `rotate` tag on older ones, and section names differ by version.
+      "-show_streams",
       "-of",
-      "csv=s=x:p=0",
+      "json",
       file,
     ]);
-    const [w, h] = stdout.trim().split("x").map(Number);
-    return w && h ? { width: w, height: h } : null;
+    const stream = (JSON.parse(stdout) as { streams?: { width?: number; height?: number; tags?: { rotate?: string }; side_data_list?: { rotation?: number }[] }[] }).streams?.[0];
+    const w = stream?.width ?? 0;
+    const h = stream?.height ?? 0;
+    if (!w || !h) return null;
+    const rotation = Math.abs(stream?.side_data_list?.find((d) => typeof d.rotation === "number")?.rotation ?? Number(stream?.tags?.rotate ?? 0)) % 180;
+    return rotation === 90 ? { width: h, height: w } : { width: w, height: h };
   } catch {
     return null;
   }

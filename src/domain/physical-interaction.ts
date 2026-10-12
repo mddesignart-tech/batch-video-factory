@@ -82,7 +82,7 @@ export function keepsCriticalReferences(caps: ReferenceCaps, critical: string[])
   );
 }
 
-export type InteractionRouteKind = "LOCAL_LAYERS" | "NATIVE_CLIP" | "SCENE_PICTURE" | "VIDEO_AI" | "ASK_USER";
+export type InteractionRouteKind = "LOCAL_LAYERS" | "USER_VIDEO" | "NATIVE_CLIP" | "SCENE_PICTURE" | "VIDEO_AI" | "ASK_USER";
 export type InteractionChoice = "SIMPLER_SCENE" | "KEEP_SEPARATE" | "VIDEO_AI" | "DROP_INTERACTION";
 
 export const VI_INTERACTION_CHOICE: Record<InteractionChoice, string> = {
@@ -102,6 +102,8 @@ export interface InteractionRouteInput {
   dropped?: boolean;
   /** The scene already has its own clip (it shows the interaction as filmed / generated). */
   nativeClip?: boolean;
+  /** That clip is the person's OWN upload (filmed / made elsewhere): reused first, never replaced by a purchase. */
+  userClip?: boolean;
   /** The scene already has one picture of the whole scene (the interaction pre-composed in it). */
   scenePicture?: boolean;
   /** Types of the scene's CRITICAL references ("PRODUCT", "CHARACTER"...). */
@@ -128,6 +130,7 @@ export interface InteractionRoute {
  * Where a scene's movement should come from, given its interaction. LOCAL_OK
  * keeps the local layers. A COMPLEX_INTERACTION is never faked with separate
  * layers by default; in order:
+ *   0. the person's own uploaded clip (USER VIDEO, $0);
  *   1. the scene's own clip;
  *   2. the scene's own picture (one pre-composed image);
  *   3. Video AI - only when already approved AND a model keeps every CRITICAL reference;
@@ -154,6 +157,9 @@ export function routeInteraction(input: InteractionRouteInput): InteractionRoute
     return { interaction: "LOCAL_OK", route: "LOCAL_LAYERS", autoPaid: false, reason: "Các chủ thể không chạm nhau: ghép lớp tại máy phù hợp.", notice: null, hint: null, choices: [] };
   }
   const base = { interaction: "COMPLEX_INTERACTION" as const, notice: INTERACTION_NOTICE, hint: INTERACTION_HINT, choices };
+  if (input.userClip) {
+    return { ...base, route: "USER_VIDEO", autoPaid: false, reason: "Cảnh dùng Video của bạn thể hiện tương tác: dùng clip đó, không cần Video AI ($0)." };
+  }
   if (input.nativeClip) {
     return { ...base, route: "NATIVE_CLIP", autoPaid: false, reason: "Cảnh đã có clip riêng thể hiện tương tác: dùng clip đó." };
   }

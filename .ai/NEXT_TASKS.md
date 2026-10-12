@@ -15,11 +15,14 @@
       tham chiếu (direct reference) đủ an toàn để định tuyến AUTO; hiện đường này luôn hỏi người dùng.
 - [ ] **Chất lượng tương tác vật lý phức tạp** — cầm, rót, ôm, chạm sản phẩm: local multi-layer không làm được;
       cần clip gốc hoặc Video AI đã kiểm chứng.
-- [ ] **Kiểm tra toggle "Xuyên suốt video"** (`reference-panel.tsx`) — bật/tắt có reset gán tham chiếu thủ công theo
-      cảnh hay không; chưa kiểm.
+- [x] **Kiểm tra toggle "Xuyên suốt video"** — XONG 353c946 (gán tự động chỉ thêm, hỏi trước khi làm cũ ảnh GENERATED).
 - [ ] **LOGO Reference → overlay thật trong final render** — hiện logo chỉ là tham chiếu, chưa đặt lên video xuất.
 - [ ] **Trích nội dung từ URL** làm nguồn kịch bản.
-- [ ] **Nhập clip video người dùng tải lên** làm cảnh (clip gốc).
+- [x] **Nhập clip video người dùng tải lên** làm cảnh (clip gốc) — XONG QĐ-132 (2026-10-12).
+- [ ] **Clip người dùng làm MỘT LỚP trong Multi-layer** (QĐ-132 phần B) — hiện clip chỉ dùng làm toàn bộ hình cảnh.
+- [ ] **Smart crop clip theo mặt / sản phẩm** — hiện COVER / CONTAIN tất định; chưa có tracking.
+- [ ] **Liên kết clip người dùng với tham chiếu** (nhân vật / sản phẩm) — chưa có.
+- [ ] **Bước encode cuối lặp khung đầu một lần** (+1 khung, có từ V1, mọi video) — sửa cần đổi render recipe.
 - [ ] **Creative Style trong luồng lô thành ngữ (batch idiom)** — hiện chỉ ở luồng TẠO VIDEO / project.
 - [ ] **UI song ngữ nâng cao.**
 - [ ] **Kiểm thử thật bằng người dùng** cho kéo thả / gán lớp thủ công (drag/drop, manual layer UI).
