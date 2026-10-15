@@ -177,6 +177,11 @@ export function Storyboard({
   if (!selected) return null;
 
   const routing = routingByScene[selected.sceneNumber];
+  // The model a PERSON pinned, if any - never the router's plan or record (QĐ-069).
+  const pinnedVideo =
+    selected.videoModelPinned && selected.videoProvider && selected.videoModel
+      ? { provider: selected.videoProvider, model: selected.videoModel }
+      : null;
   // Subtitles come from the voice's own ordered lines (QĐ-122): with two or
   // more speakers every line shows, not the one line the stored field holds.
   const voiceLines = parseDialogueLines(selected.dialogue, selected.narration, selected.speakingCharacters);
@@ -583,7 +588,14 @@ export function Storyboard({
                     label="Chuyển động"
                     hint="LOCAL_MOTION: FFmpeg tại máy, $0. VIDEO_AI: 1 clip Video AI từ ảnh cảnh (tính phí)."
                   >
-                    <Select name="motionMode" defaultValue={selected.motionMode}>
+                    <Select
+                      // Re-mounted when the saved value changes, so an uncontrolled
+                      // field never shows (and re-submits) a choice the server has
+                      // since replaced - e.g. a pin cleared by LOCAL_MOTION. QĐ-135.
+                      key={`motion-${selected.motionMode}`}
+                      name="motionMode"
+                      defaultValue={selected.motionMode}
+                    >
                       <option value="AUTO">Tự chọn</option>
                       <option value="LOCAL_MOTION">LOCAL_MOTION</option>
                       <option value="VIDEO_AI">VIDEO_AI</option>
@@ -619,8 +631,12 @@ export function Storyboard({
                       hint="Để trống để AI Router tự chọn theo độ phức tạp và ngân sách."
                     >
                       <Select
+                        key={`pin-${pinnedVideo?.provider ?? ""}/${pinnedVideo?.model ?? ""}`}
                         name="videoModel"
-                        defaultValue={selected.videoModel ?? ""}
+                        // Only a PIN is shown here. The same columns also hold the
+                        // plan TẠO MEDIA froze and the model the last run used, and
+                        // showing those would re-save them as a pin. QĐ-135.
+                        defaultValue={pinnedVideo?.model ?? ""}
                         onChange={(e) => {
                           const form = e.currentTarget.form;
                           const providerInput = form?.elements.namedItem(
@@ -643,9 +659,10 @@ export function Storyboard({
                       </Select>
                     </Field>
                     <input
+                      key={`pin-provider-${pinnedVideo?.provider ?? ""}/${pinnedVideo?.model ?? ""}`}
                       type="hidden"
                       name="videoProvider"
-                      defaultValue={selected.videoProvider ?? ""}
+                      defaultValue={pinnedVideo?.provider ?? ""}
                     />
                   </div>
                 </div>

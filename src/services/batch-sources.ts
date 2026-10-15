@@ -31,6 +31,36 @@ export async function batchSource(batchId: string): Promise<BatchSource> {
     : "IDIOM_GENERATED";
 }
 
+/**
+ * Are this batch's videos rows that already exist - an imported storyboard, or
+ * a project wrapped into a batch of one by TẠO MEDIA (QĐ-103)?
+ *
+ * Such a batch is priced from its rows (`preflightImportedBatch`), never by the
+ * idiom planner: it lists no idioms (`idiomIdsJson = "[]"`), and the planner
+ * reads an empty list as "pick any unused idiom", so DỰ TOÁN LẠI used to price a
+ * stranger from the library on the reference profile - script included - and
+ * then kept re-pricing that stranger. A V1 batch's projects are made FROM its
+ * listed idioms, so a project whose idiom the list does not name means rows.
+ * QĐ-135.
+ */
+export async function pricedFromRows(batchId: string): Promise<boolean> {
+  const batch = await prisma.batch.findUnique({
+    where: { id: batchId },
+    select: { idiomIdsJson: true, projects: { select: { idiomId: true, importFingerprint: true, scriptJson: true } } },
+  });
+  if (!batch || batch.projects.length === 0) return false;
+  let listed: unknown;
+  try {
+    listed = JSON.parse(batch.idiomIdsJson || "[]");
+  } catch {
+    listed = [];
+  }
+  const idiomIds = new Set(Array.isArray(listed) ? listed : []);
+  return batch.projects.some(
+    (p) => p.importFingerprint !== null || (p.scriptJson ?? "").includes("IMPORT") || !idiomIds.has(p.idiomId),
+  );
+}
+
 /** Planned idiom videos that do not have a project yet. */
 export async function pendingIdiomVideos(batchId: string): Promise<number> {
   const batch = await prisma.batch.findUniqueOrThrow({ where: { id: batchId } });

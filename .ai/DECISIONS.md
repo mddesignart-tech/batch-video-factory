@@ -4035,3 +4035,40 @@ từ/đến (giây); sơ đồ vị trí theo tỷ lệ khung; XEM TRƯỚC (khu
 
 **Kiểm chứng.** `tests/logo-overlay.test.ts` 19/19 (A–P + thời gian hiện); fixture 1080×1920 TOP_RIGHT và 1920×1080
 BOTTOM_RIGHT đo bằng ffprobe + điểm ảnh: lệch ≤ 1 px, tỷ lệ 2:1 giữ (1,98 / 2,02), SAR 1:1. PAID POST = 0.
+
+## QĐ-135 — "Lưu cảnh" không tự ghim model; DỰ TOÁN LẠI lô dự án định giá đúng dự án (2026-10-15, local + mock, $0)
+
+Hai lỗi cũ (không thuộc QĐ-132/134) tìm thấy khi smoke đóng phase QĐ-132..134.
+
+**Lỗi 1 — form "Lưu cảnh" (`updateScene`).** Cột `videoProvider`/`videoModel` giữ ba nghĩa: ghim của người dùng,
+kế hoạch `freezeScenePlan` ghi khi TẠO MEDIA, và model lần chạy đã dùng; chỉ `videoModelPinned` nói "người chọn"
+(QĐ-069). Ô "Ghim mô hình video" lấy mặc định từ cặp cột → bấm Lưu cảnh biến KẾ HOẠCH thành GHIM
+(`videoModelPinned = true`). `updateScene` cũng không bao giờ ghi `motionSource` → chọn LOCAL_MOTION vẫn để
+`motionSource = AI_VIDEO` + ghim → `deriveSceneVideoFacts` giữ AI_VIDEO (ghim tay thắng "free wins") → dự toán và
+định tuyến vẫn mua clip Video AI. Không chi âm thầm (PREFLIGHT / duyệt chi vẫn chặn) nhưng ý người dùng bị bỏ qua.
+
+Sửa:
+- Form chỉ hiện model khi `videoModelPinned`; form remount khi motionMode / ghim đã lưu đổi (không gửi lại giá trị cũ).
+- `updateScene` (giống "Dùng Local Motion" / trình sửa cảnh import):
+  - LOCAL_MOTION → `motionSource = LOCAL_MOTION`, xoá cặp model, `videoModelPinned = false` (thắng cả ghim đang hiện).
+  - VIDEO_AI → `motionSource = AI_VIDEO`; chọn model → ghim; xoá ô model trên cảnh đang ghim → rút ghim.
+  - Đổi sang AUTO → `motionSource = AI_VIDEO` (= chưa chốt local; `effectiveMotionSource` ra quyết định mới của router).
+    AUTO giữ nguyên AUTO → không đổi kế hoạch. Không chọn model trên cảnh chưa ghim → bản ghi của router giữ nguyên.
+  - Không đụng ảnh / clip / giọng / clip tải lên đã có.
+- `deriveSceneVideoFacts`: `motionMode = LOCAL_MOTION` là chỉ thị (hướng $0) → LOCAL_MOTION bất kể motionSource / ghim
+  cũ. Hàng cũ đã bị form cũ làm hỏng định tuyến đúng mà không cần lưu lại.
+
+**Lỗi 2 — DỰ TOÁN LẠI ("cấp lô" bị kẹt).** Lô bọc một dự án (TẠO MEDIA, QĐ-103) có `idiomIdsJson = "[]"`.
+`reanalyseBatch` chuyển cho bộ lập kế hoạch thành ngữ V1; danh sách rỗng = "chọn thành ngữ chưa dùng bất kỳ" → định
+giá một thành ngữ lạ (DB nháp: "Break a leg") theo kịch bản mẫu 6 cảnh, kể cả tiền kịch bản → $1,6859, ghi đè
+`planJson` + dự toán của quyền chi DRAFT, và lưu id thành ngữ lạ vào `idiomIdsJson` → mỗi lần DỰ TOÁN LẠI sau đó lại
+định giá đúng thành ngữ lạ đó (kẹt). Hệ quả: PREFLIGHT HỎNG (vượt trần lô / phần còn lại). Nếu được duyệt, kế hoạch có
+một video thành ngữ chưa có project → executor sẽ tạo project mới và mua kịch bản. Không liên quan migration.
+
+Sửa: `pricedFromRows(batchId)` (batch-sources) — lô có project mà project là import, hoặc thành ngữ của nó không nằm
+trong `idiomIdsJson` → DỰ TOÁN LẠI chạy `preflightImportedBatch` (cùng PREFLIGHT trang lô và DUYỆT & CHẠY dùng): viết
+lại `planJson` + dự toán DRAFT từ chính các hàng. Lô thành ngữ V1 (project sinh từ danh sách của nó) không đổi.
+Lô đã kẹt: bấm DỰ TOÁN LẠI một lần là gỡ. Không đổi kiến trúc chi phí, không tăng hạn mức, không reservation/job.
+
+**Kiểm chứng.** `tests/scene-save-routing.test.ts` 13/13 (A–G + hàng cũ + lô kẹt + dự toán đi theo cảnh).
+Trên code cũ: 10 FAIL, lỗi 2 tái hiện đúng $1,6859. PAID POST = 0.

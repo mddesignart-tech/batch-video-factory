@@ -235,27 +235,52 @@ export async function updateScene(
     };
   }
 
-  const data = { ...parsed.data };
+  const current = await prisma.scene.findUnique({
+    where: { id: sceneId },
+    select: { motionMode: true, videoModelPinned: true },
+  });
+  if (!current) return { ok: false, message: "Không tìm thấy cảnh." };
+
+  const { videoProvider, videoModel, motionMode, ...rest } = parsed.data;
+  const data: Record<string, unknown> = { ...rest };
   // An empty model pin means "let the router decide", not "use a model called
   // empty string".
-  if (data.videoProvider === "") data.videoProvider = undefined;
-  if (data.videoModel === "") data.videoModel = undefined;
+  const provider = videoProvider || null;
+  const model = videoModel || null;
+  const mode = motionMode ?? current.motionMode;
+  if (motionMode !== undefined) data.motionMode = motionMode;
 
-  // Naming both halves here IS the pin, and clearing them retracts it. The flag
-  // has to be written alongside, because `generateSceneVideo` later writes the
-  // model it used into the same two columns - after which nothing else in the
-  // row can tell an instruction from a record. See QĐ-069.
-  const videoModelPinned = Boolean(data.videoProvider && data.videoModel);
+  // A pin is something a PERSON did, and `videoModelPinned` is the only column
+  // that says so: the two model columns also hold the plan `freezeScenePlan`
+  // wrote and the model `generateSceneVideo` used. The form therefore only
+  // shows a model when one is pinned, and this action only pins what was
+  // actually picked - turning that record into a pin is how "Lưu cảnh" kept a
+  // paid clip on a scene set to LOCAL_MOTION. See QĐ-069, QĐ-135.
+  if (mode === "LOCAL_MOTION") {
+    // The movement is made on this machine: no video model is called, so no
+    // pin, and the frozen decision says so too - the same writes as the
+    // "Dùng Local Motion" button. Media already made is left alone.
+    Object.assign(data, { motionSource: "LOCAL_MOTION", videoProvider: null, videoModel: null, videoModelPinned: false });
+  } else {
+    if (provider && model) {
+      Object.assign(data, { videoProvider: provider, videoModel: model, videoModelPinned: true });
+    } else if (current.videoModelPinned) {
+      // Cleared by hand: the pin is retracted and the router decides again.
+      Object.assign(data, { videoProvider: null, videoModel: null, videoModelPinned: false });
+    }
+    // Nothing picked on an unpinned scene: the router's plan stays as it was.
 
-  const scene = await prisma.scene.update({
-    where: { id: sceneId },
-    data: {
-      ...data,
-      videoProvider: data.videoProvider ?? null,
-      videoModel: data.videoModel ?? null,
-      videoModelPinned,
-    },
-  });
+    // `motionSource` is the frozen DECISION the pipeline and the estimate read.
+    // VIDEO_AI is an instruction to buy a clip. Switching to AUTO hands the
+    // decision back to the planner: AI_VIDEO is the column's "not settled on
+    // local" value, which `effectiveMotionSource` resolves to the fresh verdict
+    // (LOCAL_MOTION whenever the rules say so). An unchanged AUTO keeps its plan.
+    if (mode === "VIDEO_AI" || (mode === "AUTO" && current.motionMode !== "AUTO")) {
+      data.motionSource = "AI_VIDEO";
+    }
+  }
+
+  const scene = await prisma.scene.update({ where: { id: sceneId }, data });
   revalidatePath(`/projects/${scene.projectId}`);
   return { ok: true, message: `Đã lưu cảnh ${scene.sceneNumber}.` };
 }

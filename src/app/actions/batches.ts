@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { errorMessage } from "@/lib/utils";
 import { createAuthorization, DEFAULT_MAX_COST_PER_VIDEO } from "@/services/batch-authorization";
 import { planBatch, type BatchPlan } from "@/services/batch-planner";
+import { pricedFromRows } from "@/services/batch-sources";
+import { preflightImportedBatch } from "@/services/import-preflight";
 import {
   approveAndStart,
   batchProgress,
@@ -174,6 +176,21 @@ export async function reanalyseBatch(batchId: string): Promise<PlanActionResult>
         message:
           "Lô này đã được duyệt chi. Hãy DỪNG BATCH trước nếu muốn dự toán lại — " +
           "đổi kế hoạch dưới một quyền chi đã cấp là thay đổi thứ người dùng đã đồng ý.",
+      };
+    }
+
+    // A batch made of existing rows is re-priced from those rows - the same
+    // PREFLIGHT the batch page and DUYỆT & CHẠY use. Sending it through the idiom
+    // planner priced an unrelated idiom instead and froze that number. QĐ-135.
+    if (await pricedFromRows(batchId)) {
+      const pre = await preflightImportedBatch(batchId);
+      revalidatePath(`/batches/${batchId}`);
+      revalidatePath("/batches");
+      return {
+        ok: true,
+        batchId,
+        message: `Đã dự toán lại: $${pre.estimatedTotal.toFixed(4)} cho ${pre.runnableCount} video.`,
+        details: pre.warnings,
       };
     }
 

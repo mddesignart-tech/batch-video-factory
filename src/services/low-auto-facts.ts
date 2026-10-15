@@ -177,8 +177,20 @@ export function deriveSceneVideoFacts(
         scene.motionMode === "VIDEO_AI";
   // USER VIDEO > EXISTING NATIVE VIDEO > LOCAL MOTION > PAID VIDEO AI: a clip
   // the person supplied is never replaced by a purchase, pinned or not.
+  //
+  // A person's LOCAL_MOTION is an instruction too, and the cheaper one: it beats
+  // a stored AI_VIDEO decision and any pin left beside it. Every writer stores it
+  // with motionSource = LOCAL_MOTION; the storyboard form used not to, and rows
+  // it saved (LOCAL_MOTION + AI_VIDEO + a model "pin") were still priced and
+  // routed as a paid clip. QĐ-135.
   const motion: MotionResolution = usesUserClip(scene)
     ? { source: "LOCAL_MOTION", diverged: false, reason: USER_CLIP_REASON }
+    : scene.motionMode === "LOCAL_MOTION"
+    ? {
+        source: "LOCAL_MOTION",
+        diverged: scene.motionSource !== "LOCAL_MOTION",
+        reason: "người dùng chọn LOCAL_MOTION cho cảnh này — FFmpeg tại máy, $0",
+      }
     : effectiveMotionSource(
         scene.motionSource,
         decideMotion({
