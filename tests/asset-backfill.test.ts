@@ -1,8 +1,36 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
+
+/**
+ * This file gets a database of its own.
+ *
+ * `backfillLegacyAssets` scans EVERY asset row (SHA-256 + ffprobe per file), and
+ * it runs three times here. On the suite's shared database that is every asset
+ * every earlier test file left behind: late in a full run the scan outgrew the
+ * hook's 120 s, while the file alone took 5 s. With its own empty schema the
+ * scan sees only the rows built below, whatever ran first. Test-only: the
+ * service still reads `@/lib/prisma`, it is simply handed this client.
+ */
+vi.mock("@/lib/prisma", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { createRequire } = await import("node:module");
+  const nodeFs = await import("node:fs");
+  const nodePath = await import("node:path");
+  const { PrismaClient } = await import("@prisma/client");
+  const { ROOT, TEST_DATA } = await import("./test-env");
+  const db = nodePath.join(TEST_DATA, `asset-backfill-${process.pid}.db`);
+  nodeFs.rmSync(db, { force: true });
+  const url = `file:${nodePath.relative(nodePath.join(ROOT, "prisma"), db).split(nodePath.sep).join("/")}?socket_timeout=60`;
+  execFileSync(
+    process.execPath,
+    [createRequire(import.meta.url).resolve("prisma/build/index.js"), "db", "push", "--skip-generate", "--accept-data-loss"],
+    { cwd: ROOT, stdio: "pipe", env: { ...process.env, DATABASE_URL: url } },
+  );
+  return { prisma: new PrismaClient({ datasources: { db: { url } } }) };
+});
 import { projectSubdir, toRelative } from "@/lib/paths";
 import { backfillLegacyAssets } from "@/services/asset-backfill";
 import { fileSha256 } from "@/services/asset-content";
@@ -108,8 +136,10 @@ beforeAll(async () => {
   await legacyAsset("nameB", { kind: "audio", provider: "mock", model: "mock-voice-std", filePath: toRelative(path.join(projectSubdir(projectId, "audio"), "same-name.wav")) });
 }, 120_000);
 
-afterAll(() => {
+afterAll(async () => {
   fs.rmSync(tmp, { recursive: true, force: true });
+  // The private database file is left for the run folder's own teardown.
+  await prisma.$disconnect();
 });
 
 describe("QĐ-113 — backfill asset cũ", () => {
@@ -121,6 +151,8 @@ describe("QĐ-113 — backfill asset cũ", () => {
     ledgerBefore = await ledgerSnapshot();
     assetCountBefore = await prisma.asset.count();
     const dry = await backfillLegacyAssets({ apply: false });
+    // Only this file's rows - no other test file's assets reach the scan.
+    expect(dry.scanned).toBe(Object.keys(ids).length);
     expect(rowOf(dry, "audioOk").action).toBe("UPDATED");
     // A dry run writes nothing.
     expect((await prisma.asset.findUniqueOrThrow({ where: { id: ids.audioOk } })).sha256).toBeNull();
