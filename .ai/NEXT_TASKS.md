@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
+**Cập nhật:** 2026-10-17 — full suite 41,4 phút (xong P1 tốc độ test). 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
 full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa làm, chờ duyệt từng mục.
 
 ---
@@ -19,7 +19,7 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
 ## Backlog SAU v1.4.0 (CHƯA làm, chờ duyệt từng mục)
 
 Thứ tự ưu tiên đề xuất (2026-10-16):
-- **P1:** tối ưu tốc độ full test suite · Creative Style cho Batch Idiom · trích nội dung từ URL.
+- **P1:** ~~tối ưu tốc độ full test suite~~ (XONG 2026-10-17) · Creative Style cho Batch Idiom · trích nội dung từ URL.
 - **P2:** clip tải lên làm lớp trong Multi-Layer · smart crop theo mặt/sản phẩm · thư viện ambient production ·
   capability tham chiếu trực tiếp của Video AI · kéo-thả / chỉnh lớp thủ công · Portable / LAN packaging (kèm launcher
   `START_TOOL.bat`, hiện cố ý để ngoài git).
@@ -40,8 +40,8 @@ Thứ tự ưu tiên đề xuất (2026-10-16):
 - [ ] **Creative Style trong luồng lô thành ngữ (batch idiom)** — hiện chỉ ở luồng TẠO VIDEO / project.
 - [ ] **UI song ngữ nâng cao.**
 - [ ] **Kiểm thử thật bằng người dùng** cho kéo thả / gán lớp thủ công (drag/drop, manual layer UI).
-- [ ] **Hiệu năng SQLite / bộ test** — full suite ~2,4 giờ; "batch generation" trong `pipeline.e2e` chập chờn timeout
-      (100–300 s trên SQLite chung); điều tra trước khi nâng thêm timeout.
+- [x] **Hiệu năng SQLite / bộ test** — XONG 2026-10-17: thư mục test chuyển từ HDD (F:) sang temp trên SSD;
+      full suite 9415 s → 2483 s (−73,6 %), 1786/1786 PASS, 0 skip. Còn lại: encode FFmpeg thật trong test tích hợp.
 - [ ] **Portable / LAN packaging** — kế hoạch 2026-10-01 đang TẠM DỪNG, chưa có code.
 
 ---

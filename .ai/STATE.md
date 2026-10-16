@@ -1,9 +1,28 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.4.0 — Tăng tốc full test suite DONE (2026-10-17, chỉ hạ tầng test, $0, không POST trả phí)
+
+```
+FULL SUITE  119/119 file · 1786/1786 test PASS · 0 skip   (một process vitest, 2483 s = 41,4 phút, 2026-10-17;
+            AI_MOCK_MODE=true, mọi *_API_KEY = key giả fake-test)
+TRƯỚC: 9415 s (2 giờ 37 phút, 2026-10-15)  →  SAU: 2483 s   (−73,6 %)
+RAM vitest tối đa ~203 MB · tối đa 1 tiến trình ffmpeg/ffprobe cùng lúc · thư mục test đỉnh ~400 MB
+lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0
+```
+
+- **Nguyên nhân đo được:** repo nằm trên ổ F: là **HDD** (Seagate SATA), thư mục test cũ `data/.test` cũng ở đó. Mỗi commit
+  SQLite phải fsync trên đĩa cơ, mỗi render ghi/đọc MP4/WAV/PNG trên HDD. CPU profile: tiến trình Node rảnh 98 % (chờ I/O).
+  DB test chỉ ~10 MB — **không** phải do tích luỹ dữ liệu; FFmpeg ~25 % thời gian test pipeline; vòng poll mock ~10 %.
+- **Sửa:** `tests/test-env.ts` — `TEST_ROOT` chuyển sang `os.tmpdir()/video-factory-test` (C:, NVMe SSD); ghi đè bằng
+  `VIDEO_FACTORY_TEST_ROOT`. Đường dẫn temp mở rộng tên 8.3 (`realpathSync.native`). Code production không đổi;
+  không bỏ/skip test, không tăng timeout, giữ encode FFmpeg thật 1080×1920 ở các test tích hợp.
+- Còn lại (không sửa, cố ý): encode FFmpeg thật trong test tích hợp (pipeline.e2e 240 s, batch-acceptance 200 s,
+  concurrency 141 s…) và `sleep(750)` của vòng poll production khi chạy mock.
 
 ## Sau v1.3.0 — QĐ-132 → QĐ-135 DONE (2026-10-11 → 2026-10-15, local + mock, $0, không POST trả phí)
 

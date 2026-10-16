@@ -131,7 +131,7 @@ describe("Settings -> GLOBAL PROJECT SPEND LIMIT -> DB", () => {
 
   it("7. DB của test và DB production không lẫn nhau", async () => {
     const root = path.resolve(__dirname, "..");
-    // The suite runs on data/.test/test.db and the action reports that file.
+    // The suite runs on its own temp test.db and the action reports that file.
     expect(resolveDatabaseFile(undefined, root)).toBe(TEST_DB);
     expect(isProductionDatabase(undefined, root)).toBe(false);
     const r = await updateSpendCap(form("abc"));

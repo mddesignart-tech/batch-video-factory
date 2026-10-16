@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /**
@@ -10,8 +12,25 @@ import path from "node:path";
 
 export const ROOT = path.resolve(__dirname, "..");
 
-/** Parent of every test run's private folder. */
-export const TEST_ROOT = path.join(ROOT, "data", ".test");
+/**
+ * Environment variable that overrides where test runs keep their folders.
+ */
+export const TEST_ROOT_ENV = "VIDEO_FACTORY_TEST_ROOT";
+
+/**
+ * Parent of every test run's private folder.
+ *
+ * It lives in the OS temp folder, not under `data/`: on this machine the repo
+ * sits on a spinning disk (F:) and the temp folder on an NVMe SSD (C:). Every
+ * SQLite commit fsyncs, and every render writes and reads back MP4/WAV/PNG
+ * files, so the same suite measured ~2.5x slower on the HDD (2026-10-17: one
+ * pipeline test 225 s on F: vs 90 s on C:). The folder is a throwaway either
+ * way. `realpathSync.native` expands the 8.3 short name (`MINDDE~1`) so paths
+ * compare equal to what the app resolves later.
+ */
+export const TEST_ROOT =
+  process.env[TEST_ROOT_ENV] ??
+  path.join(fs.realpathSync.native(os.tmpdir()), "video-factory-test");
 
 /**
  * Environment variable that carries THIS run's folder from the global setup
@@ -24,14 +43,18 @@ export const TEST_RUN_ENV = "VIDEO_FACTORY_TEST_DATA";
  * global setup wipes its folder at start - so a second vitest started while a
  * suite was running deleted that suite's database and media mid-run (seen
  * 2026-09-26: a pipeline.e2e render lost its FFmpeg input, QĐ-109). Now each
- * run owns `data/.test/run-<pid>-<id>` and touches nothing else.
+ * run owns `<TEST_ROOT>/run-<pid>-<id>` and touches nothing else.
  */
 export const TEST_DATA =
   process.env[TEST_RUN_ENV] ??
   path.join(TEST_ROOT, `run-${process.pid}-${Date.now().toString(36)}`);
 export const TEST_DB = path.join(TEST_DATA, "test.db");
 
-/** Prisma resolves a relative `file:` URL against the schema folder. */
+/**
+ * Prisma resolves a relative `file:` URL against the schema folder. When the
+ * test folder is on another drive, `path.relative` returns an absolute path,
+ * which Prisma (and `resolveDatabaseFile`) take as is.
+ */
 // socket_timeout: a busy test machine renders several 1080x1920 videos at once
 // (per-video runs, QĐ-110); the default wait for SQLite is too short for that.
 export const TEST_DATABASE_URL = `file:${path

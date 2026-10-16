@@ -41,7 +41,7 @@ import { resetMockJobs, MOCK_FAILURE_ENV } from "@/providers/mock/mock-visual-pr
  *        -> simulated restart -> render -> settle
  *
  * Everything is mock. No network, no vendor, no money. `AI_MOCK_MODE` is pinned
- * on by tests/setup.ts and the throwaway database lives under data/.test, so the
+ * on by tests/setup.ts and the throwaway database lives in the test run's temp folder, so the
  * production ledger is never touched.
  *
  * ## Why the "vendors" are two mock model rows and not "runway" and "openai"

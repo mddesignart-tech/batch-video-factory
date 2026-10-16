@@ -34,7 +34,7 @@ import { resetMockJobs } from "@/providers/mock/mock-visual-providers";
  *                      characters cannot be drawn consistently at any price
  *
  * Everything is mock: no network, no vendor, no money. `AI_MOCK_MODE` is pinned
- * on by tests/setup.ts and the throwaway database lives under data/.test.
+ * on by tests/setup.ts and the throwaway database lives in the test run's temp folder.
  * See QĐ-076.
  */
 
