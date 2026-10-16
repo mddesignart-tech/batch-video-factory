@@ -1,7 +1,18 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-11 — **V1.3 CODE FREEZE** (`b79fd3d`, full suite 1715/1715). Chờ người dùng xác nhận tag
-`batch-video-factory-v1.3.0`. Backlog dưới đây là SAU v1.3.0 — không làm khi chưa được yêu cầu.
+**Cập nhật:** 2026-10-15 — **QĐ-132 → QĐ-135 DONE** (`738f1f3`, full suite 119/119 file · 1786/1786 PASS, $0).
+Ứng viên v1.4.0 — CHƯA tag / CHƯA GitHub Release, chờ người dùng xác nhận. Backlog dưới đây chưa làm, chờ duyệt từng mục.
+
+---
+
+## ✅ XONG sau v1.3.0 — QĐ-132 → QĐ-135 (2026-10-15, full suite 1786/1786 PASS, $0)
+
+- QĐ-132 Uploaded Video Clip — DONE (`ba23a9f`).
+- QĐ-133 Duplicate First Frame / Timing Fix — DONE (`68d9d12`).
+- QĐ-134 Logo Overlay — DONE (`cf67e64`).
+- QĐ-135 Scene Save Routing + Re-estimate Fix — DONE (`ecb9b4c`).
+- Reference Assignment Safety — DONE (`353c946`).
+- Full suite mới: 119/119 file · 1786/1786 PASS ở `738f1f3` (một process vitest, Mock Mode, key giả). Chi tiết: `.ai/STATE.md`.
 
 ---
 
@@ -15,15 +26,11 @@
       tham chiếu (direct reference) đủ an toàn để định tuyến AUTO; hiện đường này luôn hỏi người dùng.
 - [ ] **Chất lượng tương tác vật lý phức tạp** — cầm, rót, ôm, chạm sản phẩm: local multi-layer không làm được;
       cần clip gốc hoặc Video AI đã kiểm chứng.
-- [x] **Kiểm tra toggle "Xuyên suốt video"** — XONG 353c946 (gán tự động chỉ thêm, hỏi trước khi làm cũ ảnh GENERATED).
-- [x] **LOGO Reference → overlay thật trong final render** — XONG QĐ-134 (bước encode cuối, local $0).
-  - [ ] Backlog logo: kéo-thả vị trí tự do; SVG (cần rasterize an toàn); logo động (GIF/WebP động); xem trước realtime trên video.
+- [ ] **Logo (sau QĐ-134):** kéo-thả vị trí tự do; SVG (cần rasterize an toàn); logo động (GIF/WebP động); xem trước realtime trên video.
 - [ ] **Trích nội dung từ URL** làm nguồn kịch bản.
-- [x] **Nhập clip video người dùng tải lên** làm cảnh (clip gốc) — XONG QĐ-132 (2026-10-12).
 - [ ] **Clip người dùng làm MỘT LỚP trong Multi-layer** (QĐ-132 phần B) — hiện clip chỉ dùng làm toàn bộ hình cảnh.
 - [ ] **Smart crop clip theo mặt / sản phẩm** — hiện COVER / CONTAIN tất định; chưa có tracking.
 - [ ] **Liên kết clip người dùng với tham chiếu** (nhân vật / sản phẩm) — chưa có.
-- [x] **Bước encode cuối lặp khung đầu một lần** (+1 khung, có từ V1, mọi video cắt thẳng) — XONG QĐ-133 (recipe r2).
 - [ ] **Creative Style trong luồng lô thành ngữ (batch idiom)** — hiện chỉ ở luồng TẠO VIDEO / project.
 - [ ] **UI song ngữ nâng cao.**
 - [ ] **Kiểm thử thật bằng người dùng** cho kéo thả / gán lớp thủ công (drag/drop, manual layer UI).

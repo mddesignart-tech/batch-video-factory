@@ -1,15 +1,34 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-12 (**V1.3.0 RELEASED** — tag `batch-video-factory-v1.3.0` → `6524187` + GitHub Release.
-Sau v1.3: `353c946` Reference Assignment Safety; QĐ-132 Uploaded Video Clip Input — xem `.ai/DECISIONS.md`.)
+**Cập nhật:** 2026-10-15 (**QĐ-132 → QĐ-135 DONE**, full suite 119/119 file · 1786/1786 PASS ở `738f1f3`. Ứng viên
+v1.4.0 — CHƯA tag, chờ người dùng xác nhận. Trước đó: **V1.3.0 RELEASED** — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
 
-## Sau v1.3.0
+## Sau v1.3.0 — QĐ-132 → QĐ-135 DONE (2026-10-11 → 2026-10-15, local + mock, $0, không POST trả phí)
+
+```
+main = origin/main = 738f1f3   (test: asset-backfill runs on its own database)
+FULL SUITE  119/119 file · 1786/1786 test PASS   (một process vitest, 9415 s, 2026-10-15;
+            AI_MOCK_MODE=true, OPENAI/GROQ = key giả fake-api-key-for-test-only)
+lint PASS · typecheck PASS · build PASS (ecb9b4c) · secret scan PASS
+PAID API POST = 0 (text / image / video / voice)
+Sổ chi production không đổi: $10,824435 / hạn mức $15 / còn $4,175565, 0 reservation mở
+```
 
 - **Reference Assignment Safety** (`353c946`): gán tham chiếu tự động chỉ thêm; hỏi trước khi làm cũ ảnh GENERATED.
-- **QĐ-132 Uploaded Video Clip Input**: tải clip .mp4/.mov/.webm làm hình cảnh, REUSE $0, không bao giờ mua Video AI thay
-  thế; trim / âm thanh clip (ducking) / clip ngắn (giữ / lặp / chậm) / khung COVER-CONTAIN / 24-60 fps → 30 fps.
-  Migration `20261012000000_uploaded_video_clip` (chỉ thêm cột). Test 21/21 mới PASS; PAID POST = 0.
+- **QĐ-132 Uploaded Video Clip — DONE** (`ba23a9f`): tải clip .mp4/.mov/.webm làm hình cảnh, REUSE $0, không bao giờ mua
+  Video AI thay thế; trim / âm thanh clip (ducking) / clip ngắn (giữ / lặp / chậm) / khung COVER-CONTAIN / 24-60 fps → 30 fps.
+  Migration `20261012000000_uploaded_video_clip` (chỉ thêm cột, đã áp production).
+- **QĐ-133 Duplicate First Frame / Timing Fix — DONE** (`68d9d12`): bước encode cuối không còn lặp khung đầu sau cắt thẳng
+  (setpts ở bước cuối, recipe r2).
+- **QĐ-134 Logo Overlay — DONE** (`cf67e64`): LOGO Reference thành logo thật trên video cuối (`outputControlsJson.logo`,
+  bước encode cuối, local $0, không migration).
+- **QĐ-135 Scene Save Routing + Re-estimate Fix — DONE** (`ecb9b4c`): "Lưu cảnh" chỉ lưu ghim model khi người dùng thật sự
+  chọn, ghi `motionSource` cùng `motionMode`, LOCAL_MOTION thắng ghim cũ (cả hàng đã hỏng); DỰ TOÁN LẠI lô dự án / lô nhập
+  định giá từ chính các cảnh (`pricedFromRows` → `preflightImportedBatch`), không còn định giá thành ngữ lạ ("Break a leg",
+  $1,6859). Test `tests/scene-save-routing.test.ts` 13/13.
+- **Hạ tầng test** (`738f1f3`): `tests/asset-backfill.test.ts` chạy trên DB riêng (mock `@/lib/prisma`), không phụ thuộc
+  dữ liệu của các file test trước (trước đó hook 120 s hết giờ ở cuối full suite). Code production không đổi.
 
 ## 🔒 V1.3 CODE FREEZE — QĐ-117 → QĐ-131 (2026-10-02 → 2026-10-11, $0, không POST trả phí)
 
