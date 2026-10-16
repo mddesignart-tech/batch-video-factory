@@ -1,7 +1,8 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-15 (**QĐ-132 → QĐ-135 DONE**, full suite 119/119 file · 1786/1786 PASS ở `738f1f3`. Ứng viên
-v1.4.0 — CHƯA tag, chờ người dùng xác nhận. Trước đó: **V1.3.0 RELEASED** — tag `batch-video-factory-v1.3.0` → `6524187`.)
+**Cập nhật:** 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
++ GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
+`738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
 
 ## Sau v1.3.0 — QĐ-132 → QĐ-135 DONE (2026-10-11 → 2026-10-15, local + mock, $0, không POST trả phí)

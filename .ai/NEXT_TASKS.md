@@ -1,7 +1,7 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-15 — **QĐ-132 → QĐ-135 DONE** (`738f1f3`, full suite 119/119 file · 1786/1786 PASS, $0).
-Ứng viên v1.4.0 — CHƯA tag / CHƯA GitHub Release, chờ người dùng xác nhận. Backlog dưới đây chưa làm, chờ duyệt từng mục.
+**Cập nhật:** 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
+full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa làm, chờ duyệt từng mục.
 
 ---
 
@@ -16,7 +16,13 @@
 
 ---
 
-## Backlog SAU v1.3.0 (CHƯA làm, chờ duyệt từng mục)
+## Backlog SAU v1.4.0 (CHƯA làm, chờ duyệt từng mục)
+
+Thứ tự ưu tiên đề xuất (2026-10-16):
+- **P1:** tối ưu tốc độ full test suite · Creative Style cho Batch Idiom · trích nội dung từ URL.
+- **P2:** clip tải lên làm lớp trong Multi-Layer · smart crop theo mặt/sản phẩm · thư viện ambient production ·
+  capability tham chiếu trực tiếp của Video AI · kéo-thả / chỉnh lớp thủ công · Portable / LAN packaging (kèm launcher
+  `START_TOOL.bat`, hiện cố ý để ngoài git).
 
 **P1 / P2**
 
