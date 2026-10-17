@@ -419,7 +419,7 @@ function toPlannedVideo(
 
   if (basis === "reference-profile") {
     warnings.push(
-      "Chưa có kịch bản thật nên dự toán dựa trên kịch bản mẫu 6 cảnh. " +
+      `Chưa có kịch bản thật nên dự toán dựa trên kịch bản mẫu ${estimate.scenes.length} cảnh. ` +
         "Chi phí thật sẽ được kiểm tra lại theo kịch bản thật trước khi chi.",
     );
   }

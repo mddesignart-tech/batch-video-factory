@@ -20,6 +20,7 @@ import { approveAuthorization, createAuthorization } from "@/services/batch-auth
 import { planBatch, referenceProfileFor, REFERENCE_SCENE_PROFILE } from "@/services/batch-planner";
 import { savePlan, storedPlan } from "@/services/batch-runner";
 import { materializeIdiomVideos } from "@/services/batch-sources";
+import { preflightImportedBatch } from "@/services/import-preflight";
 import { applyBatchCreativeStyle } from "@/services/creative-style";
 import { setSpendCap, spendStatus } from "@/services/spend-guard";
 import { seedMock } from "./phase5-helpers";
@@ -245,7 +246,11 @@ describe("BATCH với phong cách (DB, mock)", () => {
     tiktokBatch = batch.id;
     expect(storedPlan(await prisma.batch.findUniqueOrThrow({ where: { id: batch.id } }))!.creativeStyle).toMatchObject(TIKTOK);
     // The estimate prices the style's 8 scenes, not a 6-scene profile.
-    for (const v of plan.videos) expect(v.sceneCount).toBe(8);
+    for (const v of plan.videos) {
+      expect(v.sceneCount).toBe(8);
+      // The note under each row names the profile it priced, not a fixed "6 cảnh".
+      expect(v.warnings.join(" ")).toContain("kịch bản mẫu 8 cảnh");
+    }
 
     const r = await approveAndWrite(batch.id);
     expect(r.created).toBe(5);
@@ -342,6 +347,14 @@ describe("BATCH với phong cách (DB, mock)", () => {
     expect(r.created).toBe(0);
     expect(await prisma.project.count({ where: { batchId: tiktokBatch } })).toBe(5);
     expect(await prisma.providerJob.count()).toBe(jobs);
+    expect(await paid()).toEqual(before);
+  });
+
+  it("M: duyệt từ trang lô (preflight production) giữ phong cách trong kế hoạch", async () => {
+    const before = await paid();
+    await preflightImportedBatch(tiktokBatch);
+    const plan = storedPlan(await prisma.batch.findUniqueOrThrow({ where: { id: tiktokBatch } }));
+    expect(plan!.creativeStyle).toMatchObject(TIKTOK);
     expect(await paid()).toEqual(before);
   });
 

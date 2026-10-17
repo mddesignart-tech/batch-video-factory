@@ -1227,9 +1227,23 @@ async function persistPreflight(
   providerScope: string[],
   planned: PlannedVideo[],
 ): Promise<void> {
+  // An idiom batch approved from its own page comes through here too. Its
+  // PHONG CÁCH (QĐ-136) lives only in the plan, so the new plan carries it over
+  // instead of dropping it - otherwise the batch card shows "Tự động" and a
+  // later DỰ TOÁN LẠI prices the old 6-scene profile.
+  const previous = await prisma.batch.findUnique({ where: { id: batchId }, select: { planJson: true } });
+  let creativeStyle: BatchPlan["creativeStyle"] = plan.creativeStyle ?? null;
+  if (!creativeStyle && previous?.planJson) {
+    try {
+      creativeStyle = (JSON.parse(previous.planJson) as Partial<BatchPlan>).creativeStyle ?? null;
+    } catch {
+      creativeStyle = null;
+    }
+  }
+  const stored: BatchPlan = creativeStyle ? { ...plan, creativeStyle } : plan;
   await prisma.batch.update({
     where: { id: batchId },
-    data: { planJson: JSON.stringify(plan), estimatedCost: estimatedTotal },
+    data: { planJson: JSON.stringify(stored), estimatedCost: estimatedTotal },
   });
   // The draft carries the figures the operator is about to approve - including
   // the per-video ceiling the gateway enforces. It used to receive only the

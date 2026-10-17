@@ -4104,3 +4104,10 @@ video lô chạy idiom-v1 (bộ viết hài gốc). Dự toán lô luôn dùng p
 - Override phong cách theo từng thành ngữ: CHƯA làm (backlog) — per-project style card vẫn đổi được từng video.
 
 **Kiểm chứng.** `tests/batch-creative-style.test.ts` (A–L + hài nhẹ, giáo dục, an toàn ngôn ngữ, dự toán). PAID POST = 0.
+
+**Smoke UI thật (2026-10-17, sandbox mock, lô 16 thành ngữ).** Hai lỗi tìm thấy và sửa:
+- Ghi chú dự toán từng video luôn nói "kịch bản mẫu 6 cảnh" kể cả khi phong cách định giá 8 / 5 cảnh → nay ghi đúng
+  số cảnh đã định giá.
+- Duyệt lô từ trang chi tiết (PREFLIGHT → `persistPreflight`) ghi đè `planJson` và làm mất `creativeStyle`: video vẫn
+  đúng phong cách nhưng thẻ lô báo "Tự động" và DỰ TOÁN LẠI sau đó mất phong cách → plan mới giữ `creativeStyle` của plan
+  cũ. Test M (đỏ trên code cũ).
