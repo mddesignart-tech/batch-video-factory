@@ -1,9 +1,33 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.4.0 — QĐ-136 Creative Style cho lô thành ngữ DONE (2026-10-17, local + mock, $0)
+
+```
+COMMIT      5060da4 (feat) + 84be22f (fix sau smoke UI) — đã push, main = origin/main
+FULL SUITE  120/120 file · 1802/1802 test PASS · 0 skip   (một process vitest, 2443 s, ở 84be22f;
+            AI_MOCK_MODE=true, mọi *_API_KEY = key giả)
+lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0
+```
+
+- **Phong cách cả lô** lưu trong kế hoạch đã duyệt (`planJson.creativeStyle`, không migration); mỗi video lô nhận
+  `creativeStyleJson` → kịch bản / chấm điểm / Camera Director / motion dùng đúng Creative Style Engine của QĐ-127.
+- **Smoke UI thật** (dev server sandbox: DB + data riêng ở temp, Mock Mode, key giả; DB thật không đổi):
+  - Lô 16 thành ngữ TikTok Comedy (hài 4, nhanh, punchline bắt buộc): 16/16 video cùng style, 8 cảnh, 24,8 s,
+    16/16 có punchline, 37 cảnh gag, 64 SFX hài; camera FAST_COMEDY (CRASH_ZOOM / PUSH_IN, ambient 0,7).
+  - Lô 16 thành ngữ Professional (hài 0, vừa, không punchline): 5 cảnh Mở đầu → Nghĩa → Ví dụ → Khi nào dùng → Tóm tắt,
+    25,0 s, 0 punchline, 0 cảnh gag, 0 SFX hài; camera CINEMATIC (DOLLY_IN / PULL_BACK, không hiệu ứng gắt, ambient 0,9).
+  - Đổi phong cách lô đã có media (đã dừng): Image / Video / Voice POST = 0, kịch bản + đường dẫn media không đổi.
+  - Lô / dự án cũ (bản sao DB thật, trước QĐ-136): mở bình thường, "Tự động – bộ viết gốc".
+- **Lỗi smoke tìm ra và đã sửa (`84be22f`):** duyệt từ trang lô (PREFLIGHT) ghi đè `planJson` làm mất `creativeStyle`;
+  ghi chú dự toán luôn ghi "kịch bản mẫu 6 cảnh".
+- **Chưa làm (backlog):** override phong cách theo từng thành ngữ trong lô.
+- Ghi nhận, KHÔNG sửa (ngoài phạm vi): tên lô mặc định luôn "Batch Video Factory #001"; lô thành ngữ chưa duyệt trên
+  trang chi tiết hiện dòng "Lô nhập chưa có video nào" của luồng nhập.
 
 ## Sau v1.4.0 — Tăng tốc full test suite DONE (2026-10-17, chỉ hạ tầng test, $0, không POST trả phí)
 

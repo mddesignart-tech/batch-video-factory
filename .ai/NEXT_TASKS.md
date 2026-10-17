@@ -1,7 +1,16 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-17 — full suite 41,4 phút (xong P1 tốc độ test). 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
+**Cập nhật:** 2026-10-17 — **QĐ-136 DONE** (Creative Style cho lô thành ngữ, `5060da4` + `84be22f`, đã push; full suite
+120/120 file · 1802/1802 PASS). Cùng ngày: full suite 41,4 phút (xong P1 tốc độ test). 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
 full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa làm, chờ duyệt từng mục.
+
+---
+
+## ✅ XONG sau v1.4.0 (2026-10-17, $0)
+
+- Tăng tốc full test suite — DONE (`dced288`).
+- QĐ-136 Creative Style cho lô thành ngữ — DONE (`5060da4` + sửa sau smoke UI `84be22f`): phong cách cả lô, smoke UI
+  thật lô 16 thành ngữ PASS, full suite 120/120 file · 1802/1802 PASS. Chi tiết: `.ai/STATE.md`, `.ai/DECISIONS.md`.
 
 ---
 
@@ -19,7 +28,7 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
 ## Backlog SAU v1.4.0 (CHƯA làm, chờ duyệt từng mục)
 
 Thứ tự ưu tiên đề xuất (2026-10-16):
-- **P1:** ~~tối ưu tốc độ full test suite~~ (XONG 2026-10-17) · ~~Creative Style cho Batch Idiom~~ (XONG QĐ-136) · trích nội dung từ URL.
+- **P1:** trích nội dung từ URL · override phong cách theo từng thành ngữ trong lô.
 - **P2:** clip tải lên làm lớp trong Multi-Layer · smart crop theo mặt/sản phẩm · thư viện ambient production ·
   capability tham chiếu trực tiếp của Video AI · kéo-thả / chỉnh lớp thủ công · Portable / LAN packaging (kèm launcher
   `START_TOOL.bat`, hiện cố ý để ngoài git).
@@ -37,13 +46,10 @@ Thứ tự ưu tiên đề xuất (2026-10-16):
 - [ ] **Clip người dùng làm MỘT LỚP trong Multi-layer** (QĐ-132 phần B) — hiện clip chỉ dùng làm toàn bộ hình cảnh.
 - [ ] **Smart crop clip theo mặt / sản phẩm** — hiện COVER / CONTAIN tất định; chưa có tracking.
 - [ ] **Liên kết clip người dùng với tham chiếu** (nhân vật / sản phẩm) — chưa có.
-- [x] **Creative Style trong luồng lô thành ngữ (batch idiom)** — XONG 2026-10-17 (QĐ-136): phong cách cả lô.
 - [ ] **Override phong cách theo từng thành ngữ trong lô** (QĐ-136 chưa làm) — hiện cả lô một phong cách; đổi từng video
       bằng thẻ Phong cách trên trang dự án.
 - [ ] **UI song ngữ nâng cao.**
 - [ ] **Kiểm thử thật bằng người dùng** cho kéo thả / gán lớp thủ công (drag/drop, manual layer UI).
-- [x] **Hiệu năng SQLite / bộ test** — XONG 2026-10-17: thư mục test chuyển từ HDD (F:) sang temp trên SSD;
-      full suite 9415 s → 2483 s (−73,6 %), 1786/1786 PASS, 0 skip. Còn lại: encode FFmpeg thật trong test tích hợp.
 - [ ] **Portable / LAN packaging** — kế hoạch 2026-10-01 đang TẠM DỪNG, chưa có code.
 
 ---
