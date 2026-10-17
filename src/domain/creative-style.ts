@@ -408,7 +408,7 @@ const IDIOM_ROLE_TEXT: Record<string, string> = {
   reaction: "BIG REACTION - a comic reaction close-up",
   meaning: "REAL MEANING - explained in very simple English",
   example: "EXAMPLE SENTENCE - the idiom used naturally",
-  usage: "ANOTHER EXAMPLE - a second everyday situation where you would say it",
+  usage: "WHEN TO USE IT - another everyday situation where you would say it, used correctly",
   recap: "RECAP - one short line the viewer remembers",
   payoff: "FINAL PAYOFF / PUNCHLINE - a clear funny line that closes the video",
 };
@@ -426,7 +426,9 @@ const IDIOM_SCENE_SECONDS: Record<string, number> = { SLOW: 6, MEDIUM: 5, FAST: 
 export function idiomPlan(s: EffectiveCreativeStyle, targetDuration: number): string[] {
   let roles: string[];
   if (s.comedyLevel <= 1) roles = s.comedyLevel === 1 ? ["hook", "literal", "meaning", "example"] : ["hook", "meaning", "example"];
-  else if (s.comedyLevel <= 3) roles = ["hook", "literal", "escalation", "punchline", "meaning", "example"];
+  // Light humour: ONE gentle mix-up, then the lesson; a soft payoff only when wanted.
+  else if (s.comedyLevel === 2) roles = ["hook", "literal", "meaning", "example", ...(wantsPunchline(s) ? ["payoff"] : [])];
+  else if (s.comedyLevel === 3) roles = ["hook", "literal", "escalation", "punchline", "meaning", "example"];
   else roles = ["hook", "literal", "gag", "escalation", "reaction", "meaning", "example", "payoff"];
   if (s.punchlineMode === "NONE") roles = roles.filter((r) => r !== "punchline" && r !== "payoff");
   if (s.punchlineMode === "REQUIRED" && !roles.includes("payoff")) roles = [...roles.filter((r) => r !== "punchline"), "payoff"];
@@ -449,8 +451,71 @@ export function idiomStructureHint(s: EffectiveCreativeStyle, targetDuration: nu
   const roles = idiomPlan(s, targetDuration);
   return [
     `STRUCTURE - exactly ${roles.length} scenes, in this order (about ${Math.round(targetDuration / roles.length)} s each):`,
-    ...roles.map((r, i) => `  ${i + 1}. ${IDIOM_ROLE_TEXT[r] ?? r}`),
+    ...roles.map((r, i) => `  ${i + 1}. ${idiomRoleText(r, s.comedyLevel)}`),
   ].join("\n");
+}
+
+/** Calmer wording of the beats a calm or lightly funny video still has. */
+const IDIOM_ROLE_TEXT_CALM: Record<string, string> = {
+  literal: "WORD-FOR-WORD READING - calmly show what the words would mean literally, then say clearly that this is NOT the meaning (no joke)",
+  payoff: "STRONG CLOSING LINE - a clear, memorable last line built only on the meaning already given (not a joke)",
+};
+const IDIOM_ROLE_TEXT_LIGHT: Record<string, string> = {
+  literal: "GENTLE MISUNDERSTANDING - one light, friendly mix-up of the literal words",
+  payoff: "SOFT PAYOFF - a light, friendly closing line that makes the viewer smile",
+};
+
+/** What one idiom beat must do, worded for the comedy level. */
+export function idiomRoleText(role: string, comedyLevel: number): string {
+  const variant = comedyLevel <= 1 ? IDIOM_ROLE_TEXT_CALM : comedyLevel === 2 ? IDIOM_ROLE_TEXT_LIGHT : {};
+  return variant[role] ?? IDIOM_ROLE_TEXT[role] ?? role;
+}
+
+/** The label of the idiom's literal reading in the idiom-v2 prompt. */
+export function idiomLiteralLabel(s: Pick<EffectiveCreativeStyle, "comedyLevel">): string {
+  return s.comedyLevel <= 1 ? "WORD-FOR-WORD READING (for contrast only, not a joke)" : "LITERAL VISUAL GAG";
+}
+
+/**
+ * Every style-driven value of the idiom-v2 prompt (prompts/script-creative.txt),
+ * in one place, so the writer, the tests and any batch path render it alike.
+ */
+export function idiomV2PromptValues(s: EffectiveCreativeStyle, targetDuration: number): Record<string, string> {
+  return {
+    ...idiomWriterVoice(s),
+    literalLabel: idiomLiteralLabel(s),
+    creativeStyle: creativeStylePrompt(s, { factual: false, storyGags: true }),
+    structure: idiomStructureHint(s, targetDuration),
+    sceneRange: `Exactly ${idiomPlan(s, targetDuration).length}`,
+  };
+}
+
+/** Vietnamese names of the idiom beats, for the batch / project preview. */
+const IDIOM_ROLE_LABELS: Record<string, string> = {
+  hook: "Mở đầu",
+  literal: "Hiểu nhầm nghĩa đen",
+  gag: "Gag hình ảnh",
+  escalation: "Cường điệu",
+  punchline: "Khoảnh khắc hài",
+  reaction: "Phản ứng",
+  meaning: "Nghĩa thật",
+  example: "Câu ví dụ",
+  usage: "Khi nào dùng",
+  recap: "Tóm tắt",
+  payoff: "Punchline",
+};
+
+export function idiomRoleLabel(role: string, comedyLevel: number): string {
+  if (comedyLevel <= 1 && role === "literal") return "Nghĩa từng chữ";
+  if (comedyLevel <= 1 && role === "payoff") return "Câu kết";
+  if (comedyLevel === 2 && role === "payoff") return "Kết nhẹ";
+  return IDIOM_ROLE_LABELS[role] ?? role;
+}
+
+/** One line summing a style up, for previews ("Hài TikTok · Hài 4/5 · Nhanh · Punchline: Bắt buộc"). */
+export function creativeSummary(s: EffectiveCreativeStyle): string {
+  const [preset, comedy, pacing, punchline] = creativeBadges(s);
+  return [preset!.value, `Hài ${comedy!.value}`, `Nhịp ${pacing!.value.toLowerCase()}`, `Punchline: ${punchline!.value.toLowerCase()}`].join(" · ");
 }
 
 /** Who the idiom writer is, and its one humour rule, for this style. */
@@ -503,6 +568,17 @@ export function storedCreativeJson(input: Partial<StoredCreativeStyle> | null | 
   );
   if (s.preset === "AUTO" && !explicit) return null;
   return JSON.stringify(s);
+}
+
+/** The picker's hidden JSON form field (CreativeStylePicker); anything unreadable = "Tự động". */
+export function creativeFromFormField(raw: unknown): Partial<StoredCreativeStyle> | null {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const parsed = CreativeStyleSchema.partial().safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The idiom writer's prompt version when a creative style was chosen (null column = "idiom-v1"). */

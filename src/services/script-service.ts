@@ -10,7 +10,7 @@ import { sha256 } from "@/lib/crypto";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { buildPrompt } from "@/lib/prompts";
-import { creativeStylePrompt, idiomPlan, idiomStructureHint, idiomWriterVoice, type EffectiveCreativeStyle } from "@/domain/creative-style";
+import { idiomV2PromptValues, type EffectiveCreativeStyle } from "@/domain/creative-style";
 import { getTextProvider } from "@/providers/registry";
 import { ProviderError, type ProviderUsage, type ScriptRequest } from "@/providers/types";
 import { assertCanSpend } from "./spend-guard";
@@ -276,13 +276,7 @@ export async function generateScript(
   // uses idiom-v2, whose role, structure, scene count and humour rule all come
   // from the style - never a comedy prompt with a "no jokes" note appended.
   const systemPrompt = opts.creative
-    ? await buildPrompt("script-creative", {
-        ...values,
-        ...idiomWriterVoice(opts.creative),
-        creativeStyle: creativeStylePrompt(opts.creative, { factual: false, storyGags: true }),
-        structure: idiomStructureHint(opts.creative, opts.targetDuration),
-        sceneRange: `Exactly ${idiomPlan(opts.creative, opts.targetDuration).length}`,
-      })
+    ? await buildPrompt("script-creative", { ...values, ...idiomV2PromptValues(opts.creative, opts.targetDuration) })
     : await buildPrompt("script", values);
 
   const request: ScriptRequest = {

@@ -13,20 +13,9 @@ import {
 } from "@/services/content-service";
 import { IMPORT_MAX_BYTES } from "@/services/imported-image";
 import type { ActionResult } from "./idioms";
-import { CreativeStyleSchema, type StoredCreativeStyle } from "@/domain/creative-style";
+import { CreativeStyleSchema, creativeFromFormField, type StoredCreativeStyle } from "@/domain/creative-style";
 import { saveCreativeStyle } from "@/services/creative-style";
 import { generateProjectScript } from "@/services/project-service";
-
-/** The picker's hidden JSON field; anything unreadable = "Tự động". */
-function parseCreativeField(raw: FormDataEntryValue | null): Partial<StoredCreativeStyle> | null {
-  if (typeof raw !== "string" || raw.trim() === "") return null;
-  try {
-    const parsed = CreativeStyleSchema.partial().safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * TẠO VIDEO (multi-content engine). Free: writes the script (mock text in
@@ -102,7 +91,7 @@ export async function createContentVideo(formData: FormData): Promise<ActionResu
       audience: d.audience,
       tone: d.tone,
       voiceMode: d.voiceMode,
-      creativeStyle: parseCreativeField(formData.get("creativeStyle")),
+      creativeStyle: creativeFromFormField(formData.get("creativeStyle")),
       durationSeconds: d.durationSeconds,
       stylePresetId: d.stylePresetId || undefined,
       outputProfile: checked.profile,

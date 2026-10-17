@@ -18,7 +18,7 @@ import {
 } from "@/domain/creative-style";
 import { writeMockContentScript } from "@/providers/mock/mock-content-writer";
 import { MockTextProvider, idiomBeatsFor } from "@/providers/mock/mock-text-provider";
-import { idiomPlan, idiomStructureHint, idiomWriterVoice } from "@/domain/creative-style";
+import { idiomPlan, idiomV2PromptValues } from "@/domain/creative-style";
 import { scriptNeedsRewrite } from "@/domain/script";
 import { readPromptFile, renderTemplate } from "@/lib/prompts";
 import type { ContentScriptRequest } from "@/providers/types";
@@ -388,10 +388,7 @@ describe("IDIOM CREATIVE FIXES (UI test A/B)", () => {
       renderTemplate(readPromptFile("script-creative"), {
         ...base,
         characters: "- Max", avoidAngles: "(none yet)",
-        ...idiomWriterVoice(s),
-        creativeStyle: creativeStylePrompt(s, { factual: false, storyGags: true }),
-        structure: idiomStructureHint(s, 25),
-        sceneRange: `Exactly ${idiomPlan(s, 25).length}`,
+        ...idiomV2PromptValues(s, 25),
       });
     const pb = render(B);
     expect(pb).not.toMatch(/\{\{\w+\}\}/);

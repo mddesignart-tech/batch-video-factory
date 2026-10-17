@@ -1,5 +1,8 @@
 import { notFound } from "next/navigation";
-import { batchProgress } from "@/services/batch-runner";
+import { batchProgress, storedPlan } from "@/services/batch-runner";
+import { templateOf } from "@/domain/content-templates";
+import { creativeBadges, creativeSummary, resolveCreativeStyle } from "@/domain/creative-style";
+import { BatchCreativeCard } from "./batch-creative-card";
 import { BatchProgressView } from "./batch-progress-view";
 import { VideoResumePanel } from "./video-resume-panel";
 
@@ -26,10 +29,29 @@ export default async function BatchDetailPage({
   const { id } = await params;
   const progress = await batchProgress(id);
   if (!progress) notFound();
+  // PHONG CÁCH (QĐ-136): idiom batches only - an imported storyboard keeps its own script.
+  const plan = progress.importBatch ? null : storedPlan(progress.batch);
+  const idiomCreative = templateOf("ENGLISH_IDIOM").creative;
+  const style = plan?.creativeStyle ?? null;
+  const effective = resolveCreativeStyle(idiomCreative, style);
 
   return (
     <div className="space-y-4">
       <BatchProgressView initial={progress} />
+      {plan ? (
+        <BatchCreativeCard
+          batchId={progress.batch.id}
+          creative={idiomCreative}
+          initial={style}
+          videos={progress.videos.length}
+          badges={style ? creativeBadges(effective) : [{ label: "Phong cách", value: "Tự động" }]}
+          summary={
+            style
+              ? `Kế hoạch lô: ${creativeSummary(effective)}.`
+              : "Kế hoạch lô: Tự động - bộ viết kịch bản thành ngữ gốc (lô cũ / chưa chọn phong cách)."
+          }
+        />
+      ) : null}
       {/* Per-video resume (QĐ-110): one plan, one button per video. */}
       <VideoResumePanel batchId={progress.batch.id} />
     </div>

@@ -19,7 +19,7 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
 ## Backlog SAU v1.4.0 (CHƯA làm, chờ duyệt từng mục)
 
 Thứ tự ưu tiên đề xuất (2026-10-16):
-- **P1:** ~~tối ưu tốc độ full test suite~~ (XONG 2026-10-17) · Creative Style cho Batch Idiom · trích nội dung từ URL.
+- **P1:** ~~tối ưu tốc độ full test suite~~ (XONG 2026-10-17) · ~~Creative Style cho Batch Idiom~~ (XONG QĐ-136) · trích nội dung từ URL.
 - **P2:** clip tải lên làm lớp trong Multi-Layer · smart crop theo mặt/sản phẩm · thư viện ambient production ·
   capability tham chiếu trực tiếp của Video AI · kéo-thả / chỉnh lớp thủ công · Portable / LAN packaging (kèm launcher
   `START_TOOL.bat`, hiện cố ý để ngoài git).
@@ -37,7 +37,9 @@ Thứ tự ưu tiên đề xuất (2026-10-16):
 - [ ] **Clip người dùng làm MỘT LỚP trong Multi-layer** (QĐ-132 phần B) — hiện clip chỉ dùng làm toàn bộ hình cảnh.
 - [ ] **Smart crop clip theo mặt / sản phẩm** — hiện COVER / CONTAIN tất định; chưa có tracking.
 - [ ] **Liên kết clip người dùng với tham chiếu** (nhân vật / sản phẩm) — chưa có.
-- [ ] **Creative Style trong luồng lô thành ngữ (batch idiom)** — hiện chỉ ở luồng TẠO VIDEO / project.
+- [x] **Creative Style trong luồng lô thành ngữ (batch idiom)** — XONG 2026-10-17 (QĐ-136): phong cách cả lô.
+- [ ] **Override phong cách theo từng thành ngữ trong lô** (QĐ-136 chưa làm) — hiện cả lô một phong cách; đổi từng video
+      bằng thẻ Phong cách trên trang dự án.
 - [ ] **UI song ngữ nâng cao.**
 - [ ] **Kiểm thử thật bằng người dùng** cho kéo thả / gán lớp thủ công (drag/drop, manual layer UI).
 - [x] **Hiệu năng SQLite / bộ test** — XONG 2026-10-17: thư mục test chuyển từ HDD (F:) sang temp trên SSD;

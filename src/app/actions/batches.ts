@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { QUALITY_MODES } from "@/domain/enums";
+import { CreativeStyleSchema, creativeFromFormField, parseCreativeStyle, storedCreativeJson, type StoredCreativeStyle } from "@/domain/creative-style";
 import { prisma } from "@/lib/prisma";
 import { errorMessage } from "@/lib/utils";
 import { createAuthorization, DEFAULT_MAX_COST_PER_VIDEO } from "@/services/batch-authorization";
@@ -80,6 +81,8 @@ export async function analyseBatch(formData: FormData): Promise<PlanActionResult
     };
   }
   const input = parsed.data;
+  // PHONG CÁCH for the whole batch (QĐ-136). "Tự động" with nothing changed = null.
+  const creativeStyle = parseCreativeStyle(storedCreativeJson(creativeFromFormField(formData.get("creativeStyle"))));
   const idiomIds = (input.idiomIds ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -129,6 +132,7 @@ export async function analyseBatch(formData: FormData): Promise<PlanActionResult
         qualityMode: input.qualityMode,
         targetDuration: input.targetDuration,
         maxCostPerVideo: input.maxCostPerVideo,
+        creativeStyle,
       },
       batch.id,
     );
@@ -204,6 +208,8 @@ export async function reanalyseBatch(batchId: string): Promise<PlanActionResult>
         qualityMode: batch.qualityMode as (typeof QUALITY_MODES)[number],
         targetDuration: batch.targetDuration,
         maxCostPerVideo: batch.maxCostPerVideo,
+        // A re-estimate keeps the style the batch was planned with.
+        creativeStyle: storedPlan(batch)?.creativeStyle ?? null,
       },
       batch.id,
     );
@@ -323,4 +329,24 @@ export async function getBatchProgress(batchId: string): Promise<BatchProgress |
 export async function getStoredPlan(batchId: string): Promise<BatchPlan | null> {
   const batch = await prisma.batch.findUnique({ where: { id: batchId } });
   return batch ? storedPlan(batch) : null;
+}
+
+/**
+ * PHONG CÁCH for every video of a batch (QĐ-136). Stores only: no script is
+ * rewritten and no image, clip or voice line is made - $0.
+ */
+export async function saveBatchCreativeStyleAction(
+  batchId: string,
+  style: Partial<StoredCreativeStyle> | null,
+): Promise<ActionResult> {
+  try {
+    const parsed = style ? CreativeStyleSchema.partial().safeParse(style) : null;
+    if (parsed && !parsed.success) return { ok: false, message: "Phong cách không hợp lệ." };
+    const { applyBatchCreativeStyle } = await import("@/services/creative-style");
+    const r = await applyBatchCreativeStyle(batchId, parsed?.data ?? null);
+    revalidatePath(`/batches/${batchId}`);
+    return { ok: true, message: r.message };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
 }

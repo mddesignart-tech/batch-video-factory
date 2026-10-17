@@ -188,7 +188,7 @@ export class MockTextProvider implements TextProvider {
       const duration = req.creative
         ? round1(req.targetDuration / beats.length)
         : round1((beat.share / shareTotal) * req.targetDuration);
-      const content = beatContent(calm && beat.role === "hook" ? "hook-calm" : beat.role, {
+      const content = beatContent(styledRole(beat.role, req.creative?.comedyLevel, beats.slice(0, index).filter((b) => b.role === "usage").length), {
         idiom,
         angle,
         max,
@@ -203,7 +203,7 @@ export class MockTextProvider implements TextProvider {
       // why: Leo delivers the line from off to the side while Max reacts, so
       // both are on screen even though only one of them is "the subject".
       const present =
-        beat.role === "literal" ? [max] : [max, leo];
+        beat.role === "literal" && !calm ? [max] : [max, leo];
       // Speaking is read back out of the dialogue line, which is written as
       // "Name: ...". Deriving presence from this is the bug; deriving speech
       // from it is exactly right.
@@ -372,6 +372,12 @@ const CREATIVE_BEATS: Record<string, Beat> = {
 
 /** A calm explainer (comedy 0-1) opens plainly: no record scratch, no shocked push-in. */
 const CALM_HOOK: Beat = { role: "hook", share: 0.12, complexity: "LOW", spendPriority: "HIGH", camera: "clean medium shot, calm and clear", sfx: "soft chime" };
+/** ...and its word-for-word reading and closing line stay calm too. */
+const CALM_BEATS: Record<string, Beat> = {
+  hook: CALM_HOOK,
+  literal: { role: "literal", share: 0.14, complexity: "LOW", spendPriority: "NORMAL", camera: "clean static medium shot, text-safe framing", sfx: "" },
+  payoff: { role: "payoff", share: 0.1, complexity: "LOW", spendPriority: "HIGH", camera: "slow gentle push-in, clean background", sfx: "soft chime" },
+};
 
 /**
  * The idiom beats for a chosen creative style - from `idiomPlan`, the same
@@ -380,8 +386,22 @@ const CALM_HOOK: Beat = { role: "hook", share: 0.12, complexity: "LOW", spendPri
 export function idiomBeatsFor(style: NonNullable<ScriptRequest["creative"]>, targetDuration = 25): Beat[] {
   const calm = style.comedyLevel <= 1;
   return idiomPlan(style, targetDuration).map((role) =>
-    role === "hook" && calm ? CALM_HOOK : (BEATS.find((b) => b.role === role) ?? CREATIVE_BEATS[role]!),
+    (calm ? CALM_BEATS[role] : undefined) ?? BEATS.find((b) => b.role === role) ?? CREATIVE_BEATS[role]!,
   );
+}
+
+/**
+ * Which wording a beat gets. Absent comedy = the original writer, unchanged.
+ * Comedy 0-1 is a calm explainer start to end (hook, word-for-word reading,
+ * closing line); comedy 2 has one gentle mix-up and a soft payoff. A second
+ * "when to use it" scene never repeats the first.
+ */
+function styledRole(role: string, comedyLevel: number | undefined, usageBefore: number): string {
+  if (role === "usage") return usageBefore === 0 ? "usage" : "usage-more";
+  if (comedyLevel === undefined) return role;
+  if (comedyLevel <= 1 && (role === "hook" || role === "literal" || role === "payoff")) return `${role}-calm`;
+  if (comedyLevel === 2 && role === "payoff") return "payoff-soft";
+  return role;
 }
 
 // ----------------------------------------------------------------- helpers ---
@@ -455,12 +475,46 @@ function beatContent(role: string, ctx: BeatContext): BeatContent {
         action: `${leo} points to the text card with a friendly smile.`,
       };
     case "usage":
+      // Built from the idiom's own meaning: a fixed sentence here once taught
+      // every idiom the meaning of "a little bird told me".
       return {
         visual: `${max} and ${leo} chat calmly at a table; a small text card shows when to use the idiom.`,
-        dialogue: `${leo}: "Use it when you know something, but you do not say who told you."`,
+        dialogue: `${leo}: "Say "${idiom}" when you mean: ${meaning}."`,
         narration: "",
-        subtitle: "Use it when you won't say who told you.",
+        subtitle: shorten(`Use it when you mean: ${meaning}`, 58),
         action: `${leo} explains; ${max} nods and takes a note.`,
+      };
+    case "usage-more":
+      return {
+        visual: `${max} uses the idiom with a friend in an everyday place; ${leo} nods from the side.`,
+        dialogue: `${max}: "${example}"`,
+        narration: "",
+        subtitle: shorten(example, 58),
+        action: `${max} says the line naturally; ${leo} gives a small approving nod.`,
+      };
+    case "literal-calm":
+      return {
+        visual: `A clean side-by-side card: left, a simple drawing of the words taken literally (${literal}); right, a question mark.`,
+        dialogue: `${leo}: "Word for word, it sounds like ${shorten(literal, 40)}. But that is NOT the meaning."`,
+        narration: "",
+        subtitle: "Word for word? Not the meaning.",
+        action: `${leo} points at the card and shakes his head calmly.`,
+      };
+    case "payoff-calm":
+      return {
+        visual: `${leo} faces the camera in a clean setting; a text card reads "${idiom}".`,
+        dialogue: `${leo}: "Now you know it: ${idiom}."`,
+        narration: "",
+        subtitle: shorten(`Now you know: ${idiom}`, 58),
+        action: `${leo} gives a calm, confident nod.`,
+      };
+    case "payoff-soft":
+      return {
+        visual: `${max} and ${leo} side by side; ${max} finally gets it and smiles.`,
+        dialogue: `${max}: "Ohh... so nobody meant it word for word!"`,
+        narration: "",
+        subtitle: "So nobody meant it word for word!",
+        action: `${leo} laughs softly; ${max} smiles, a little embarrassed.`,
       };
     case "recap":
       return {

@@ -187,6 +187,7 @@ export function CreativeStylePicker({
   ];
   const advanced: [string, React.ReactNode][] = [
     ["comedyStyles", styles],
+    ["emotionStyle", emotion],
     ["tone", tone],
     ["energyLevel", energy],
   ];
@@ -201,7 +202,7 @@ export function CreativeStylePicker({
         {camera}
       </div>
       <details className="rounded-lg border border-ink-800 px-3 py-2">
-        <summary className="cursor-pointer text-xs text-ink-400">Nâng cao: kiểu hài, năng lượng, giọng điệu</summary>
+        <summary className="cursor-pointer text-xs text-ink-400">Nâng cao: kiểu hài, năng lượng, {show("emotionStyle") ? "" : "cảm xúc, "}giọng điệu</summary>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {advanced.filter(([k]) => !show(k) || k === "comedyStyles").map(([k, node]) => (
             <div key={k} className={k === "comedyStyles" ? "sm:col-span-2" : undefined}>

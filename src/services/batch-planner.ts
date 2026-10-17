@@ -9,6 +9,8 @@ import { getSettings } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
 import { round } from "@/lib/utils";
 import { sceneCharacters } from "@/domain/scene-characters";
+import { templateOf } from "@/domain/content-templates";
+import { idiomPlan, resolveCreativeStyle, type StoredCreativeStyle } from "@/domain/creative-style";
 import {
   estimateProject,
   type CostBreakdown,
@@ -79,6 +81,48 @@ export const REFERENCE_SCENE_PROFILE: {
   { sceneNumber: 6, duration: 3, complexity: "LOW", spendPriority: "LOW", characterCount: 2, speechText: "Break a leg on your interview!" },
 ];
 
+/** Cost shape of each idiom beat (mirrors the writer's beats: gags are the busy scenes). */
+const ROLE_PROFILE: Record<string, { complexity: Complexity; spendPriority: SpendPriority; characterCount: number; speechText: string }> = {
+  hook: { complexity: "MEDIUM", spendPriority: "HIGH", characterCount: 2, speechText: "Break a leg!" },
+  literal: { complexity: "MEDIUM", spendPriority: "NORMAL", characterCount: 1, speechText: "Wait, you want me to do THAT?" },
+  gag: { complexity: "HIGH", spendPriority: "NORMAL", characterCount: 1, speechText: "Is this how it works?" },
+  escalation: { complexity: "HIGH", spendPriority: "NORMAL", characterCount: 2, speechText: "I am VERY prepared." },
+  punchline: { complexity: "HIGH", spendPriority: "HIGH", characterCount: 2, speechText: "That is NOT what I meant." },
+  reaction: { complexity: "MEDIUM", spendPriority: "NORMAL", characterCount: 1, speechText: "WHAT are you doing?!" },
+  payoff: { complexity: "MEDIUM", spendPriority: "HIGH", characterCount: 2, speechText: "So I did not need that!" },
+  meaning: { complexity: "LOW", spendPriority: "LOW", characterCount: 2, speechText: "It just means good luck." },
+  example: { complexity: "LOW", spendPriority: "LOW", characterCount: 2, speechText: "Break a leg on your interview!" },
+  usage: { complexity: "LOW", spendPriority: "LOW", characterCount: 2, speechText: "Say it before a show or a test." },
+  recap: { complexity: "LOW", spendPriority: "LOW", characterCount: 1, speechText: "Break a leg means good luck." },
+};
+
+/**
+ * The reference profile for a batch with a CHOSEN creative style: the same
+ * beats `idiomPlan` gives the writer, spread over the requested running time,
+ * so a TikTok batch (8 short scenes) is not priced as a 6-scene explainer.
+ * No style = REFERENCE_SCENE_PROFILE, exactly as before.
+ */
+export function referenceProfileFor(
+  style: StoredCreativeStyle | null | undefined,
+  targetDuration: number,
+): PlannedSceneInput[] {
+  if (!style) return REFERENCE_SCENE_PROFILE.map((s) => ({ ...s }));
+  const effective = resolveCreativeStyle(templateOf("ENGLISH_IDIOM").creative, style);
+  const roles = idiomPlan(effective, targetDuration);
+  const duration = Math.min(6, Math.max(2, Math.round((targetDuration / roles.length) * 10) / 10));
+  const calm = effective.comedyLevel <= 1;
+  return roles.map((role, i) => {
+    const shape = ROLE_PROFILE[role] ?? ROLE_PROFILE.example!;
+    return {
+      sceneNumber: i + 1,
+      duration,
+      ...shape,
+      // A calm explainer has no busy gag scenes to pay for.
+      complexity: calm && shape.complexity !== "LOW" ? "LOW" : shape.complexity,
+    };
+  });
+}
+
 export interface PlannedSceneRow {
   sceneNumber: number;
   complexity: Complexity;
@@ -136,6 +180,12 @@ export interface BatchCosting {
 
 export interface BatchPlan {
   qualityMode: QualityMode;
+  /**
+   * The creative style every video of this batch is written with, frozen with
+   * the plan the operator approved. Absent (plans made before this field) or
+   * null = the original idiom writer.
+   */
+  creativeStyle?: StoredCreativeStyle | null;
 
   /**
    * The costing that will actually run if approved right now.
@@ -190,6 +240,11 @@ export interface PlanBatchInput {
   qualityMode: QualityMode;
   targetDuration: number;
   maxCostPerVideo: number;
+  /**
+   * Batch-wide CREATIVE STYLE (Creative Style Engine, QĐ-127) every video of
+   * the batch is written with. Null / absent = the original idiom writer.
+   */
+  creativeStyle?: StoredCreativeStyle | null;
 }
 
 /**
@@ -230,6 +285,7 @@ export async function selectIdioms(input: PlanBatchInput): Promise<
 async function scenesFor(
   idiomId: string,
   batchId: string | null,
+  input: Pick<PlanBatchInput, "creativeStyle" | "targetDuration">,
 ): Promise<{
   scenes: PlannedSceneInput[];
   basis: "real-script" | "reference-profile";
@@ -279,7 +335,7 @@ async function scenesFor(
   return {
     projectId: project?.id ?? null,
     basis: "reference-profile",
-    scenes: REFERENCE_SCENE_PROFILE.map((s) => ({ ...s })),
+    scenes: referenceProfileFor(input.creativeStyle, input.targetDuration),
   };
 }
 
@@ -409,7 +465,7 @@ async function costAgainst(
   const paidQa = (await getSettings()).aiPaidQa;
 
   for (const idiom of idioms) {
-    const { scenes, basis, projectId } = await scenesFor(idiom.id, batchId);
+    const { scenes, basis, projectId } = await scenesFor(idiom.id, batchId, input);
     const estimate = estimateProject({
       scenes,
       models,
@@ -552,6 +608,7 @@ export async function planBatch(
 
   return {
     qualityMode: input.qualityMode,
+    creativeStyle: input.creativeStyle ?? null,
     runtime,
     production,
     recommendation,

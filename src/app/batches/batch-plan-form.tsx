@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import {
@@ -22,6 +22,17 @@ import { ActionFeedback, type ActionResult } from "@/components/action-ui";
 import { analyseBatch, approveBatch } from "@/app/actions/batches";
 import type { BatchPlan } from "@/services/batch-planner";
 import { formatUSD } from "@/lib/utils";
+import { CreativeStylePicker } from "@/components/creative-style-picker";
+import { templateOf } from "@/domain/content-templates";
+import {
+  creativeSummary,
+  idiomPlan,
+  idiomRoleLabel,
+  resolveCreativeStyle,
+  storedCreativeJson,
+  type StoredCreativeStyle,
+  type TemplateCreative,
+} from "@/domain/creative-style";
 import { VI_COST_BASIS, VI_COST_BASIS_SHORT } from "@/domain/cost-basis";
 import {
   VI_MOTION_SOURCE,
@@ -45,6 +56,16 @@ import {
  */
 
 const BATCH_MODES: QualityMode[] = ["ECONOMY", "BALANCED", "QUALITY"];
+
+/**
+ * PHONG CÁCH for the whole batch (QĐ-136): the single-video Creative Style
+ * Engine, same picker. Simple: preset, hài, nhịp, punchline; cảm xúc, kiểu hài
+ * and năng lượng sit under Nâng cao.
+ */
+const BATCH_CREATIVE: TemplateCreative = {
+  ...templateOf("ENGLISH_IDIOM").creative,
+  simpleFields: ["preset", "comedyLevel", "pacingStyle", "punchlineMode"],
+};
 const AMOUNT_SHORTCUTS = [1, 2, 3, 5, 10];
 
 const STATUS_TONE: Record<VideoPlanStatus, "ok" | "warn" | "danger"> = {
@@ -73,6 +94,20 @@ export function BatchPlanForm({
   const [amount, setAmount] = useState(3);
   const [mode, setMode] = useState<QualityMode>("BALANCED");
   const [maxPerVideo, setMaxPerVideo] = useState(defaultMaxCostPerVideo);
+  const [duration, setDuration] = useState(25);
+  const [creative, setCreative] = useState<Partial<StoredCreativeStyle>>({ preset: "AUTO" });
+  // What the writer will be asked for - the same idiomPlan the writer uses.
+  const preview = useMemo(() => {
+    const json = storedCreativeJson(creative);
+    if (!json) return null;
+    const effective = resolveCreativeStyle(BATCH_CREATIVE, JSON.parse(json) as StoredCreativeStyle);
+    const roles = idiomPlan(effective, duration);
+    return {
+      summary: creativeSummary(effective),
+      roles: roles.map((r) => idiomRoleLabel(r, effective.comedyLevel)),
+      perScene: Math.round((duration / roles.length) * 10) / 10,
+    };
+  }, [creative, duration]);
 
   const [planning, setPlanning] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -216,7 +251,7 @@ export function BatchPlanForm({
                 </Select>
               </Field>
 
-              <Field label="Phong cách">
+              <Field label="Phong cách hình ảnh">
                 <Select name="stylePresetId" defaultValue={presets[0]?.id ?? ""}>
                   {presets.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -232,7 +267,8 @@ export function BatchPlanForm({
                   type="number"
                   min={15}
                   max={60}
-                  defaultValue={25}
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.currentTarget.value) || 25)}
                 />
               </Field>
 
@@ -248,6 +284,21 @@ export function BatchPlanForm({
                   defaultValue={2}
                 />
               </Field>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-ink-800 p-3">
+              <p className="mb-2 text-sm font-semibold text-ink-200">PHONG CÁCH (áp cho cả lô)</p>
+              <CreativeStylePicker creative={BATCH_CREATIVE} onChange={setCreative} />
+              <p className="mt-2 text-xs text-ink-400">
+                {preview ? (
+                  <>
+                    <span className="font-medium text-ink-200">{preview.summary}</span> · mỗi video{" "}
+                    {preview.roles.length} cảnh × ~{preview.perScene}s: {preview.roles.join(" → ")}
+                  </>
+                ) : (
+                  "Tự động: giữ bộ viết kịch bản thành ngữ gốc (như các lô trước)."
+                )}
+              </p>
             </div>
 
             {notEnoughIdioms ? (

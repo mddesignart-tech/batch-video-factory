@@ -1,6 +1,6 @@
 "use server";
 
-import { CreativeStyleSchema, type StoredCreativeStyle } from "@/domain/creative-style";
+import { creativeFromFormField } from "@/domain/creative-style";
 
 import { revalidatePath } from "next/cache";
 import { MOTION_MODES } from "@/domain/storyboard";
@@ -45,16 +45,6 @@ const CreateInput = z.object({
   customFps: z.coerce.number().optional(),
 });
 
-function creativeFromForm(raw: FormDataEntryValue | null): Partial<StoredCreativeStyle> | null {
-  if (typeof raw !== "string" || raw.trim() === "") return null;
-  try {
-    const parsed = CreativeStyleSchema.partial().safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function createProject(
   formData: FormData,
 ): Promise<ActionResult & { projectId?: string }> {
@@ -88,7 +78,7 @@ export async function createProject(
       // Never for a single project: media is always an explicit second step.
       autoStartMedia: false,
       // QĐ-127 PHONG CÁCH SÁNG TẠO; "Tự động" = the original idiom writer.
-      creativeStyle: creativeFromForm(formData.get("creativeStyle")),
+      creativeStyle: creativeFromFormField(formData.get("creativeStyle")),
     });
     revalidatePath("/projects");
     return {

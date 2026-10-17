@@ -5,7 +5,7 @@
 Write a {{targetDuration}}-second script for the idiom: "{{idiom}}"
 
 REAL MEANING: {{meaning}}
-LITERAL VISUAL GAG: {{literalMeaning}}
+{{literalLabel}}: {{literalMeaning}}
 EXAMPLE SENTENCE: {{exampleSentence}}
 
 CHARACTERS (use these exact names and keep them consistent):

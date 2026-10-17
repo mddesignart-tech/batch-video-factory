@@ -189,6 +189,9 @@ export async function materializeIdiomVideos(batchId: string): Promise<Materiali
         targetDuration: batch.targetDuration,
         maxBudget: live.maxCostPerVideo,
         batchId,
+        // The batch-wide creative style frozen with the approved plan (null =
+        // the original idiom writer, byte for byte).
+        creativeStyle: plan?.creativeStyle ?? null,
         autoGenerateScript: true,
         autoStartMedia: false,
       });

@@ -4072,3 +4072,35 @@ Lô đã kẹt: bấm DỰ TOÁN LẠI một lần là gỡ. Không đổi kiế
 
 **Kiểm chứng.** `tests/scene-save-routing.test.ts` 13/13 (A–G + hàng cũ + lô kẹt + dự toán đi theo cảnh).
 Trên code cũ: 10 FAIL, lỗi 2 tái hiện đúng $1,6859. PAID POST = 0.
+
+## QĐ-136 — Creative Style Engine trong luồng lô thành ngữ (Batch Idiom) (2026-10-17, local + mock, $0)
+
+Người dùng: lô thành ngữ phải dùng được Creative Style Engine thật (QĐ-127/127a), KHÔNG xây engine thứ hai.
+
+**Audit.** Lô thành ngữ tạo project bằng `createProjectForIdiom` rồi `generateProjectScript` — đúng đường single-video,
+đã nhận `creativeStyle` (idiom-v2, `idiomPlan`, `scriptNeedsRewrite(score, comedyLevel)`, camera đọc
+`Project.creativeStyleJson` qua `projectContent`). Chỗ hở duy nhất: lô không lưu và không truyền style, nên mọi
+video lô chạy idiom-v1 (bộ viết hài gốc). Dự toán lô luôn dùng profile mẫu 6 cảnh.
+
+**Quyết định.**
+- Phong cách cả lô lưu trong **kế hoạch đã duyệt** (`BatchPlan.creativeStyle`, `planJson`) — KHÔNG migration. Nó là
+  một phần thứ người dùng đồng ý (số cảnh được định giá). Plan cũ không có trường = null = bộ viết gốc byte-for-byte.
+- `materializeIdiomVideos` truyền `plan.creativeStyle` vào `createProjectForIdiom` → mỗi video có
+  `creativeStyleJson` riêng → kịch bản, chấm điểm, viết lại, Camera Director, motion preset dùng đúng engine cũ.
+- Dự toán: có phong cách → `referenceProfileFor(style, duration)` = đúng các beat của `idiomPlan` (TikTok 8 cảnh, Chuyên
+  nghiệp 5 cảnh LOW). Không phong cách → `REFERENCE_SCENE_PROFILE` như cũ. DỰ TOÁN LẠI giữ style của plan.
+- `idiomPlan` hài 2 (Hài nhẹ): hook → hiểu nhầm nhẹ → nghĩa → ví dụ → kết nhẹ (khi muốn punchline). Trước đây hài 2
+  dùng chung cấu trúc hài 3 (cường điệu + khoảnh khắc hài), trái với mô tả "một khoảnh khắc nhẹ". Hài 0-1 / 3 / 4-5 không đổi.
+- Hài 0-1: beat "literal" / "payoff" có lời dặn bình thản ("WORD-FOR-WORD READING", "STRONG CLOSING LINE"); prompt
+  idiom-v2 thay nhãn "LITERAL VISUAL GAG" bằng `{{literalLabel}}`. Một nguồn giá trị prompt: `idiomV2PromptValues`.
+- Mock: cảnh "khi nào dùng" lấy từ nghĩa của CHÍNH thành ngữ (trước đây câu cố định của "A little bird told me" — sai nghĩa
+  với mọi thành ngữ khác); cảnh "usage" thứ hai không lặp; literal/payoff bình thản cho hài 0-1, kết nhẹ cho hài 2.
+- Đổi phong cách cả lô sau khi chạy: `applyBatchCreativeStyle` = `saveCreativeStyle` cho từng video — chỉ lưu, không viết
+  lại, không tạo media, "Media cũ vẫn được giữ." Plan đã duyệt không đổi (video chưa viết theo style đã duyệt); lô chưa
+  duyệt thì plan nhận style mới và cần DỰ TOÁN LẠI.
+- UI: form lô có mục PHONG CÁCH (picker dùng chung; đơn giản: preset, hài, nhịp, punchline; Nâng cao: kiểu hài, cảm xúc,
+  năng lượng, giọng) + xem trước ("Hài TikTok · Hài 4/5 · Nhịp nhanh · Punchline: bắt buộc · 8 cảnh × ~3,1s: ...").
+  Trang lô có thẻ "Phong cách của lô". Ô "Phong cách" cũ (preset hình ảnh) đổi nhãn "Phong cách hình ảnh".
+- Override phong cách theo từng thành ngữ: CHƯA làm (backlog) — per-project style card vẫn đổi được từng video.
+
+**Kiểm chứng.** `tests/batch-creative-style.test.ts` (A–L + hài nhẹ, giáo dục, an toàn ngôn ngữ, dự toán). PAID POST = 0.
