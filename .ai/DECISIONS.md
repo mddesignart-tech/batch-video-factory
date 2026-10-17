@@ -4140,3 +4140,40 @@ video lô chạy idiom-v1 (bộ viết hài gốc). Dự toán lô luôn dùng p
 - Lô chưa có video (lô thành ngữ chưa duyệt): `buildBatchResumePlans` trả [] thay vì lỗi "Lô nhập chưa có video nào"
   của luồng nhập. Bảng hiện `NO_VIDEOS_YET`. Pipeline không đổi.
 - Test: `tests/batch-stop-safety.test.ts` (12 test; 6 test đỏ trên code cũ).
+
+## QĐ-138 — URL Content Extraction (2026-10-17, local + mock, $0)
+
+**Luồng:** URL → đọc trang (`services/url-fetch.ts`) → trích nội dung (`services/url-extract.ts`) → xem trước → người dùng
+chỉnh sửa / chấp nhận → snapshot → bộ viết kịch bản hiện có. Không có pipeline kịch bản riêng.
+
+- **Nguồn URL** dùng resolver hiện có: chỉ nhận snapshot đã CHẤP NHẬN (`URL_NOT_READ` nếu chưa đọc) và không bao giờ fetch.
+  Có ở AI Review, Product Review, Knowledge, Quảng cáo, Câu chuyện, Tùy chỉnh.
+- **Lưu trữ:** không migration. Snapshot nằm ở `Project.sourceText`, link ở `sourceUrl`, metadata ở
+  `contentBriefJson.urlSource`: url, finalUrl, domain, tiêu đề, mô tả, site, ngôn ngữ, content type, extractedAt, method,
+  độ dài, contentHash, loại trang, tác giả, ngày, og:image (chỉ link), approvedAt, edited, snapshotHash.
+- **SSRF (`domain/url-safety.ts`):** chỉ http/https, cổng mặc định, không user:pass@. Chặn localhost / *.local /
+  *.internal / tên một nhãn / metadata, và mọi IP loopback, riêng, CGNAT, link-local (169.254), multicast, reserved.
+  Chặn cả dạng số viết khác như 2130706433, 0x7f, IPv6 mapped, NAT64.
+  - Lookup DNS của socket kiểm tra MỌI địa chỉ của tên miền ngay lúc kết nối và kết nối đúng địa chỉ đã kiểm,
+    nên DNS rebinding không lách được.
+  - Mỗi redirect được kiểm tra lại, tối đa 5. Agent riêng, không dùng proxy env.
+  - Không có ngoại lệ localhost trong code production. Test dùng transport trong bộ nhớ; smoke dev dùng
+    `URL_FETCH_FIXTURE_DIR` (thư mục, không socket, bị tắt khi NODE_ENV=production).
+- **Giới hạn:** 15 s cho cả lượt đọc, kể cả body nhỏ giọt. 3 MB trước và sau giải nén (chặn gzip bomb).
+  Chỉ đọc text/html, xhtml, text/plain; PDF / ảnh / video / zip bị từ chối.
+- **Trích:** parser HTML nhẹ, tất định. Bỏ script / style / nav / footer / aside, cookie / consent, quảng cáo,
+  share / related / comment, nội dung ẩn, menu nhiều link.
+  - Chọn khối chính theo thứ tự articleBody → article → main → điểm readability-lite.
+  - Giữ heading (##), danh sách (-), bảng thông số 2 cột ("Tên: giá trị"), dl.
+  - JSON-LD: Product (tên, thương hiệu, thông số, additionalProperty, giá + tình trạng, giá đánh dấu "có thể thay đổi")
+    và Article (tiêu đề, tác giả, ngày).
+  - Giới hạn 12.000 ký tự: tiêu đề, mô tả và thông số trước, rồi thân bài theo thứ tự, cắt ở ranh giới khối.
+  - Không dịch, không sửa sự thật bằng AI.
+- **Trang JS-only:** báo "cần trình duyệt, chưa hỗ trợ". **Mạng xã hội** (Facebook, TikTok, Instagram, YouTube, X, …):
+  báo chưa hỗ trợ.
+- **Factuality:** nguồn URL thêm khối SOURCE MATERIAL vào prompt: snapshot là nguồn sự thật duy nhất, không thêm claim,
+  giá có thể thay đổi, phong cách chỉ đổi cách kể.
+- **Đọc lại:** ĐỌC LẠI TỪ WEB chỉ xem trước (so contentHash). THAY NGUỒN cần xác nhận khi đã có kịch bản và chỉ đổi nguồn:
+  không viết lại kịch bản, không tạo media.
+- **Smoke tìm ra và đã sửa:** dấu markdown của snapshot (`#`, `##`, `-`) lọt vào tiêu đề dự án và lời thoại mock.
+  Tiêu đề dự án nay bỏ dấu; bộ viết mock tách mỗi dòng heading / danh sách thành câu riêng.

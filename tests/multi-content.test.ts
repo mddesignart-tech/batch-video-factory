@@ -141,11 +141,11 @@ describe("PROMPT → storyboard", () => {
     }
   });
 
-  it("URL: kiến trúc có, nhưng chưa đọc link tự động → báo rõ, không tạo dự án nửa vời", async () => {
+  it("URL chưa ĐỌC NỘI DUNG / CHẤP NHẬN → báo rõ, không tạo dự án nửa vời (QĐ-138)", async () => {
     const count = await prisma.project.count();
     await expect(
       createContentProject({ contentType: "PRODUCT_REVIEW", sourceType: "URL", sourceUrl: "https://example.com/p" }),
-    ).rejects.toMatchObject({ code: "URL_SOURCE_NOT_AVAILABLE" });
+    ).rejects.toMatchObject({ code: "URL_NOT_READ" });
     expect(await prisma.project.count()).toBe(count);
   });
 });

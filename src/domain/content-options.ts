@@ -120,8 +120,8 @@ export const CONTENT_SOURCE_TYPES = [
   { id: "PROMPT", label: "Nhập ý tưởng", icon: "✍️", enabled: true },
   { id: "TEXT", label: "Dán nội dung", icon: "📋", enabled: true },
   { id: "ASSETS", label: "Tải ảnh / video", icon: "🖼️", enabled: true },
-  // Architecture only: no web extraction service exists yet (feature gated).
-  { id: "URL", label: "Dán URL", icon: "🔗", enabled: false },
+  // QĐ-138: read one public web page -> preview -> accepted snapshot.
+  { id: "URL", label: "URL", icon: "🔗", enabled: true },
   { id: "STORYBOARD", label: "Nhập storyboard", icon: "🗂️", enabled: true },
   { id: "IDIOM", label: "Thư viện thành ngữ", icon: "📚", enabled: true },
 ] as const;

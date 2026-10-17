@@ -1,14 +1,13 @@
 import type { FactOrigin } from "@/domain/content-options";
+import { checkSourceUrl } from "@/domain/url-safety";
 
 /**
  * CONTENT SOURCE - where a video's content comes from, behind one interface.
  *
- * PROMPT, TEXT and ASSETS are resolved locally and cost nothing. URL is part of
- * the architecture but GATED: no web extraction service exists yet, so a URL is
- * stored on the project and the person is asked to paste the page's text. A
- * future extractor (an official API, a readability service, a public document
- * fetcher) is one more resolver here - nothing else changes. Nothing scrapes a
- * site, and no resolver names a website.
+ * PROMPT, TEXT and ASSETS are resolved locally and cost nothing. URL (QĐ-138)
+ * resolves to the SNAPSHOT the person accepted after ĐỌC NỘI DUNG
+ * (services/url-source.ts): reading the page happened before, $0, and this
+ * resolver never opens the link. Nothing crawls a site.
  */
 
 export interface ContentSourceInput {
@@ -29,7 +28,7 @@ export interface ResolvedContent {
 
 export class ContentSourceError extends Error {
   constructor(
-    readonly code: "EMPTY_SOURCE" | "URL_SOURCE_NOT_AVAILABLE" | "SOURCE_TOO_LONG" | "UNKNOWN_SOURCE",
+    readonly code: "EMPTY_SOURCE" | "URL_NOT_READ" | "INVALID_URL" | "SOURCE_TOO_LONG" | "UNKNOWN_SOURCE",
     message: string,
   ) {
     super(message);
@@ -96,15 +95,17 @@ const RESOLVERS: Record<string, ContentSourceResolver> = {
   },
   URL: {
     id: "URL",
-    available: false,
+    available: true,
     resolve: async (i) => {
       const r = base(i);
-      // The URL is kept; its TEXT has to come from the person for now.
-      if (r.sourceText || r.idea) return requireSomething(r, i.uploadCount ?? 0);
-      throw new ContentSourceError(
-        "URL_SOURCE_NOT_AVAILABLE",
-        "Tool chưa tự đọc nội dung từ đường link. Hãy mở trang, sao chép phần nội dung cần dùng và dán vào ô “Dán nội dung”.",
-      );
+      const checked = r.sourceUrl ? checkSourceUrl(r.sourceUrl) : null;
+      if (!checked) throw new ContentSourceError("INVALID_URL", "Hãy dán đường link của trang cần đọc.");
+      if (!checked.ok) throw new ContentSourceError("INVALID_URL", checked.message);
+      // The accepted snapshot - never a fetch here. No snapshot, no script.
+      if (!r.sourceText) {
+        throw new ContentSourceError("URL_NOT_READ", "Hãy bấm ĐỌC NỘI DUNG, xem lại và CHẤP NHẬN nội dung trang trước khi tạo kịch bản.");
+      }
+      return requireSomething({ ...r, sourceUrl: checked.url.href }, i.uploadCount ?? 0);
     },
   },
 };

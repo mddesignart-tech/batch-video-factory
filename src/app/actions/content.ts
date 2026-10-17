@@ -16,6 +16,16 @@ import type { ActionResult } from "./idioms";
 import { CreativeStyleSchema, creativeFromFormField, type StoredCreativeStyle } from "@/domain/creative-style";
 import { saveCreativeStyle } from "@/services/creative-style";
 import { generateProjectScript } from "@/services/project-service";
+import {
+  acceptedSnapshot,
+  applyProjectUrlSource,
+  readUrlSource,
+  refetchProjectUrlSource,
+  urlSourceErrorMessage,
+  type RefetchResult,
+  type StoredUrlSource,
+  type UrlSourcePreview,
+} from "@/services/url-source";
 
 /**
  * TẠO VIDEO (multi-content engine). Free: writes the script (mock text in
@@ -30,6 +40,8 @@ const CreateContentInput = z.object({
   idea: z.string().max(4000).optional(),
   sourceText: z.string().optional(),
   sourceUrl: z.string().max(2000).optional(),
+  /** QĐ-138: the page metadata of the accepted URL snapshot (JSON, re-checked). */
+  urlSourceMeta: z.string().max(20_000).optional(),
   subjectName: z.string().max(200).optional(),
   /** One fact per line, typed by the person (USER_PROVIDED). */
   factsText: z.string().max(5000).optional(),
@@ -68,14 +80,29 @@ export async function createContentVideo(formData: FormData): Promise<ActionResu
     uploads.push({ bytes: Buffer.from(await entry.arrayBuffer()), filename: entry.name });
   }
 
+  // URL: the text is the snapshot the person accepted; its metadata is
+  // re-checked here, and the link is not opened again.
+  let urlSource: StoredUrlSource | null = null;
+  let sourceText = d.sourceText;
+  if (d.sourceType === "URL" && d.urlSourceMeta) {
+    try {
+      const snap = acceptedSnapshot(d.sourceText ?? "", JSON.parse(d.urlSourceMeta));
+      urlSource = snap.stored;
+      sourceText = snap.text;
+    } catch (err) {
+      return { ok: false, message: urlSourceErrorMessage(err).message };
+    }
+  }
+
   try {
     const project = await createContentProject({
       contentType: d.contentType,
       formatId: d.formatId,
       sourceType: d.sourceType,
       idea: d.idea,
-      sourceText: d.sourceText,
-      sourceUrl: d.sourceUrl,
+      sourceText,
+      sourceUrl: urlSource?.url ?? d.sourceUrl,
+      urlSource,
       subjectName: d.subjectName,
       facts: (d.factsText ?? "")
         .split(/\r?\n/)
@@ -154,5 +181,50 @@ export async function rewriteWithStyleAction(projectId: string): Promise<ActionR
     };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
+  }
+}
+
+// --------------------------------------------------------- URL source ---
+
+/** ĐỌC NỘI DUNG: fetch + extract one page for the preview. $0, nothing stored, no AI. */
+export async function readUrlSourceAction(url: string): Promise<ActionResult & { preview?: UrlSourcePreview; code?: string }> {
+  try {
+    const preview = await readUrlSource(String(url ?? ""));
+    return { ok: true, message: `Đã đọc ${preview.meta.domain}: ${preview.meta.contentLength.toLocaleString("vi-VN")} ký tự.`, preview };
+  } catch (err) {
+    const e = urlSourceErrorMessage(err);
+    return { ok: false, message: e.message, code: e.code };
+  }
+}
+
+/** ĐỌC LẠI TỪ WEB on a project: a new preview only - nothing is replaced yet. */
+export async function refetchProjectUrlAction(projectId: string): Promise<ActionResult & { result?: RefetchResult; code?: string }> {
+  try {
+    const result = await refetchProjectUrlSource(projectId);
+    return {
+      ok: true,
+      message: result.changed ? "Nội dung trang đã thay đổi so với bản đã lưu. Xem lại rồi chọn THAY NGUỒN nếu muốn." : "Nội dung trang không đổi so với bản đã lưu.",
+      result,
+    };
+  } catch (err) {
+    const e = urlSourceErrorMessage(err);
+    return { ok: false, message: e.message, code: e.code };
+  }
+}
+
+/** THAY NGUỒN: replace the snapshot. Never rewrites the script, never makes media. */
+export async function applyProjectUrlAction(
+  projectId: string,
+  text: string,
+  meta: unknown,
+  confirmReplace: boolean,
+): Promise<ActionResult & { needsConfirmation?: boolean }> {
+  try {
+    const r = await applyProjectUrlSource(projectId, { text, meta, confirmReplace });
+    if (r.status === "NEEDS_CONFIRMATION") return { ok: false, message: r.message, needsConfirmation: true };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, message: r.message };
+  } catch (err) {
+    return { ok: false, message: urlSourceErrorMessage(err).message };
   }
 }

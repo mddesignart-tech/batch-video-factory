@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-17 — **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
+**Cập nhật:** 2026-10-17 — **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
 121/121 file · 1814/1814 PASS). **QĐ-136 DONE** (Creative Style cho lô thành ngữ, `5060da4` + `84be22f`, đã push; full suite
 120/120 file · 1802/1802 PASS). Cùng ngày: full suite 41,4 phút (xong P1 tốc độ test). 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
 full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa làm, chờ duyệt từng mục.
@@ -12,6 +12,8 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
 - Tăng tốc full test suite — DONE (`dced288`).
 - QĐ-136 Creative Style cho lô thành ngữ — DONE (`5060da4` + sửa sau smoke UI `84be22f`): phong cách cả lô, smoke UI
   thật lô 16 thành ngữ PASS, full suite 120/120 file · 1802/1802 PASS. Chi tiết: `.ai/STATE.md`, `.ai/DECISIONS.md`.
+- QĐ-138 URL Content Extraction — DONE: nguồn URL (đọc → xem trước → chấp nhận → snapshot), chống SSRF, trích bài viết /
+  sản phẩm (JSON-LD), đọc lại chỉ đổi nguồn. Chi tiết: `.ai/STATE.md`, `.ai/DECISIONS.md`.
 - QĐ-137 An toàn vòng đời lô + dọn UX nhỏ — DONE: DỪNG BATCH dừng thật (kiểm tra trước mỗi bước, không FAILED, không
   RUNNING kẹt, idempotent), tên lô mặc định tăng dần, empty-state đúng cho lô thành ngữ chưa duyệt. Full suite 121/121 file ·
   1814/1814 PASS.
@@ -32,7 +34,8 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
 ## Backlog SAU v1.4.0 (CHƯA làm, chờ duyệt từng mục)
 
 Thứ tự ưu tiên đề xuất (2026-10-16):
-- **P1:** trích nội dung từ URL · override phong cách theo từng thành ngữ trong lô.
+- **P1:** override phong cách theo từng thành ngữ trong lô · đọc trang cần trình duyệt (headless, sau QĐ-138) ·
+  nhập ảnh sản phẩm từ URL làm tham chiếu (có xác nhận, tôn trọng quyền truy cập) · đọc PDF qua link.
 - **P2:** clip tải lên làm lớp trong Multi-Layer · smart crop theo mặt/sản phẩm · thư viện ambient production ·
   capability tham chiếu trực tiếp của Video AI · kéo-thả / chỉnh lớp thủ công · Portable / LAN packaging (kèm launcher
   `START_TOOL.bat`, hiện cố ý để ngoài git).
@@ -46,7 +49,9 @@ Thứ tự ưu tiên đề xuất (2026-10-16):
 - [ ] **Chất lượng tương tác vật lý phức tạp** — cầm, rót, ôm, chạm sản phẩm: local multi-layer không làm được;
       cần clip gốc hoặc Video AI đã kiểm chứng.
 - [ ] **Logo (sau QĐ-134):** kéo-thả vị trí tự do; SVG (cần rasterize an toàn); logo động (GIF/WebP động); xem trước realtime trên video.
-- [ ] **Trích nội dung từ URL** làm nguồn kịch bản.
+- [ ] **Đọc trang cần trình duyệt (sau QĐ-138)** — trang JS-only hiện báo "chưa hỗ trợ"; cần headless browser có kiểm
+      soát SSRF như QĐ-138.
+- [ ] **Nhập ảnh sản phẩm từ URL làm tham chiếu (sau QĐ-138)** — hiện chỉ lưu link og:image, không tải ảnh.
 - [ ] **Clip người dùng làm MỘT LỚP trong Multi-layer** (QĐ-132 phần B) — hiện clip chỉ dùng làm toàn bộ hình cảnh.
 - [ ] **Smart crop clip theo mặt / sản phẩm** — hiện COVER / CONTAIN tất định; chưa có tracking.
 - [ ] **Liên kết clip người dùng với tham chiếu** (nhân vật / sản phẩm) — chưa có.

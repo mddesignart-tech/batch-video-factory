@@ -1,9 +1,31 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.4.0 — QĐ-138 URL Content Extraction DONE (2026-10-17, local + mock, $0)
+
+```
+FULL SUITE  122/122 file · 1843/1843 test PASS · 0 skip   (một process vitest, 2512 s; AI_MOCK_MODE=true, key giả)
+RELATED     14 file · 177/177 PASS (gồm tests/url-source.test.ts 29 test, fixture HTML trong tests/fixtures/url)
+lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0
+```
+
+- Nguồn **URL** trong TẠO VIDEO: dán link → ĐỌC NỘI DUNG → xem trước (tiêu đề, domain, loại trang, ngôn ngữ, số ký tự,
+  cảnh báo) → CHỈNH SỬA / CHẤP NHẬN / ĐỌC LẠI → TẠO KỊCH BẢN.
+- Snapshot lưu trong dự án. Kịch bản, viết lại, tiếp tục và render không mở lại link. Thẻ "Nguồn URL" trên dự án có
+  ĐỌC LẠI TỪ WEB và THAY NGUỒN (hỏi xác nhận, chỉ đổi nguồn, Image / Video / Voice POST = 0).
+- Có chống SSRF (IP riêng, localhost, metadata, DNS rebinding, redirect), timeout 15 s, giới hạn 3 MB, kiểm tra content-type.
+  Không đọc trang JS-only hay mạng xã hội. Ảnh trên trang không được tải về.
+- Smoke UI thật (sandbox: DB + data riêng, Mock Mode, key giả, trang fixture đọc từ thư mục; DB thật không đổi):
+  - Chặn localhost; đọc trang sản phẩm JSON-LD (593 ký tự, thông số + giá có cảnh báo); chỉnh sửa → chấp nhận →
+    kịch bản Hài TikTok dùng đúng thông số trên trang.
+  - Mở dự án không fetch; ĐỌC LẠI phát hiện trang đổi; THAY NGUỒN: kịch bản giữ nguyên, 0 job / chi phí mới.
+  - Báo đúng cho trang JS-only và cho link TikTok.
+- Lỗi smoke đã sửa: dấu markdown của snapshot lọt vào tiêu đề dự án / lời thoại mock.
+- Backlog: đọc trang cần trình duyệt (headless), nhập ảnh từ URL làm tham chiếu, đọc PDF qua link.
 
 ## Sau v1.4.0 — QĐ-137 An toàn vòng đời lô + dọn UX nhỏ DONE (2026-10-17, local + mock, $0)
 

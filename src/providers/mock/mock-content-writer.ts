@@ -24,7 +24,17 @@ export function detectLanguage(text: string): Lang {
 export function sourceSentences(text: string): { text: string; paragraphStart: boolean }[] {
   const out: { text: string; paragraphStart: boolean }[] = [];
   for (const para of text.split(/\n\s*\n|\r\n\s*\r\n/)) {
+    // A heading or list line ("## Thông số", "- Dung tích: 500 ml" - the shape a
+    // URL snapshot has, QĐ-138) is its own sentence, without its marker.
     const sentences = para
+      .split(/\r?\n/)
+      .map((line) => {
+        const m = /^\s*(#{1,6}|[-*•])\s+(.*)$/.exec(line);
+        if (!m) return line;
+        const body = m[2]!.trim();
+        return /[.!?:;。！？]$/.test(body) ? body : `${body}.`;
+      })
+      .join(" ")
       .replace(/\s+/g, " ")
       .split(/(?<=[.!?。！？])\s+/)
       .map((s) => s.trim())

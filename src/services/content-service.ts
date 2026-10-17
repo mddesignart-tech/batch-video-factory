@@ -40,6 +40,7 @@ import { parseJson, round } from "@/lib/utils";
 import { getTextProvider } from "@/providers/registry";
 import type { ContentScriptRequest, ScriptRequest } from "@/providers/types";
 import { resolveContentSource, type ContentSourceInput } from "./content-source";
+import { storedUrlSourceOf, urlSourceRule, type StoredUrlSource } from "./url-source";
 import { importSceneImage, storeImportedImage } from "./imported-image";
 import { autoAssignReferences, createReference, projectReferenceAssets, setSceneReferences } from "./reference-assets";
 import type { ReferenceType } from "@/domain/reference";
@@ -106,6 +107,11 @@ export interface CreateContentProjectInput extends ContentSourceInput {
   writeScript?: boolean;
   /** QĐ-127 PHONG CÁCH SÁNG TẠO. Absent / all "Tự động" = the template's creative defaults. */
   creativeStyle?: Partial<StoredCreativeStyle> | null;
+  /**
+   * QĐ-138: the page metadata of an accepted URL snapshot (the snapshot text
+   * itself is `sourceText`). Stored in the brief; never re-fetched.
+   */
+  urlSource?: StoredUrlSource | null;
 }
 
 /** The voice-only narrator, created once with the voice of an existing character. */
@@ -135,7 +141,8 @@ export async function ensureNarrator(): Promise<void> {
 }
 
 function shortTopic(text: string): string {
-  const line = text.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  // Markdown markers of a URL snapshot ("# Title", "- item") are not part of the topic.
+  const line = text.split(/\r?\n/).map((l) => l.replace(/^\s*(#{1,6}|[-*•>])\s+/, "").trim()).find((l) => l.length > 0) ?? "";
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 }
 
@@ -203,7 +210,14 @@ export async function createContentProject(input: CreateContentProjectInput): Pr
       creativeStyleJson: storedCreativeJson(input.creativeStyle),
       voiceMode,
       bilingualMode,
-      contentBriefJson: JSON.stringify({ idea: resolved.idea, facts: resolved.facts, cta: input.cta?.trim() ?? "", subjectName: input.subjectName?.trim() ?? "", assetIds: [] }),
+      contentBriefJson: JSON.stringify({
+        idea: resolved.idea,
+        facts: resolved.facts,
+        cta: input.cta?.trim() ?? "",
+        subjectName: input.subjectName?.trim() ?? "",
+        assetIds: [],
+        ...(input.sourceType === "URL" && input.urlSource ? { urlSource: input.urlSource } : {}),
+      }),
     },
   });
   ensureProjectDirs(project.id);
@@ -376,6 +390,11 @@ export async function generateContentProjectScript(projectId: string): Promise<S
   });
   // An operator's edited prompt without {{creativeStyle}} still gets the block.
   if (!systemPrompt.includes(creativeBlock)) systemPrompt = `${systemPrompt}\n\n${creativeBlock}`;
+  // QĐ-138: a web page is SOURCE MATERIAL - the only place facts come from.
+  // The accepted snapshot is read from the project; the link is never opened here.
+  if (project.contentSourceType === "URL") {
+    systemPrompt = `${systemPrompt}\n\n${urlSourceRule(storedUrlSourceOf(project), project.sourceUrl)}`;
+  }
 
   const request: ContentScriptRequest = {
     contentType: content.contentType,

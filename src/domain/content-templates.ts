@@ -553,7 +553,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     ctaRules: [],
     safetyRules: COMMON_SAFETY,
     factual: false,
-    sources: ["PROMPT", "TEXT", "ASSETS"],
+    sources: ["PROMPT", "TEXT", "ASSETS", "URL"],
     ideaPlaceholder: "Ví dụ: Chú thỏ nhỏ học cách chia sẻ",
     creative: creative(
       { tone: "GENTLE", comedyLevel: 1, comedyStyles: ["CUTE"], pacingStyle: "MEDIUM", punchlineMode: "AUTO", emotionStyle: "WARM", energyLevel: 2 },
@@ -632,7 +632,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     ctaRules: ["CTA only when the user gave contact details or a call to action. Never invent phone numbers or links."],
     safetyRules: [...COMMON_SAFETY, "No fake urgency, no invented discounts or prices."],
     factual: true,
-    sources: ["PROMPT", "TEXT", "ASSETS"],
+    sources: ["PROMPT", "TEXT", "ASSETS", "URL"],
     ideaPlaceholder: "Ví dụ: In ấn Mind Decor – in bạt, standee, giao nhanh trong ngày",
     creative: creative({ tone: "ENERGETIC", comedyLevel: 1, comedyStyles: [], pacingStyle: "FAST", punchlineMode: "AUTO", emotionStyle: "EXCITED", energyLevel: 4 }),
   },
@@ -667,7 +667,7 @@ export const CONTENT_TEMPLATES: readonly ContentTemplate[] = [
     ctaRules: [],
     safetyRules: COMMON_SAFETY,
     factual: false,
-    sources: ["PROMPT", "TEXT", "ASSETS"],
+    sources: ["PROMPT", "TEXT", "ASSETS", "URL"],
     ideaPlaceholder: "Ví dụ: Làm video 45 giây về…",
     creative: creative(
       { tone: "NATURAL", comedyLevel: 0, comedyStyles: [], pacingStyle: "AUTO", punchlineMode: "AUTO", emotionStyle: "AUTO", energyLevel: 3 },

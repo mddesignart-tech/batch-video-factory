@@ -23,6 +23,7 @@ import {
   VOICE_MODES,
 } from "@/domain/content-options";
 import { cn } from "@/lib/utils";
+import { UrlSourcePanel } from "./url-source-panel";
 
 /**
  * TẠO VIDEO - four steps a non-technical person can follow:
@@ -55,6 +56,8 @@ export function CreateVideoWizard({ presets }: { presets: { id: string; name: st
   const [duration, setDuration] = useState<number | "custom">(30);
   const [customDuration, setCustomDuration] = useState("40");
   const [files, setFiles] = useState<File[]>([]);
+  // QĐ-138: a URL source goes on only once its extracted text is accepted.
+  const [urlAccepted, setUrlAccepted] = useState(false);
 
   const templates = category ? templatesInCategory(category) : [];
   const template: ContentTemplate | null = useMemo(
@@ -83,6 +86,7 @@ export function CreateVideoWizard({ presets }: { presets: { id: string; name: st
   const sources = template ? CONTENT_SOURCE_TYPES.filter((s) => (template.sources as readonly string[]).includes(s.id)) : [];
   const legacyIdiom = template?.engine === "LEGACY_IDIOM";
   const ready = Boolean(template && source && !legacyIdiom && source !== "STORYBOARD" && source !== "IDIOM");
+  const canCreate = ready && (source !== "URL" || urlAccepted);
   const defaultStyle = presets.find((p) => p.slug === template?.defaultStyleSlug)?.id ?? "";
   const product = template?.category === "PRODUCT" || template?.category === "ADS" || template?.category === "AI";
 
@@ -166,15 +170,17 @@ export function CreateVideoWizard({ presets }: { presets: { id: string; name: st
               <button
                 type="button"
                 key={s.id}
-                disabled={!s.enabled && s.id !== "URL"}
-                onClick={() => setSource(s.id)}
+                disabled={!s.enabled}
+                onClick={() => {
+                  setSource(s.id);
+                  setUrlAccepted(false);
+                }}
                 className={cn(
                   "rounded-lg border px-4 py-2 text-sm",
                   source === s.id ? "border-brand-500 bg-brand-500/10 text-ink-100" : "border-ink-700 text-ink-300 hover:border-ink-500",
                 )}
               >
                 {s.icon} {s.label}
-                {s.id === "URL" ? <span className="ml-1 text-[10px] text-ink-500">(sắp có)</span> : null}
               </button>
             ))}
           </div>
@@ -204,17 +210,13 @@ export function CreateVideoWizard({ presets }: { presets: { id: string; name: st
                   <Input name="subjectName" placeholder="Ví dụ: Bình giữ nhiệt Mind 500ml" />
                 </Field>
               ) : null}
-              {source === "URL" ? (
-                <Field label="Đường link" hint="Tool chưa tự đọc trang web. Hãy dán thêm nội dung trang vào ô bên dưới.">
-                  <Input name="sourceUrl" placeholder="https://…" />
-                </Field>
-              ) : null}
-              {source === "TEXT" || source === "URL" ? (
+              {source === "URL" ? <UrlSourcePanel onAcceptedChange={setUrlAccepted} /> : null}
+              {source === "TEXT" ? (
                 <Field label="Dán nội dung" hint="Bài viết, caption, mô tả sản phẩm, script… AI giữ ý chính, rút gọn theo thời lượng, không bịa thêm.">
                   <Textarea name="sourceText" rows={8} placeholder="Dán nội dung vào đây…" />
                 </Field>
               ) : null}
-              <Field label={source === "TEXT" ? "Ghi chú thêm (không bắt buộc)" : "Bạn muốn video nói về điều gì?"}>
+              <Field label={source === "TEXT" || source === "URL" ? "Ghi chú thêm (không bắt buộc)" : "Bạn muốn video nói về điều gì?"}>
                 <Textarea name="idea" rows={source === "PROMPT" ? 4 : 2} placeholder={template.ideaPlaceholder} />
               </Field>
               {product ? (
@@ -362,10 +364,13 @@ export function CreateVideoWizard({ presets }: { presets: { id: string; name: st
       {ready ? (
         <Step n={4} title="Tạo kịch bản">
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" variant="primary" size="lg" disabled={pending}>
+            <Button type="submit" variant="primary" size="lg" disabled={pending || !canCreate}>
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               TẠO KỊCH BẢN
             </Button>
+            {!canCreate ? (
+              <p className="text-xs text-warn-500">Hãy ĐỌC NỘI DUNG và CHẤP NHẬN nội dung trang trước.</p>
+            ) : null}
             <p className="text-xs text-ink-500">
               Bước này chỉ viết kịch bản để bạn xem và sửa. Chưa tạo ảnh, giọng hay video - chưa tốn phí media.
             </p>

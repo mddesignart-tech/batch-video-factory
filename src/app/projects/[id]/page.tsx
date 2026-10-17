@@ -47,6 +47,8 @@ import { audienceOf, languageOf } from "@/domain/content-options";
 import { spokenLines } from "@/domain/scene-subtitles";
 import type { ScriptDoc } from "@/domain/script";
 import { CreativeStyleCard } from "./creative-style-card";
+import { UrlSourceCard } from "./url-source-card";
+import { storedUrlSourceOf } from "@/services/url-source";
 import { sceneCameraViews } from "@/services/scene-camera-view";
 import { projectContent } from "@/domain/content-legacy";
 import { creativeBadges, parseCreativeStyle, type EffectiveCreativeStyle } from "@/domain/creative-style";
@@ -252,6 +254,25 @@ export default async function ProjectDetailPage({
             targetDuration={project.targetDuration}
             title={project.title}
           />
+
+          {project.contentSourceType === "URL" && project.sourceUrl ? (
+            (() => {
+              // QĐ-138: the accepted snapshot. Reading this page never opens the link.
+              const src = storedUrlSourceOf(project);
+              return (
+                <UrlSourceCard
+                  projectId={project.id}
+                  url={src?.url ?? project.sourceUrl}
+                  domain={src?.domain ?? (URL.canParse(project.sourceUrl) ? new URL(project.sourceUrl).hostname : project.sourceUrl.slice(0, 60))}
+                  pageTitle={src?.pageTitle ?? ""}
+                  extractedAt={src?.extractedAt ?? ""}
+                  approvedAt={src?.approvedAt ?? ""}
+                  chars={(project.sourceText ?? "").length}
+                  edited={src?.edited ?? false}
+                />
+              );
+            })()
+          ) : null}
 
           {project.scriptJson ? (
             <CreativeStyleCard
