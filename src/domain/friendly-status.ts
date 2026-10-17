@@ -119,3 +119,10 @@ export function batchWorkflowStep(input: {
   if (input.priced) return "PREFLIGHT";
   return "REVIEW";
 }
+
+/**
+ * A batch with no videos yet - an idiom batch before DUYỆT & CHẠY (QĐ-137).
+ * Not the import flow's "Lô nhập chưa có video nào": nothing was imported.
+ */
+export const NO_VIDEOS_YET =
+  "Lô này chưa được duyệt / chưa tạo video nào. Video sẽ hiện ở đây sau khi bấm DUYỆT & CHẠY BATCH.";

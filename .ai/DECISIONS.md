@@ -4111,3 +4111,32 @@ video lô chạy idiom-v1 (bộ viết hài gốc). Dự toán lô luôn dùng p
 - Duyệt lô từ trang chi tiết (PREFLIGHT → `persistPreflight`) ghi đè `planJson` và làm mất `creativeStyle`: video vẫn
   đúng phong cách nhưng thẻ lô báo "Tự động" và DỰ TOÁN LẠI sau đó mất phong cách → plan mới giữ `creativeStyle` của plan
   cũ. Test M (đỏ trên code cũ).
+
+## QĐ-137 — An toàn vòng đời lô (DỪNG BATCH) + dọn UX nhỏ (2026-10-17, local + mock, $0)
+
+**Root cause DỪNG không dừng thật:**
+- Executor chỉ đọc trạng thái dừng **giữa các video** (đầu `runOne`) và trong vòng tạo dự án thành ngữ. Video đang chạy
+  vẫn đi hết mọi cảnh (ảnh → clip → giọng) rồi render. Sau khi dừng, `batchApprovalFor` trả null nên mỗi bước đi theo
+  đường "không thuộc lô": provider mock không cần create token nên tiếp tục tạo ProviderJob (số job tăng trong smoke).
+  Provider thật bị chặn ở cổng nhưng khi đó cảnh bị ghi `failed` → STOP biến thành FAILED.
+- `settleBatchIfDone` trả null khi còn video đang "chờ". Video bị bỏ qua vì DỪNG vẫn ở `script_ready`, nên lô có thể
+  kẹt RUNNING. `runBatch` ghi RUNNING vô điều kiện khi bắt đầu, nên một run bắt đầu muộn sau khi dừng lật lô về RUNNING.
+- UI: badge "Đang chạy (pipeline production)" lấy từ run-registry trong process. Hook polling ngừng ngay khi DB về
+  CANCELLED (trạng thái cuối) dù run vẫn đang kết thúc bước cuối, nên badge cũ đứng yên tới khi tải lại trang.
+
+**Quyết định:**
+- Kiểm tra dừng (`stopRequested`, đọc mới từ DB) trước MỖI cảnh, trước mỗi bước ảnh / clip / giọng và trước render.
+  Bước đã gửi tới provider được để chạy xong và giữ kết quả (có thể đã bị tính tiền; không giả vờ huỷ).
+  Không bước nào sau đó được bắt đầu.
+- Video bị dừng giữa chừng được trả về đúng trạng thái trước run, không bị đánh failed. Lỗi của bước đang chạy khi lô vừa
+  bị dừng được coi là dừng, không phải lỗi.
+- `runBatch` gặp quyền chi CANCELLED: không ghi RUNNING, chốt CANCELLED. `settleBatchIfDone` gặp quyền chi CANCELLED:
+  chốt CANCELLED, không bao giờ FAILED.
+- `cancelBatch` idempotent: bấm lần hai giữ thời điểm và lý do của lần dừng đầu, trả `alreadyStopped`.
+- UI: badge "Đang dừng — chờ bước đã gửi xong" khi run còn kết thúc. Polling chỉ ngừng khi trạng thái là trạng thái cuối
+  VÀ không còn run, và đồng bộ lại sau `router.refresh()` (DỪNG / TIẾP TỤC).
+- Tên lô mặc định: `nextDefaultBatchName` = max(số "#NNN" lớn nhất, số lô hiện có) + 1. Không migration, người dùng
+  vẫn sửa được.
+- Lô chưa có video (lô thành ngữ chưa duyệt): `buildBatchResumePlans` trả [] thay vì lỗi "Lô nhập chưa có video nào"
+  của luồng nhập. Bảng hiện `NO_VIDEOS_YET`. Pipeline không đổi.
+- Test: `tests/batch-stop-safety.test.ts` (12 test; 6 test đỏ trên code cũ).

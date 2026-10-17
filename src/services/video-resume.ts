@@ -262,6 +262,9 @@ function planFrom(
 
 /** Plans for every video of a batch, from ONE preflight. */
 export async function buildBatchResumePlans(batchId: string, opts: { ignoreLockOwnerFor?: Set<string> } = {}): Promise<VideoResumePlan[]> {
+  // An idiom batch has no videos until it is approved and run: that is "nothing
+  // to resume yet", not the import flow's "import a storyboard first" (QĐ-137).
+  if ((await prisma.project.count({ where: { batchId } })) === 0) return [];
   const pre = await preflightImportedBatch(batchId);
   const projects = await prisma.project.findMany({
     where: { batchId },

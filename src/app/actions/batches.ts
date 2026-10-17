@@ -268,9 +268,12 @@ export async function approveBatch(
 
 export async function stopBatch(batchId: string): Promise<ActionResult> {
   try {
-    const { cancelledJobs, inFlight } = await cancelBatch(batchId);
+    const { cancelledJobs, inFlight, alreadyStopped } = await cancelBatch(batchId);
     revalidatePath(`/batches/${batchId}`);
     revalidatePath("/batches");
+    if (alreadyStopped) {
+      return { ok: true, message: "Lô đã dừng từ trước. Không có gì thay đổi; bấm TIẾP TỤC khi muốn chạy tiếp." };
+    }
     return {
       ok: true,
       message:

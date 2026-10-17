@@ -207,7 +207,11 @@ export function BatchProgressView({
             canReplan={authorization?.status === "DRAFT" && !progress.importBatch}
           />
           <div className="flex flex-wrap items-center gap-2 text-xs">
-              {progress.running ? (
+              {progress.running && stopped && authorization?.status === "CANCELLED" ? (
+                // DỪNG was accepted; the run is only finishing the one step
+                // already sent (QĐ-137). Nothing new is started.
+                <Badge tone="warn">Đang dừng — chờ bước đã gửi xong, không bắt đầu bước mới</Badge>
+              ) : progress.running ? (
                 <Badge tone="warn">Đang chạy (pipeline production)</Badge>
               ) : authorization && authorization.status !== "DRAFT" ? (
                 // Also offered on a finished batch: resuming never re-approves,

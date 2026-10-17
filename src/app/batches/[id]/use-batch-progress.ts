@@ -42,7 +42,9 @@ export function useBatchProgress(
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const terminal = isTerminalBatchStatus(progress.status as BatchStatus);
+  // A stopped batch whose run is still finishing its last step is not done
+  // yet: keep polling until the run itself has ended (QĐ-137).
+  const terminal = isTerminalBatchStatus(progress.status as BatchStatus) && !progress.running;
   const [polling, setPolling] = useState(!terminal);
 
   // Held in a ref so the effect below does not re-subscribe on every render;
@@ -68,7 +70,7 @@ export function useBatchProgress(
       const next = (await res.json()) as BatchProgress;
       setProgress(next);
       setError(null);
-      if (isTerminalBatchStatus(next.status as BatchStatus)) setPolling(false);
+      if (isTerminalBatchStatus(next.status as BatchStatus) && !next.running) setPolling(false);
     } catch (err) {
       // Keep the last good numbers. A transient failure must not blank a page
       // that was correct a second ago.
@@ -78,6 +80,13 @@ export function useBatchProgress(
       setRefreshing(false);
     }
   }, [batchId]);
+
+  // A server refresh (after DỪNG / TIẾP TỤC) hands a new first paint: take it,
+  // and start polling again if the batch is going again.
+  useEffect(() => {
+    setProgress(initial);
+    setPolling(!(isTerminalBatchStatus(initial.status as BatchStatus) && !initial.running));
+  }, [initial]);
 
   useEffect(() => {
     if (!polling) return;

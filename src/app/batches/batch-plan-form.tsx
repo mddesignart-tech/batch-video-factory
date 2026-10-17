@@ -83,12 +83,15 @@ export function BatchPlanForm({
   difficulties,
   availableIdioms,
   defaultMaxCostPerVideo,
+  defaultName,
 }: {
   presets: { id: string; name: string }[];
   categories: string[];
   difficulties: string[];
   availableIdioms: number;
   defaultMaxCostPerVideo: number;
+  /** "Batch Video Factory #00N", the next free number (QĐ-137). */
+  defaultName: string;
 }) {
   const router = useRouter();
   const [amount, setAmount] = useState(3);
@@ -166,7 +169,7 @@ export function BatchPlanForm({
               <Field label="Tên lô">
                 <Input
                   name="name"
-                  defaultValue="Batch Video Factory #001"
+                  defaultValue={defaultName}
                   required
                 />
               </Field>

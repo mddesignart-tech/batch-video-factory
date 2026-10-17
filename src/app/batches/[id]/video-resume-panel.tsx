@@ -1,6 +1,7 @@
 "use client";
 
 import { FriendlyReason } from "@/components/friendly-reason";
+import { NO_VIDEOS_YET } from "@/domain/friendly-status";
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Table, Td, Th } from "@/components/ui";
@@ -135,6 +136,8 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
       <CardContent className="space-y-3">
         {plans === null ? (
           <p className="text-xs text-ink-500">Đang lập kế hoạch từng video…</p>
+        ) : plans.length === 0 ? (
+          <p className="text-xs text-ink-500">{NO_VIDEOS_YET}</p>
         ) : (
           <Table>
             <thead>

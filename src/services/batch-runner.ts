@@ -175,8 +175,12 @@ export async function approveAndStart(opts: {
 export async function cancelBatch(
   batchId: string,
   reason = "Người dùng bấm DỪNG BATCH.",
-): Promise<{ cancelledJobs: number; inFlight: number }> {
-  await closeAuthorization(batchId, "CANCELLED", reason);
+): Promise<{ cancelledJobs: number; inFlight: number; alreadyStopped: boolean }> {
+  // Idempotent (QĐ-137): a second press keeps the first stop's time and
+  // reason, and only re-checks that nothing is left queued.
+  const auth = await prisma.batchAuthorization.findUnique({ where: { batchId }, select: { status: true } });
+  const alreadyStopped = auth?.status === "CANCELLED";
+  if (!alreadyStopped) await closeAuthorization(batchId, "CANCELLED", reason);
 
   const cancelled = await prisma.job.updateMany({
     where: { batchId, status: "queued" },
@@ -204,6 +208,8 @@ export async function cancelBatch(
 
   await prisma.batch.update({ where: { id: batchId }, data: { status: "CANCELLED" } });
 
+  if (alreadyStopped) return { cancelledJobs: cancelled.count + cancelledScenes.count, inFlight, alreadyStopped };
+
   await logger.warn({
     event: "batch.cancelled",
     message:
@@ -214,7 +220,7 @@ export async function cancelBatch(
         : "Không có job nào đang chạy."),
   });
 
-  return { cancelledJobs: cancelled.count + cancelledScenes.count, inFlight };
+  return { cancelledJobs: cancelled.count + cancelledScenes.count, inFlight, alreadyStopped };
 }
 
 /**
@@ -406,6 +412,15 @@ export async function batchProgress(batchId: string): Promise<BatchProgress | nu
 export async function settleBatchIfDone(batchId: string): Promise<BatchStatus | null> {
   const progress = await batchProgress(batchId);
   if (!progress) return null;
+  // Stopped is stopped (QĐ-137). Videos the stop left waiting are waiting for
+  // TIẾP TỤC, not for this run - they must not hold the batch at RUNNING, and
+  // a stop is never turned into FAILED.
+  if (progress.authorization?.status === "CANCELLED") {
+    if (progress.status !== "CANCELLED") {
+      await prisma.batch.update({ where: { id: batchId }, data: { status: "CANCELLED" } });
+    }
+    return "CANCELLED";
+  }
   // Videos an approval does not cover (a $0-only or a picked-videos approval,
   // QĐ-114) are waiting for a person, not for this run: they do not keep the
   // batch RUNNING.

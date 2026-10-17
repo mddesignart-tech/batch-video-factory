@@ -638,6 +638,32 @@ export class ExecutorError extends Error {
 }
 
 /**
+ * DỪNG BATCH reached a run that was already going (QĐ-137). Not a failure: the
+ * video is put back as it was and TIẾP TỤC picks it up.
+ */
+export class BatchStoppedError extends ExecutorError {
+  constructor(where: string) {
+    super(`CANCELLED: lô đã được DỪNG ${where}.`);
+    this.name = "BatchStoppedError";
+  }
+}
+
+/**
+ * Has the person pressed DỪNG? Read fresh every time - it changes under a run
+ * that is already going, and a value captured at the start would let the run
+ * walk every remaining scene of the video it is on.
+ */
+export async function stopRequested(batchId: string): Promise<boolean> {
+  if (!batchId) return false;
+  const live = await prisma.batchAuthorization.findUnique({ where: { batchId }, select: { status: true } });
+  return live?.status === "CANCELLED";
+}
+
+async function assertNotStopped(batchId: string, where: string): Promise<void> {
+  if (await stopRequested(batchId)) throw new BatchStoppedError(where);
+}
+
+/**
  * Approve an amount the PERSON typed, then start the run in the background.
  *
  * Never raises a budget: the global cap is checked by `approveAuthorization`
@@ -905,6 +931,10 @@ async function runScene(
     await setStep(projectId, `${label} · cảnh ${progress.scene}/${progress.of}`);
     return withSemaphore("paid-media", progress.paidSlots, work);
   };
+  // DỪNG is honoured before EVERY step, not only between videos (QĐ-137): a
+  // step already sent finishes - the vendor may bill it anyway - but nothing
+  // after it is started.
+  await assertNotStopped(batchId, "trước bước ảnh");
   await step("Ảnh", () => generateSceneImage(sceneId));
   await assertHeadroom(projectId, batchId, ceilings, "sau ảnh");
 
@@ -913,8 +943,10 @@ async function runScene(
   // `generateSceneVideo` route again - so it judged one model and the POST used
   // another. The generator now buys exactly the frozen choice, and the batch
   // gate (2c) refuses any other model at the POST itself (QĐ-111).
+  await assertNotStopped(batchId, "trước bước clip");
   await step("Clip", () => generateSceneVideo(sceneId));
   await assertHeadroom(projectId, batchId, ceilings, "sau clip");
+  await assertNotStopped(batchId, "trước bước giọng");
   await step("Giọng", () => generateSceneVoice(sceneId, { allowRebuyMissing: allowRebuyMissingVoice }));
 
   const done = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
@@ -1027,6 +1059,12 @@ export async function runBatch(
     batch: auth.authorizedMaxSpend,
     providers: parseJson<string[]>(auth.providerScopeJson, []),
   };
+  // A batch stopped before its run got going stays stopped: it is never
+  // flipped back to RUNNING behind the person's back (QĐ-137).
+  if (auth.status === "CANCELLED") {
+    await prisma.batch.update({ where: { id: batchId }, data: { status: "CANCELLED" } });
+    return { batchId, outcomes: [], settledStatus: "CANCELLED", releasedReservations: 0 };
+  }
   await prisma.batch.update({ where: { id: batchId }, data: { status: "RUNNING" } });
   const settings = await getSettings();
 
@@ -1202,7 +1240,14 @@ export async function runBatch(
         orderBy: { sceneNumber: "asc" },
       });
       let stopped = "";
+      // DỪNG reached this video part-way: what is done stays done, nothing else
+      // starts, and the video is NOT failed (QĐ-137).
+      let cancelled = false;
       for (const scene of scenes) {
+        if (await stopRequested(batchId)) {
+          cancelled = true;
+          break;
+        }
         try {
           await assertHeadroom(project.id, batchId, ceilings, `cảnh ${scene.sceneNumber}`);
           await runScene(scene.id, project.id, batchId, ceilings, {
@@ -1211,6 +1256,12 @@ export async function runBatch(
             paidSlots: settings.maxConcurrentPaidRequests,
           }, opts.rebuyMissingVoice === true);
         } catch (err) {
+          // A step refused because the batch was stopped meanwhile (its gate
+          // closed with the approval) is the stop, not a broken scene.
+          if (err instanceof BatchStoppedError || (await stopRequested(batchId))) {
+            cancelled = true;
+            break;
+          }
           stopped = err instanceof Error ? err.message : String(err);
           await prisma.scene.update({
             where: { id: scene.id },
@@ -1225,6 +1276,29 @@ export async function runBatch(
           });
           break;
         }
+      }
+
+      if (!cancelled && !stopped && (await stopRequested(batchId))) cancelled = true;
+      if (cancelled) {
+        // Back exactly as it was before this run touched it; TIẾP TỤC reuses
+        // every asset already on disk.
+        await prisma.project.update({
+          where: { id: project.id },
+          data: { status: project.status, errorMessage: project.errorMessage, currentStep: null, runFinishedAt: new Date() },
+        });
+        await logger.warn({
+          event: "batch.video_cancelled",
+          projectId: project.id,
+          message: `Video "${project.title}" dừng giữa chừng vì lô bị DỪNG. Phần đã xong được giữ; không bắt đầu bước nào nữa.`,
+        });
+        return {
+          projectId: project.id,
+          title: project.title,
+          stopped: "CANCELLED: lô đã được DỪNG khi video này đang chạy.",
+          rendered: false,
+          skipped: true,
+          outputDir: null,
+        };
       }
 
       // A render that fails never reaches back for the paid API - the assets are

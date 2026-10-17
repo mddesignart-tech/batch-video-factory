@@ -1,9 +1,30 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.4.0 — QĐ-137 An toàn vòng đời lô + dọn UX nhỏ DONE (2026-10-17, local + mock, $0)
+
+```
+FULL SUITE  121/121 file · 1814/1814 test PASS · 0 skip   (một process vitest, 2506 s; AI_MOCK_MODE=true, key giả)
+RELATED     14 file · 185/185 PASS (gồm tests/batch-stop-safety.test.ts 12 test; 6 test đỏ trên code cũ)
+lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0
+```
+
+- **DỪNG BATCH (P0):**
+  - Executor kiểm tra lệnh dừng trước mỗi cảnh, trước mỗi bước ảnh / clip / giọng và trước render. Trước đây chỉ kiểm tra
+    giữa các video, nên video đang chạy vẫn đi hết mọi cảnh.
+  - Bước đã gửi tới provider chạy xong và giữ kết quả. Không bước nào sau đó được bắt đầu.
+  - Video bị dừng trả về trạng thái trước run, không bị đánh FAILED.
+  - Lô chốt CANCELLED, không quay lại RUNNING và không thành FAILED.
+  - DỪNG idempotent.
+  - UI hiện "Đang dừng" khi run đang kết thúc bước cuối, và polling chạy tới khi run kết thúc thật.
+- **Tên lô mặc định:** "#NNN" tiếp theo, tính bằng max(số lớn nhất đã dùng, số lô) + 1. Không migration.
+- **Empty-state:** lô thành ngữ chưa duyệt không còn hiện "Lô nhập chưa có video nào"; nay hiện "Lô này chưa được duyệt /
+  chưa tạo video nào…".
+- Chi tiết root cause: `.ai/DECISIONS.md` QĐ-137.
 
 ## Sau v1.4.0 — QĐ-136 Creative Style cho lô thành ngữ DONE (2026-10-17, local + mock, $0)
 
@@ -26,8 +47,7 @@ lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST =
 - **Lỗi smoke tìm ra và đã sửa (`84be22f`):** duyệt từ trang lô (PREFLIGHT) ghi đè `planJson` làm mất `creativeStyle`;
   ghi chú dự toán luôn ghi "kịch bản mẫu 6 cảnh".
 - **Chưa làm (backlog):** override phong cách theo từng thành ngữ trong lô.
-- Ghi nhận, KHÔNG sửa (ngoài phạm vi): tên lô mặc định luôn "Batch Video Factory #001"; lô thành ngữ chưa duyệt trên
-  trang chi tiết hiện dòng "Lô nhập chưa có video nào" của luồng nhập.
+- Ghi nhận khi smoke (tên lô luôn "#001", empty-state sai, DỪNG không dừng thật) → đã sửa ở QĐ-137.
 
 ## Sau v1.4.0 — Tăng tốc full test suite DONE (2026-10-17, chỉ hạ tầng test, $0, không POST trả phí)
 

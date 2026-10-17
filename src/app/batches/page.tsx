@@ -22,6 +22,7 @@ import {
 } from "@/domain/enums";
 import { DEFAULT_MAX_COST_PER_VIDEO } from "@/services/batch-authorization";
 import { spendStatus } from "@/services/spend-guard";
+import { nextDefaultBatchName } from "@/domain/batch-naming";
 import { BatchPlanForm } from "./batch-plan-form";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +40,7 @@ const STATUS_TONE: Record<BatchStatus, "neutral" | "info" | "ok" | "warn" | "dan
 };
 
 export default async function BatchesPage() {
-  const [batches, presets, unusedCount, spend] = await Promise.all([
+  const [batches, presets, unusedCount, spend, names] = await Promise.all([
     prisma.batch.findMany({
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -51,6 +52,7 @@ export default async function BatchesPage() {
     prisma.stylePreset.findMany({ orderBy: { name: "asc" } }),
     prisma.idiom.count({ where: { status: { in: ["unused", "planned"] } } }),
     spendStatus(),
+    prisma.batch.findMany({ select: { name: true } }),
   ]);
 
   return (
@@ -76,6 +78,7 @@ export default async function BatchesPage() {
           difficulties={[...DIFFICULTIES]}
           availableIdioms={unusedCount}
           defaultMaxCostPerVideo={DEFAULT_MAX_COST_PER_VIDEO}
+          defaultName={nextDefaultBatchName(names.map((b) => b.name))}
         />
       </div>
 
