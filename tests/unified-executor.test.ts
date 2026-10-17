@@ -16,7 +16,7 @@ import { createAuthorization } from "@/services/batch-authorization";
 import { planBatch } from "@/services/batch-planner";
 import { savePlan } from "@/services/batch-runner";
 import { materialiseImport, scanImportSource, validateImport } from "@/services/storyboard-import";
-import { batchSource } from "@/services/batch-sources";
+import { batchSource, writeIdiomScripts } from "@/services/batch-sources";
 import { approveAndRun, preflightForApproval } from "@/services/batch-executor";
 import { runJob } from "@/jobs/handlers";
 
@@ -152,11 +152,30 @@ describe("one approval logic for both sources", () => {
     expect(await batchSource(idiomBatchId)).toBe("IDIOM_GENERATED");
     expect(await batchSource(storyBatchId)).toBe("STORYBOARD_IMPORTED");
 
+    // QĐ-139: no money is approved against a sample script.
+    const sample = await preflightForApproval(idiomBatchId);
+    expect(sample.ready).toBe(false);
+    expect(sample.checks.find((c) => !c.ok && c.blocking)?.detail).toMatch(/SCRIPTS_REQUIRED/);
+    await expect(approveAndRun({ batchId: idiomBatchId, maxBatch: 5, lowAutoApproved: false })).rejects.toThrow(
+      /SCRIPTS_REQUIRED/,
+    );
+    const written = await writeIdiomScripts(idiomBatchId);
+    expect(written.written).toBe(2);
+    expect(written.failed).toEqual([]);
+    // Text AI only: no image, clip or voice was bought for the scripts.
+    const ids = (await prisma.project.findMany({ where: { batchId: idiomBatchId }, select: { id: true } })).map((p) => p.id);
+    expect(ids).toHaveLength(2);
+    const media = await prisma.providerJob.count({ where: { projectId: { in: ids }, kind: { in: ["image", "video", "voice"] } } });
+    expect(media).toBe(0);
+    expect((await prisma.batchAuthorization.findUniqueOrThrow({ where: { batchId: idiomBatchId } })).status).toBe("DRAFT");
+
     const idiom = await preflightForApproval(idiomBatchId);
     const story = await preflightForApproval(storyBatchId);
     expect(idiom.source).toBe("IDIOM_GENERATED");
     expect(story.source).toBe("STORYBOARD_IMPORTED");
     expect(idiom.ready).toBe(true);
+    // Priced from the real rows now, scene by scene.
+    expect(idiom.preflight?.videos).toHaveLength(2);
     expect(story.ready).toBe(true);
     // Same checks, in the same order - one gateChecks, not two copies. Rows
     // named after a model or a video ("key: ...") depend on the plan itself.
@@ -177,7 +196,7 @@ describe("one approval logic for both sources", () => {
 });
 
 describe("idiom source -> production executor", () => {
-  it("DUYỆT & CHẠY writes the scripts and runs every video to an MP4, through the executor", async () => {
+  it("DUYỆT & CHẠY runs every real script to an MP4, through the executor", async () => {
     const pre = await preflightForApproval(idiomBatchId);
     const { run } = await approveAndRun({
       batchId: idiomBatchId,

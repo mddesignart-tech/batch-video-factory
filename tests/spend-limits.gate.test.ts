@@ -197,7 +197,7 @@ describe("cổng trước mỗi POST trả phí — bốn tầng, trong khoá re
     await gate(batchId, p, (await firstScene(p, 1)).id, 0.4);
     const err = await gate(batchId, p, (await firstScene(p, 2)).id, 0.3).catch((e: unknown) => e);
     expect((err as BatchAuthorizationError).verdict?.reasonCode).toBe("VIDEO_LIMIT_EXCEEDED");
-    expect((err as BatchAuthorizationError).verdict?.message).toContain("vượt giới hạn video $0.10");
+    expect((err as BatchAuthorizationError).verdict?.message).toContain("thiếu $0.10");
     expect(await reservations(batchId)).toBe(1);
   });
 
@@ -299,7 +299,7 @@ describe("chạy một phần lô — mock, không POST thật", () => {
     const plan = pre.spendPlan!;
     expect(plan.runnable.map((v) => v.title)).toEqual(["Video A", "Video C", "Video D"]);
     expect(plan.blocked.map((v) => [v.title, v.verdict.reasonCode])).toEqual([["Video B", "VIDEO_LIMIT_EXCEEDED"]]);
-    expect(plan.blocked[0]!.verdict.message).toMatch(/Video B vượt giới hạn video \$[\d.]+ — dự toán \$[\d.]+, giới hạn \$[\d.]+\./);
+    expect(plan.blocked[0]!.verdict.message).toMatch(/Video B vượt giới hạn video — dự toán \$[\d.]+, giới hạn \$[\d.]+, thiếu \$[\d.]+\./);
     expect(pre.estimatedTotal).toBeCloseTo(cost["Video A"]! + cost["Video C"]!, 6);
     expect(pre.runnableVideos).toBe(3);
     expect(pre.blockedVideos).toBe(1);

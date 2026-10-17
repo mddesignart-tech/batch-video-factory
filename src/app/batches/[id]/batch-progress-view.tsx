@@ -29,6 +29,7 @@ import {
   CopyPathButton,
   OpenOutputButton,
   ResumeRunButton,
+  WriteScriptsButton,
 } from "./batch-controls";
 import { ApproveRunPanel } from "@/components/approve-run-panel";
 import { ContinueVideoButton } from "@/components/continue-video-button";
@@ -67,6 +68,8 @@ export function BatchProgressView({
   );
 
   const { batch, counts, ledger, authorization, videos } = progress;
+  // An idiom batch whose real scripts are not all written yet (QĐ-139).
+  const needsScripts = !progress.importBatch && (progress.notStarted > 0 || videos.some((v) => v.sceneCount === 0));
   const status = batch.status as BatchStatus;
 
   const totalPlanned = counts.total + progress.notStarted;
@@ -204,7 +207,8 @@ export function BatchProgressView({
             // never through the queue.
             // Resume is TIẾP TỤC below, through the executor, for every batch.
             canResume={false}
-            canReplan={authorization?.status === "DRAFT" && !progress.importBatch}
+            // Re-pricing from the sample only makes sense before the real scripts exist.
+            canReplan={authorization?.status === "DRAFT" && !progress.importBatch && videos.length === 0}
           />
           <div className="flex flex-wrap items-center gap-2 text-xs">
               {progress.running && stopped && authorization?.status === "CANCELLED" ? (
@@ -232,7 +236,21 @@ export function BatchProgressView({
         </CardContent>
       </Card>
 
-      {authorization?.status === "DRAFT" ? (
+      {authorization?.status === "DRAFT" && needsScripts ? (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle>Bước tiếp: viết kịch bản thật</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-ink-300">
+            <p>
+              Còn {progress.notStarted + videos.filter((v) => v.sceneCount === 0).length} video chưa có kịch bản thật.
+              Chi phí media chỉ được dự toán và duyệt theo kịch bản thật — từng cảnh qua router (Local / Ảnh AI /
+              Video AI / Giọng, đúng model) — không theo kịch bản mẫu.
+            </p>
+            <WriteScriptsButton batchId={batch.id} />
+          </CardContent>
+        </Card>
+      ) : authorization?.status === "DRAFT" ? (
         <div className="mt-4">
           <ApproveRunPanel batchId={batch.id} />
         </div>

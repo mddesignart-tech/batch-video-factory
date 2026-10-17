@@ -11,7 +11,9 @@ import { isRunnable, storedPlan } from "@/services/batch-runner";
  *
  *   IDIOM_GENERATED      the plan names idioms; each becomes a project whose
  *                        script is written by Text AI (a paid call, through the
- *                        ordinary gates) when the batch RUNS
+ *                        ordinary gates) BEFORE the money approval - the
+ *                        approval prices the real scripts (writeIdiomScripts,
+ *                        QĐ-139)
  *   STORYBOARD_IMPORTED  the projects and scenes already exist as rows
  *
  * From "project and scenes exist" onwards there is no difference: the same
@@ -207,4 +209,92 @@ export async function materializeIdiomVideos(batchId: string): Promise<Materiali
   }
   if (stoppedReason) await logger.warn({ event: "batch.expand_stopped", message: stoppedReason });
   return { created, blocked, stoppedReason };
+}
+
+export interface WriteScriptsResult {
+  written: number;
+  /** Projects that already had a script: kept, not written again. */
+  kept: number;
+  failed: { phrase: string; reason: string }[];
+}
+
+/**
+ * IDIOM_GENERATED, step 2 of 3 (QĐ-139): write every video's REAL script while
+ * the money approval is still a DRAFT - before anything is priced for approval.
+ *
+ * A batch used to be approved against a SAMPLE script (the reference profile)
+ * and written only after the yes. The real script then routed differently -
+ * more AI scenes, a hook on another model - and the run stopped on a model the
+ * approval had never named (APPROVED_MODEL_MISSING), with an estimate ~6x low.
+ * Now the order is: plan (free) → real scripts (Text AI only) → the preflight
+ * prices the real scenes through the real router → the person approves → the
+ * run buys exactly the frozen choices.
+ *
+ * Writing a script is a Text AI call: outside an approved batch it passes the
+ * same gates as TẠO KỊCH BẢN on a single project (confirmed model, global cap,
+ * wallet). No image, clip or voice is bought here. Resumable: an idiom with a
+ * project keeps it; a project whose script died half-way is written again.
+ */
+export async function writeIdiomScripts(batchId: string): Promise<WriteScriptsResult> {
+  const batch = await prisma.batch.findUniqueOrThrow({ where: { id: batchId } });
+  const auth = await prisma.batchAuthorization.findUnique({ where: { batchId } });
+  if (batch.status !== "PLANNED" || (auth && auth.status !== "DRAFT")) {
+    throw new Error(
+      `Chỉ viết kịch bản khi lô đang PLANNED và quyền chi còn DRAFT (lô: ${batch.status}, quyền chi: ${auth?.status ?? "không có"}).`,
+    );
+  }
+  const plan = storedPlan(batch);
+  if (!plan) throw new Error("Lô này chưa có bản kế hoạch. Hãy PHÂN TÍCH & DỰ TOÁN trước.");
+  const runnable = plan.videos.filter((v) => v.idiomId && isRunnable(v.status));
+  const { createProjectForIdiom, generateProjectScript, previewProjectCost, freezeScenePlan } = await import(
+    "@/services/project-service"
+  );
+
+  const result: WriteScriptsResult = { written: 0, kept: 0, failed: [] };
+  for (const planned of runnable) {
+    try {
+      let project = await prisma.project.findFirst({ where: { batchId, idiomId: planned.idiomId } });
+      if (project?.scriptJson) {
+        result.kept++;
+        continue;
+      }
+      if (project) {
+        await generateProjectScript(project.id);
+      } else {
+        project = await createProjectForIdiom({
+          idiomId: planned.idiomId,
+          qualityMode: batch.qualityMode as QualityMode,
+          stylePresetId: batch.stylePresetId ?? undefined,
+          targetDuration: batch.targetDuration,
+          maxBudget: batch.maxCostPerVideo,
+          batchId,
+          creativeStyle: plan.creativeStyle ?? null,
+          autoGenerateScript: true,
+          autoStartMedia: false,
+        });
+      }
+      // The router's choice for every scene of the REAL script goes onto the
+      // scenes now; the approval preflight prices exactly these.
+      const preview = await previewProjectCost(project.id);
+      await freezeScenePlan(project.id, preview);
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { estimatedCost: preview.current.breakdown.total },
+      });
+      result.written++;
+    } catch (err) {
+      result.failed.push({ phrase: planned.phrase, reason: errorMessage(err) });
+      await logger.error({
+        event: "batch.script_failed",
+        message: `Không viết được kịch bản cho "${planned.phrase}": ${errorMessage(err)}`,
+      });
+    }
+  }
+  await logger.info({
+    event: "batch.scripts_written",
+    message:
+      `Lô ${batchId}: viết ${result.written} kịch bản thật, giữ ${result.kept}, lỗi ${result.failed.length}. ` +
+      `Chưa mua ảnh / clip / giọng nào.`,
+  });
+  return result;
 }

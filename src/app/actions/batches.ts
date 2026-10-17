@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { errorMessage } from "@/lib/utils";
 import { createAuthorization, DEFAULT_MAX_COST_PER_VIDEO } from "@/services/batch-authorization";
 import { planBatch, type BatchPlan } from "@/services/batch-planner";
-import { pricedFromRows } from "@/services/batch-sources";
+import { pricedFromRows, writeIdiomScripts } from "@/services/batch-sources";
 import { preflightImportedBatch } from "@/services/import-preflight";
 import {
   approveAndStart,
@@ -156,7 +156,7 @@ export async function analyseBatch(formData: FormData): Promise<PlanActionResult
       message:
         `Đã dự toán ${plan.videos.length} video: ${plan.runnableCount} chạy được, ` +
         `${plan.blockedCount} bị chặn. Tổng dự toán $${plan.estimatedTotal.toFixed(4)}. ` +
-        `CHƯA chi đồng nào — cần bấm DUYỆT & CHẠY BATCH.`,
+        `CHƯA chi đồng nào — đây là ước tính theo kịch bản mẫu; bước tiếp: VIẾT KỊCH BẢN THẬT.`,
       details: plan.warnings,
     };
   } catch (err) {
@@ -261,6 +261,33 @@ export async function approveBatch(
     revalidatePath(`/batches/${batchId}`);
     revalidatePath("/batches");
     return { ok: true, message: result.message };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/**
+ * Step B (QĐ-139) - write the REAL scripts, Text AI only. Media is approved
+ * afterwards on the batch page, priced from these scripts by the preflight.
+ */
+export async function writeBatchScripts(batchId: string): Promise<ActionResult> {
+  try {
+    const r = await writeIdiomScripts(batchId);
+    // The sample estimate is replaced by the real scripts' one (the preflight
+    // stores it on the batch, the draft approval and every video).
+    if (r.failed.length === 0) await preflightImportedBatch(batchId);
+    revalidatePath(`/batches/${batchId}`);
+    revalidatePath("/batches");
+    const failed = r.failed.map((f) => `${f.phrase}: ${f.reason}`);
+    return {
+      ok: r.failed.length === 0,
+      message:
+        `Đã viết ${r.written} kịch bản thật` +
+        (r.kept > 0 ? `, giữ ${r.kept} kịch bản đã có` : "") +
+        (failed.length > 0 ? `, ${failed.length} lỗi` : "") +
+        `. Chưa mua ảnh / clip / giọng nào — hãy PREFLIGHT rồi DUYỆT & CHẠY trên trang lô.`,
+      details: failed,
+    };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

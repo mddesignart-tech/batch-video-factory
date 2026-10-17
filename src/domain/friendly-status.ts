@@ -125,4 +125,4 @@ export function batchWorkflowStep(input: {
  * Not the import flow's "Lô nhập chưa có video nào": nothing was imported.
  */
 export const NO_VIDEOS_YET =
-  "Lô này chưa được duyệt / chưa tạo video nào. Video sẽ hiện ở đây sau khi bấm DUYỆT & CHẠY BATCH.";
+  "Lô này chưa được duyệt / chưa tạo video nào. Video sẽ hiện ở đây sau khi bấm VIẾT KỊCH BẢN THẬT.";

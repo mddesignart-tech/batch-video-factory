@@ -44,7 +44,7 @@ describe("evaluateSpendLimits — một request, bốn tầng", () => {
     expect(v.reasonCode).toBe("SCENE_LIMIT_EXCEEDED");
     expect(v.overBy).toBeCloseTo(0.1, 6);
     expect(v.limit).toBe(0.3);
-    expect(v.message).toContain("vượt giới hạn cảnh $0.10");
+    expect(v.message).toContain("vượt giới hạn cảnh — ");
     expect(v.message).toContain("dự toán $0.40");
     expect(v.message).toContain("giới hạn $0.30");
   });
@@ -53,7 +53,7 @@ describe("evaluateSpendLimits — một request, bốn tầng", () => {
     const v = evaluateSpendLimits({ label: "Video 2", estimatedCost: 0.7, global: { cap: 5, used: 0 }, video: { limit: 0.6, used: 0 } });
     expect(v.reasonCode).toBe("VIDEO_LIMIT_EXCEEDED");
     expect(v.overBy).toBeCloseTo(0.1, 6);
-    expect(v.message).toBe("Video 2 vượt giới hạn video $0.10 — dự toán $0.70, giới hạn $0.60.");
+    expect(v.message).toBe("Video 2 vượt giới hạn video — dự toán $0.70, giới hạn $0.60, thiếu $0.10.");
   });
 
   it("F. global còn $0.30, clip $0.40 -> GLOBAL_LIMIT_EXCEEDED", () => {
@@ -114,7 +114,7 @@ describe("planBatchSpend — ai được chạy, ai bị chặn, vì sao", () =>
     });
     expect(p.runnable.map((v) => v.id)).toEqual(["A", "C"]);
     expect(p.blocked[0]!.verdict.reasonCode).toBe("VIDEO_LIMIT_EXCEEDED");
-    expect(p.blocked[0]!.verdict.message).toContain("Video B vượt giới hạn video $0.11");
+    expect(p.blocked[0]!.verdict.message).toContain("thiếu $0.11");
     expect(p.authorizationAmount).toBeCloseTo(0.64, 6);
     expect(p.requestedTotal).toBeCloseTo(1.45, 6);
   });

@@ -28,8 +28,14 @@ function CostSummaryBlock({ summary, mockMode }: { summary: ApprovalCostSummary;
         <span>Giọng: {fine(summary.voice)}</span>
         <span>Video AI: {fine(summary.video)}</span>
         <span>Reuse: $0{summary.reuseSaved > 0 ? ` (tiết kiệm ${fine(summary.reuseSaved)})` : ""}</span>
-        {summary.other > 0 ? <span>Khác (kịch bản…): {fine(summary.other)}</span> : null}
+        {summary.other >= 0.001 ? <span>Khác (kịch bản…): {fine(summary.other)}</span> : null}
       </div>
+      {summary.reserve > 0 ? (
+        <p className="text-xs text-ink-500">
+          Dự toán từng video ở bảng dưới cộng thêm dự phòng thử lại / QA {fine(summary.reserve)} (tổng{" "}
+          {fine(summary.total + summary.reserve)}). Lô không tự thử lại, nên số được duyệt là {fine(summary.total)}.
+        </p>
+      ) : null}
       <div className="space-y-0.5 border-t border-ink-800 pt-2 text-xs">
         {single ? (
           <p className={single.enough ? "text-ink-300" : "text-danger-500"}>

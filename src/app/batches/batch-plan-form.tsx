@@ -19,7 +19,7 @@ import {
   Th,
 } from "@/components/ui";
 import { ActionFeedback, type ActionResult } from "@/components/action-ui";
-import { analyseBatch, approveBatch } from "@/app/actions/batches";
+import { analyseBatch, writeBatchScripts } from "@/app/actions/batches";
 import type { BatchPlan } from "@/services/batch-planner";
 import { formatUSD } from "@/lib/utils";
 import { CreativeStylePicker } from "@/components/creative-style-picker";
@@ -117,7 +117,6 @@ export function BatchPlanForm({
   const [result, setResult] = useState<ActionResult | null>(null);
   const [plan, setPlan] = useState<BatchPlan | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
-  const [ceiling, setCeiling] = useState<number>(0);
 
   const runPlan = async (formData: FormData) => {
     setPlanning(true);
@@ -131,18 +130,19 @@ export function BatchPlanForm({
       if (res.ok && res.plan && res.batchId) {
         setPlan(res.plan);
         setBatchId(res.batchId);
-        setCeiling(res.plan.suggestedAuthorizedMaxSpend);
       }
     } finally {
       setPlanning(false);
     }
   };
 
-  const runApprove = async () => {
+  // QĐ-139: the real scripts come first; money is approved on the batch page,
+  // priced from them. The sample-script figures above are only a rough guide.
+  const runWriteScripts = async () => {
     if (!batchId) return;
     setApproving(true);
     try {
-      const res = await approveBatch(batchId, ceiling);
+      const res = await writeBatchScripts(batchId);
       setResult(res);
       if (res.ok) router.push(`/batches/${batchId}`);
     } finally {
@@ -434,7 +434,7 @@ export function BatchPlanForm({
 
           <Card>
             <CardHeader>
-              <CardTitle>2. Duyệt chi (đây là bước tiêu tiền)</CardTitle>
+              <CardTitle>2. Viết kịch bản thật (chỉ Text AI — chưa mua ảnh / clip / giọng)</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {/*
@@ -450,7 +450,7 @@ export function BatchPlanForm({
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-brand-500/40 bg-brand-500/5 px-4 py-3">
                     <p className="text-[11px] font-medium tracking-wide text-brand-400 uppercase">
-                      Dự toán CHẠY THẬT — dùng số này để duyệt
+                      Ước tính sơ bộ CHẠY THẬT — theo kịch bản mẫu, KHÔNG dùng để duyệt
                     </p>
                     <p className="mt-1 text-2xl font-semibold tabular-nums text-brand-400">
                       {formatUSD(plan.production.estimatedTotal, 4)}
@@ -524,46 +524,8 @@ export function BatchPlanForm({
                 />
               </div>
 
-              <div className="rounded-lg border border-ink-800 bg-ink-850 p-4">
-                <div className="mb-3 grid gap-2 text-sm sm:grid-cols-2">
-                  <div>
-                    <p className="text-[11px] text-ink-500">Estimated</p>
-                    <p className="font-semibold tabular-nums text-ink-100">
-                      {formatUSD(plan.recommendation.estimated, 4)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-ink-500">
-                      Recommended maximum (+
-                      {(plan.recommendation.safetyMarginPct * 100).toFixed(0)}% dự phòng)
-                    </p>
-                    <p className="font-semibold tabular-nums text-brand-400">
-                      {formatUSD(plan.recommendation.recommended, 4)}
-                      {plan.recommendation.clampedByGlobalCap ? (
-                        <span className="ml-2 text-[11px] font-normal text-warn-500">
-                          (đã hạ theo hạn mức tổng)
-                        </span>
-                      ) : null}
-                    </p>
-                  </div>
-                </div>
-                <Field
-                  label="MAXIMUM AUTHORIZED SPEND cho cả lô (USD)"
-                  hint="Số này do bạn nhập, không phải hệ thống tự duyệt. Lô tuyệt đối không chi vượt. Mỗi request đều được kiểm tra trước khi gửi."
-                >
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.1"
-                    value={ceiling}
-                    onChange={(e) => setCeiling(Number(e.currentTarget.value) || 0)}
-                    className="max-w-xs"
-                  />
-                </Field>
-              </div>
-
               {plan.warnings.length > 0 ? (
-                <Alert tone="warn" title="Cần đọc trước khi duyệt">
+                <Alert tone="warn" title="Cần đọc trước khi viết kịch bản">
                   <ul className="list-inside list-disc space-y-0.5 text-xs">
                     {plan.warnings.map((w, i) => (
                       <li key={i}>{w}</li>
@@ -572,30 +534,28 @@ export function BatchPlanForm({
                 </Alert>
               ) : null}
 
-              {ceiling > plan.globalCap.remaining ? (
-                <Alert tone="danger" title="Vượt hạn mức toàn ứng dụng">
-                  Hạn mức tổng chỉ còn {formatUSD(plan.globalCap.remaining, 4)}.
-                  Không duyệt được số lớn hơn.
-                </Alert>
-              ) : null}
+              <Alert tone="info" title="Chi phí chỉ được duyệt theo kịch bản thật">
+                Các con số ở trên tính theo kịch bản MẪU. Bước này chỉ viết kịch bản thật cho{" "}
+                {plan.runnableCount} video (Text AI, ước tính{" "}
+                {formatUSD(
+                  (plan.production ?? plan.runtime).videos
+                    .filter((v) => v.status === "OK")
+                    .reduce((n, v) => n + v.breakdown.text, 0),
+                  4,
+                )}
+                ) — không mua ảnh, clip hay giọng. Sau đó trang lô chạy PREFLIGHT trên từng cảnh thật
+                (Local / Ảnh AI / Video AI / Giọng và model cụ thể), bạn xem một con số dự toán và tự nhập
+                trần chi rồi mới DUYỆT &amp; CHẠY.
+              </Alert>
 
               <Button
                 variant="primary"
-                disabled={
-                  approving ||
-                  ceiling <= 0 ||
-                  ceiling > plan.globalCap.remaining ||
-                  plan.runnableCount === 0
-                }
-                onClick={() => void runApprove()}
+                disabled={approving || plan.runnableCount === 0}
+                onClick={() => void runWriteScripts()}
               >
                 {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                DUYỆT &amp; CHẠY BATCH
+                VIẾT KỊCH BẢN THẬT
               </Button>
-              <p className="text-xs text-ink-500">
-                Sau khi duyệt, lô chạy tự động: kịch bản → ảnh → video → giọng →
-                phụ đề → trộn → render → MP4. Hệ thống sẽ KHÔNG hỏi lại từng cảnh.
-              </p>
             </CardContent>
           </Card>
         </>

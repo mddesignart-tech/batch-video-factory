@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-17 — **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
+**Cập nhật:** 2026-10-17 — **QĐ-139 DONE** (lô thành ngữ duyệt chi theo kịch bản thật — sửa P1 UAT; full suite 123/123 file · 1848/1848 PASS). **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
 121/121 file · 1814/1814 PASS). **QĐ-136 DONE** (Creative Style cho lô thành ngữ, `5060da4` + `84be22f`, đã push; full suite
 120/120 file · 1802/1802 PASS). Cùng ngày: full suite 41,4 phút (xong P1 tốc độ test). 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
 full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa làm, chờ duyệt từng mục.
@@ -12,6 +12,14 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
 - Tăng tốc full test suite — DONE (`dced288`).
 - QĐ-136 Creative Style cho lô thành ngữ — DONE (`5060da4` + sửa sau smoke UI `84be22f`): phong cách cả lô, smoke UI
   thật lô 16 thành ngữ PASS, full suite 120/120 file · 1802/1802 PASS. Chi tiết: `.ai/STATE.md`, `.ai/DECISIONS.md`.
+- QĐ-139 Duyệt chi lô thành ngữ theo kịch bản thật — DONE (P1 của UAT 2026-10-17).
+  - Còn từ UAT, chưa làm:
+    - P2: "Xuyên suốt video" gắn lại reference người dùng đã bỏ tay.
+    - P2: bảng "tiếp tục riêng" không tự làm mới.
+    - P2/P3: panel phong cách lô hiện ở lô dự án đơn.
+    - P3: giá cảnh cũ sau khi gán clip.
+    - P3: không cảnh báo logo trong suốt 100%.
+    - P3: START_TOOL.bat không build lại.
 - QĐ-138 URL Content Extraction — DONE: nguồn URL (đọc → xem trước → chấp nhận → snapshot), chống SSRF, trích bài viết /
   sản phẩm (JSON-LD), đọc lại chỉ đổi nguồn. Chi tiết: `.ai/STATE.md`, `.ai/DECISIONS.md`.
 - QĐ-137 An toàn vòng đời lô + dọn UX nhỏ — DONE: DỪNG BATCH dừng thật (kiểm tra trước mỗi bước, không FAILED, không

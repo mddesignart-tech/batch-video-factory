@@ -5,6 +5,7 @@ import {
   reanalyseBatch,
   retryBatchVideo,
   stopBatch,
+  writeBatchScripts,
 } from "@/app/actions/batches";
 import { openOutputFolder } from "@/app/actions/output";
 import { resumeBatchRun } from "@/app/actions/batch-run";
@@ -71,6 +72,23 @@ export function BatchControls({
         </ActionButtonWithFeedback>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * VIẾT KỊCH BẢN THẬT (QĐ-139): Text AI only. The money approval comes after,
+ * priced from these scripts.
+ */
+export function WriteScriptsButton({ batchId }: { batchId: string }) {
+  return (
+    <ActionButtonWithFeedback
+      action={() => writeBatchScripts(batchId)}
+      variant="primary"
+      size="sm"
+      confirm="Viết kịch bản thật cho các video của lô? Chỉ gọi Text AI (rẻ) — không mua ảnh, clip hay giọng. Duyệt chi media là bước sau."
+    >
+      VIẾT KỊCH BẢN THẬT
+    </ActionButtonWithFeedback>
   );
 }
 

@@ -4177,3 +4177,48 @@ chỉnh sửa / chấp nhận → snapshot → bộ viết kịch bản hiện c
   không viết lại kịch bản, không tạo media.
 - **Smoke tìm ra và đã sửa:** dấu markdown của snapshot (`#`, `##`, `-`) lọt vào tiêu đề dự án và lời thoại mock.
   Tiêu đề dự án nay bỏ dấu; bộ viết mock tách mỗi dòng heading / danh sách thành câu riêng.
+
+## QĐ-139 — Lô thành ngữ duyệt chi theo kịch bản THẬT (2026-10-17, local + mock, $0)
+
+**Nguồn:** UAT 2026-10-17, lỗi P1. Lô Professional được duyệt theo kịch bản MẪU: 1 cảnh AI, chỉ `mock-video-std`.
+Kịch bản thật lại có 3 cảnh AI, và cảnh mở đầu được router chọn `mock-video-pro`. Hậu quả:
+- Cả 3 video dừng ở cảnh 1 với `APPROVED_MODEL_MISSING`, lô FAILED.
+- Dự toán thấp khoảng 6 lần ($0,28 so với $1,63 mỗi video).
+- TIẾP TỤC riêng từng video thì vướng trần lô.
+
+Người dùng chọn hướng 2: có kịch bản thật trước, rồi mới preflight và duyệt chi media.
+
+**Luồng mới (lô thành ngữ):**
+1. PHÂN TÍCH & DỰ TOÁN: miễn phí, ghi rõ là ước tính sơ bộ theo kịch bản mẫu, KHÔNG dùng để duyệt.
+2. VIẾT KỊCH BẢN THẬT (`writeIdiomScripts`):
+   - Chỉ chạy khi lô đang PLANNED và quyền chi còn DRAFT.
+   - Chỉ gọi Text AI, qua cùng cổng như TẠO KỊCH BẢN của dự án đơn: model đã xác nhận giá, hạn mức toàn cục, ví.
+   - Không mua ảnh, clip hay giọng.
+   - Chạy lại được: dự án đã có kịch bản thì giữ nguyên.
+   - Router chọn cho từng cảnh được ghi vào cảnh (`freezeScenePlan`), và preflight lưu dự toán thật vào lô / video.
+3. Trang lô → PREFLIGHT: dùng `rowsApprovalInput`, cùng đường với storyboard nhập. Dự toán từng cảnh thật: Local /
+   Ảnh AI / Video AI / Giọng, đúng model.
+4. DUYỆT & CHẠY: `frozenFromPreflight` đóng băng MỌI cảnh mua clip, đúng route đã định giá. Danh sách
+   `runnableProjectIds` nay được áp cả cho lô thành ngữ.
+
+**Chặn:**
+- `preflightForApproval` còn video chưa có kịch bản thật thì thêm check chặn `SCRIPTS_REQUIRED`, nên `ready = false`.
+  Vì vậy `approveAndRun` / `approveBatch` / `extendApproval` đều từ chối.
+- Lô cũ đã APPROVED trước QĐ-139 vẫn chạy được theo đường `materializeIdiomVideos` như cũ.
+
+**Đổi model hoặc chi phí so với bản đã duyệt:**
+- Cổng QĐ-111 vẫn dừng trước POST (không tự nâng model).
+- Video nay về `needs_review` (CẦN DUYỆT LẠI) thay vì `failed` (`needsReapproval`), nên lô không FAILED vô lý.
+
+**Một con số dự toán:**
+- Tóm tắt duyệt chi, các check và nút DUYỆT dùng cùng số tiền được duyệt (chi phí tăng thêm theo cảnh).
+- Phần dự phòng thử lại / QA trong dự toán từng video được ghi rõ là không nằm trong số duyệt, vì lô không tự thử lại.
+- Câu báo vượt trần đổi thành "… — dự toán $X, giới hạn $Y, thiếu $Z". Câu cũ "vượt giới hạn lô $0.70 … giới hạn $0.93"
+  dễ đọc thành hai giới hạn khác nhau.
+
+**Test:** `tests/batch-real-script-approval.test.ts` (5 test), gồm:
+- Professional 3 video chạy xong, mọi clip đúng route đã đóng băng.
+- Viết kịch bản lần hai không gọi Text AI.
+- Không viết kịch bản khi quyền chi đã duyệt.
+- TikTok hồi quy.
+- Model chưa duyệt → `needs_review`, 0 POST video.

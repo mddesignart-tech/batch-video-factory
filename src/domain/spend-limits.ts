@@ -99,9 +99,11 @@ function verdict(
     overBy,
     message:
       overBy > EPS
-        ? `${label} vượt giới hạn ${what} ${usd(overBy)} — dự toán ${usd(cost)}` +
+        ? // "thiếu" names the shortfall: "vượt giới hạn lô $0.70 … giới hạn $0.93"
+          // read as two different limits (UAT 2026-10-17).
+          `${label} vượt giới hạn ${what} — dự toán ${usd(cost)}` +
           (used > EPS ? ` (đã dùng ${usd(used)})` : "") +
-          `, giới hạn ${usd(limit)}.`
+          `, giới hạn ${usd(limit)}, thiếu ${usd(overBy)}.`
         : `${label}: ${usd(cost)} trong giới hạn ${what} ${usd(limit)} (còn ${usd(remainingAfter)}).`,
   };
 }

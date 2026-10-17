@@ -126,6 +126,11 @@ export interface ApprovalCostSummary {
   total: number;
   /** What reuse keeps in the wallet (shown as "Reuse: $0"). */
   reuseSaved: number;
+  /**
+   * The videos' full estimates minus `total`: the retry / QA reserve each video
+   * estimate carries. The run never retries on its own, so it is not approved.
+   */
+  reserve: number;
   videos: { projectId: string; title: string; estimate: number; limit: number | null; remaining: number | null; enough: boolean }[];
   globalRemaining: number;
   /** Every video fits its budget and the total fits the global budget. */
@@ -548,14 +553,27 @@ export async function preflightForApproval(
   batchId: string,
   opts: { maxBatch?: number; maxPerVideo?: number; resume?: boolean } & ApprovalSelection = {},
 ): Promise<ApprovalPreflight> {
+  const pending = await pendingIdiomVideos(batchId);
   const input =
-    (await pendingIdiomVideos(batchId)) > 0
+    pending > 0
       ? await idiomApprovalInput(batchId)
       : await rowsApprovalInput(batchId, Boolean(opts.resume), {
           onlyProjectIds: opts.onlyProjectIds,
           zeroCostOnly: opts.zeroCostOnly,
         });
   const check = await gateChecks(batchId, input, opts);
+  if (pending > 0) {
+    // QĐ-139: a SAMPLE script is never what money is approved against. Its
+    // figures are shown as a rough guide only; the yes waits for the real
+    // scripts (VIẾT KỊCH BẢN THẬT), priced scene by scene through the router.
+    check.checks.unshift({
+      label: "Đã có kịch bản thật cho mọi video",
+      ok: false,
+      detail: `SCRIPTS_REQUIRED: còn ${pending} video chưa có kịch bản thật — bấm VIẾT KỊCH BẢN THẬT; dự toán hiện tại chỉ theo kịch bản mẫu, KHÔNG dùng để duyệt chi`,
+      blocking: true,
+    });
+    check.ready = false;
+  }
   return { ...check, costSummary: await approvalCostSummary(check) };
 }
 
@@ -570,18 +588,27 @@ async function approvalCostSummary(check: ApprovalPreflight): Promise<ApprovalCo
   const image = sum((v) => v.breakdown.image);
   const voice = sum((v) => v.breakdown.voice);
   const video = sum((v) => v.breakdown.video);
-  const total = check.preflight ? round(sum((v) => v.estimatedCost)) : round(check.estimatedTotal);
+  // ONE figure (QĐ-139): with a spend plan, the summary shows exactly what the
+  // checks judge and the button approves - the per-scene incremental cost - not
+  // the video total, which also carries a retry / QA reserve the run never buys.
+  const planned = new Map((check.spendPlan?.runnable ?? []).map((v) => [v.id, v.incrementalCost]));
+  const total = check.spendPlan
+    ? round(check.estimatedTotal)
+    : check.preflight
+      ? round(sum((v) => v.estimatedCost))
+      : round(check.estimatedTotal);
   const rows: ApprovalCostSummary["videos"] = [];
   for (const v of videos) {
     const b = await videoBudget(v.projectId);
     const remaining = b.remaining;
+    const estimate = planned.get(v.projectId) ?? v.estimatedCost;
     rows.push({
       projectId: v.projectId,
       title: v.title,
-      estimate: round(v.estimatedCost),
+      estimate: round(estimate),
       limit: b.limit,
       remaining,
-      enough: remaining !== null && v.estimatedCost <= remaining + 1e-9,
+      enough: remaining !== null && estimate <= remaining + 1e-9,
     });
   }
   const globalOk = check.mockMode || total <= check.globalRemaining + 1e-9;
@@ -592,6 +619,7 @@ async function approvalCostSummary(check: ApprovalPreflight): Promise<ApprovalCo
     other: round(Math.max(0, total - image - voice - video)),
     total,
     reuseSaved: sum((v) => v.savings.total),
+    reserve: check.spendPlan ? round(Math.max(0, sum((v) => v.estimatedCost) - total)) : 0,
     videos: rows,
     globalRemaining: check.globalRemaining,
     enough: globalOk && rows.every((r) => r.enough),
@@ -628,6 +656,11 @@ async function frozenFromPreflight(check: ApprovalPreflight): Promise<FrozenVide
     }
   }
   return out;
+}
+
+/** The run wanted a model / price the approval did not cover: re-approve, not a failure. */
+export function needsReapproval(message: string): boolean {
+  return /APPROVED_MODEL_(MISSING|CHANGED)/.test(message);
 }
 
 export class ExecutorError extends Error {
@@ -1123,6 +1156,21 @@ export async function runBatch(
       if (opts.onlyProjectIds?.includes(p.id) && (await checkVideoAgainstCap(p.id, ceilings.perVideo))) continue;
       blocked.set(p.id, (p.errorMessage ?? "chưa có kịch bản").replace(/^BLOCKED: /, ""));
     }
+    // Scripts written before the approval (QĐ-139): the approval named the
+    // videos it covers, exactly as for imported rows.
+    if (approvedIds) {
+      const outside = await prisma.project.findMany({
+        where: { batchId, id: { notIn: approvedIds }, status: { not: "completed" } },
+        select: { id: true },
+      });
+      for (const p of outside) {
+        if (blocked.has(p.id)) continue;
+        blocked.set(
+          p.id,
+          "BATCH_LIMIT_EXCEEDED: video này không nằm trong phần được duyệt của lô (không đủ trần lô / hạn mức toàn cục lúc duyệt). Duyệt lại để chạy.",
+        );
+      }
+    }
   }
   const all = await prisma.project.findMany({ where: { batchId }, orderBy: { createdAt: "asc" } });
 
@@ -1319,7 +1367,14 @@ export async function runBatch(
       await prisma.project.update({
         where: { id: project.id },
         data: {
-          ...(stopped ? { status: isNeedsSelection(stopped) ? "needs_review" : "failed", errorMessage: stopped.slice(0, 2000) } : {}),
+          // A model the approval did not name (QĐ-139) waits for a new yes -
+          // it was stopped before its POST, so nothing is broken.
+          ...(stopped
+            ? {
+                status: isNeedsSelection(stopped) || needsReapproval(stopped) ? "needs_review" : "failed",
+                errorMessage: stopped.slice(0, 2000),
+              }
+            : {}),
           runFinishedAt: new Date(),
           currentStep: null,
         },

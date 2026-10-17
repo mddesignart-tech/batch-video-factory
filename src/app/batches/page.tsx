@@ -62,11 +62,12 @@ export default async function BatchesPage() {
         description="Một nút tạo nhiều video hoàn chỉnh: kịch bản → ảnh → video → giọng → phụ đề → render → MP4."
       />
 
-      <Alert tone="info" title="Quy trình hai bước, tiền chỉ ra ở bước hai">
-        Bấm <strong>PHÂN TÍCH &amp; DỰ TOÁN</strong> để xem từng video tốn bao
-        nhiêu — bước này miễn phí và làm lại bao nhiêu lần cũng được. Chỉ khi bấm{" "}
-        <strong>DUYỆT &amp; CHẠY BATCH</strong> và nhập hạn mức thì lô mới được
-        phép gọi API trả phí. Hạn mức toàn ứng dụng hiện còn{" "}
+      <Alert tone="info" title="Quy trình ba bước, tiền media chỉ ra ở bước ba">
+        Bấm <strong>PHÂN TÍCH &amp; DỰ TOÁN</strong> để xem ước tính sơ bộ — miễn
+        phí, làm lại bao nhiêu lần cũng được. Bấm <strong>VIẾT KỊCH BẢN THẬT</strong>{" "}
+        (chỉ Text AI). Trên trang lô, <strong>PREFLIGHT</strong> dự toán từng cảnh
+        thật; chỉ khi bấm <strong>DUYỆT &amp; CHẠY</strong> và nhập hạn mức thì lô
+        mới được mua ảnh / clip / giọng. Hạn mức toàn ứng dụng hiện còn{" "}
         <strong>{formatUSD(spend.remaining, 4)}</strong> trên{" "}
         {formatUSD(spend.cap)}.
       </Alert>

@@ -1,9 +1,26 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.4.0 — QĐ-139 Duyệt chi lô theo kịch bản thật DONE (2026-10-17, local + mock, $0)
+
+```
+FULL SUITE  123/123 file · 1848/1848 test PASS · 0 skip   (một process vitest, 3140 s; AI_MOCK_MODE=true, key giả)
+RELATED     tests/batch-real-script-approval.test.ts 5/5 + 9 file liên quan 125/125
+UAT UI      sandbox (DB/data riêng, mock): Professional #004 3/3 COMPLETED, TikTok #005 3/3 COMPLETED (DỪNG → TIẾP TỤC)
+lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0
+```
+
+- Lô thành ngữ có quy trình 3 bước:
+  1. PHÂN TÍCH & DỰ TOÁN: ước tính sơ bộ.
+  2. VIẾT KỊCH BẢN THẬT: chỉ Text AI.
+  3. Trên trang lô: PREFLIGHT từng cảnh thật → DUYỆT & CHẠY.
+- Chưa có kịch bản thật thì không duyệt được (`SCRIPTS_REQUIRED`).
+- Mọi clip được đóng băng đúng route. Nếu lúc chạy đòi model chưa duyệt: dừng trước POST, video CẦN DUYỆT LẠI, không FAILED.
+- Chi tiết: `.ai/DECISIONS.md` QĐ-139.
 
 ## Sau v1.4.0 — QĐ-138 URL Content Extraction DONE (2026-10-17, local + mock, $0)
 
