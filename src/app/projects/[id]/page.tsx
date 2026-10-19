@@ -21,6 +21,7 @@ import {
 } from "@/domain/enums";
 import type { ScriptScore } from "@/domain/script";
 import { previewProjectCost } from "@/services/project-service";
+import { sceneActualCosts } from "@/services/cost-tracker";
 import { Storyboard } from "./storyboard";
 import type { ClipView, SceneClipView } from "./scene-clip-panel";
 import { projectClips } from "@/services/uploaded-clip";
@@ -181,6 +182,8 @@ export default async function ProjectDetailPage({
     : {};
   // Tài sản tham chiếu (QĐ-124): read only here, $0.
   const [references, refProblems] = await Promise.all([listProjectReferences(id), referenceProblems(id)]);
+  // What each scene really cost: the ledger, not a cached column.
+  const paidByScene = await sceneActualCosts(id);
   const musicAsset = project.backgroundMusicAssetId
     ? await prisma.asset.findUnique({ where: { id: project.backgroundMusicAssetId } })
     : null;
@@ -442,7 +445,7 @@ export default async function ProjectDetailPage({
                 imageModel: scene.imageModel,
                 voiceModel: scene.voiceModel,
                 estimatedCost: shownSceneEstimate(scene, liveEstimate.get(scene.sceneNumber)),
-                actualCost: scene.actualCost,
+                actualCost: paidByScene.get(scene.id) ?? 0,
                 imagePath: scene.imagePath,
                 imageSource: scene.imageSource,
                 motionMode: scene.motionMode,

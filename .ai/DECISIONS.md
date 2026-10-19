@@ -4261,3 +4261,45 @@ Vẫn lưu được.
   `prisma generate` + `npm run build`;
 - `prisma migrate status` báo thiếu migration → cảnh báo + hướng dẫn `npm run backup` → `npx prisma migrate deploy`,
   hỏi có khởi động tiếp không. KHÔNG tự áp migration.
+
+## QĐ-141 — Đủ N mục theo yêu cầu + chi phí cảnh/dự án khớp sổ chi (2026-10-19, mock, $0)
+
+**Nguồn:** REAL API SMOKE TEST đầu tiên của v1.5.0 (dự án `4c25708b`, lô `21b43e8c`, $0,125, PASS). Hai tồn đọng.
+Không thêm feature mới.
+
+**1. "3 mẹo" chỉ có Mẹo 1:**
+- Nguyên nhân: `planScenes` chia số cảnh theo THỜI LƯỢNG (12 s → 3 cảnh = hook + 1 mẹo + tóm tắt). Con số "3" trong
+  yêu cầu không được đọc; prompt nói với writer "3 cảnh, 1 cảnh mẹo", writer làm đúng như vậy. Không có bước kiểm tra
+  nào sau Text stage hay trước DUYỆT KỊCH BẢN.
+- Sửa (generic, `src/domain/requested-items.ts`): `requestedItemsOf(idea)` đọc "N + danh từ liệt kê" (mẹo, bước, lợi
+  ích, sai lầm, cách, lý do… / tips, steps, ways, reasons…), số dạng chữ VI/EN ("ba mẹo", "five steps") và "Top N".
+  Đơn vị đo (giây, năm, tuổi…) không phải danh sách; số dạng chữ phải đứng liền danh từ ("ba mẹ có cách" ≠ 3 cách).
+  Chỉ đọc ý tưởng người dùng nhập (`brief.idea`), không đọc nội dung dán.
+- `planScenes({ itemCount })`: đúng N bản của beat lặp lại của format (tip / step / item / explain…), mỗi mục một cảnh;
+  quá ngắn thì bỏ beat phụ (recap) trước, không bỏ mục. Không có N → như cũ.
+- Prompt: thêm khối `REQUESTED COUNT` (mỗi mục một cảnh, có nội dung thật, recap không thay mục).
+- Text stage: `checkItemCoverage` (cảnh mục có ≥ 4 từ, không trùng lời). Thiếu → viết lại MỘT lần với ghi chú mục
+  thiếu (1 Text call nữa, có ledger). Vẫn thiếu → `Project.errorMessage` nêu rõ mục thiếu, DUYỆT KỊCH BẢN báo
+  `ITEMS_MISSING`. Kiểm lại trên Storyboard hiện tại (cảnh thêm tay tính là cảnh mục, cảnh bỏ qua không tính), nên
+  sửa cảnh là cách sửa hợp lệ. Không có Image / Video / Voice nào bị gọi lại.
+
+**2. `Scene.actualCost = 0`, `Project.estimatedCost = 0` sau khi chạy:**
+- Nguồn sự thật: `CostEntry` (estimated=false) — chỉ `recordCost` ghi. `Project.actualCost` / `Batch.actualCost`
+  là cache tính lại từ sổ (đã đúng). Dự toán: `Scene.estimatedCost` (đóng băng ở `freezeScenePlan`),
+  `Project.estimatedCost` / `Batch.estimatedCost` (preflight), số đã duyệt: `BatchAuthorization.estimatedCost` +
+  `authorizedMaxSpend`. Tiền giữ chỗ / thất bại-có-thể-bị-tính: `CostReservation` (trần lô), không vào `CostEntry`.
+- Nguyên nhân A: không chỗ nào ghi `Scene.actualCost`; Storyboard đọc cột đó → luôn $0.
+- Nguyên nhân B: bảng "tiếp tục riêng" (`buildBatchResumePlans`, poll mỗi 3 s từ QĐ-140) chạy `preflightImportedBatch`
+  có persist; sau khi chạy xong, preflight chỉ còn tính phần CÒN PHẢI MUA ($0) và ghi đè `Project.estimatedCost` +
+  `Batch.estimatedCost`.
+- Sửa: `recordCost` đồng bộ `Scene.actualCost` (`syncSceneActualCost`, tính lại từ sổ, không cộng dồn); trang dự án
+  đọc chi phí cảnh thẳng từ sổ (`sceneActualCosts`, đúng cả với dữ liệu cũ). `persistPreflight` chỉ ghi dự toán khi
+  quyền chi còn DRAFT (chưa duyệt); sau khi duyệt giữ nguyên số đã duyệt.
+- An toàn: tính lại từ sổ nên Resume / Render lại / sync lặp không cộng thêm; asset dùng lại không có dòng sổ media
+  ($0); giữ chỗ / huỷ / thất bại-có-thể-bị-tính nằm ở `CostReservation`, không bị đếm vào cảnh/dự án; lần thử lại có
+  tính phí ghi vào sổ thì được tính đúng một lần.
+- Dữ liệu cũ: `Scene.actualCost` của dự án smoke test vẫn 0 trong DB (không backfill); UI đọc từ sổ nên hiển thị đúng.
+  `Project.estimatedCost` = 0 của dự án đó cũng giữ nguyên (không bịa số).
+
+**Test:** `tests/qd141-items-and-cost.test.ts` 14/14 (mutation: bỏ itemCount → 4 fail; bỏ sync cảnh + guard preflight
+→ 4 fail).

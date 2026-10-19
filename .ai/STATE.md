@@ -1,9 +1,25 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-19 (**QĐ-141 DONE** — đủ N mục theo yêu cầu + chi phí cảnh/dự án khớp sổ chi, sau REAL API SMOKE TEST đầu tiên PASS $0,125; xem mục đầu). 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.5.0 — REAL API SMOKE TEST PASS + QĐ-141 DONE (2026-10-19)
+
+```
+REAL API SMOKE  dự án 4c25708b · lô 21b43e8c · 3 cảnh LOCAL_MOTION · Video AI = 0 · MP4 1080x1920 30fps 13,43 s
+                chi thật $0,125000 (text $0,001438 + 3 ảnh gpt-image-2:medium $0,12348 + 3 TTS $0,000082),
+                dự toán $0,1454; sổ $10,824435 → $10,949435 / hạn mức $15 (còn $4,050565). 0 khung trùng, phụ đề + giọng khớp.
+QĐ-141          FULL SUITE 125/125 file · 1875/1875 test PASS (3003 s, mock) · RELATED 18 file 260/260 PASS
+                lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0
+```
+
+- Script đủ N mục: "3 mẹo / 5 bước / Top 7 / 5 steps" → N cảnh mục (`requested-items`, `planScenes({ itemCount })`),
+  kiểm tra ở Text stage, viết lại 1 lần nếu thiếu, còn thiếu thì DUYỆT KỊCH BẢN chặn (`ITEMS_MISSING`) và nêu mục thiếu.
+- Chi phí: `Scene.actualCost` đồng bộ từ sổ chi (`CostEntry`); trang dự án đọc thẳng từ sổ. `Project/Batch.estimatedCost`
+  không còn bị preflight sau duyệt (bảng tiếp tục riêng) ghi đè thành $0.
+- Chi tiết: `.ai/DECISIONS.md` QĐ-141.
 
 ## Sau v1.4.0 — QĐ-140 Dọn tồn đọng UAT P2/P3 DONE (2026-10-19, local + mock, $0)
 

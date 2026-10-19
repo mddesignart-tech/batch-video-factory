@@ -45,7 +45,17 @@ export function planScenes(input: {
   sceneCount?: number;
   /** Creative pacing: × seconds per scene (1 = as before). */
   paceFactor?: number;
+  /**
+   * The request names a count of items ("3 mẹo", "5 bước", "Top 7"): exactly
+   * that many copies of the format's item beat, one item per scene, whatever
+   * the running time would suggest. See domain/requested-items.
+   */
+  itemCount?: number;
 }): PlannedBeat[] {
+  const itemRole = itemRoleOf(input.format);
+  if (input.itemCount && input.itemCount > 0 && itemRole) {
+    return timed(itemBeats(input.format.beats, itemRole, input.itemCount, input.durationSeconds), input.durationSeconds);
+  }
   const count = Math.max(1, Math.min(PLAN_MAX_SCENES, input.sceneCount ?? sceneCountFor(input.durationSeconds, input.audience, input.paceFactor ?? 1)));
   let beats: BeatSpec[] = [...input.format.beats];
 
@@ -81,6 +91,31 @@ export function planScenes(input: {
     beats.splice(at + 1, 0, pick);
   }
 
+  return timed(beats, input.durationSeconds);
+}
+
+/** The beat a format repeats for its items (tip, step, item…), or null. */
+export function itemRoleOf(format: TemplateFormat): string | null {
+  return format.beats.find((b) => b.repeatable)?.role ?? null;
+}
+
+/**
+ * N copies of the item beat in place of its one; the other beats kept. When
+ * even two seconds a scene would overrun the video, optional framing beats
+ * (a recap) go first - an item never does.
+ */
+function itemBeats(template: readonly BeatSpec[], itemRole: string, count: number, durationSeconds: number): BeatSpec[] {
+  const n = Math.min(count, PLAN_MAX_SCENES);
+  const beats = template.flatMap((b) => (b.role === itemRole ? Array.from({ length: n }, () => b) : [b]));
+  while (beats.length * PLAN_MIN_SCENE_SECONDS > durationSeconds) {
+    const optionalAt = lastIndexWhere(beats, (b) => b.optional === true && b.role !== itemRole);
+    if (optionalAt < 0) break;
+    beats.splice(optionalAt, 1);
+  }
+  return beats.slice(0, PLAN_MAX_SCENES);
+}
+
+function timed(beats: BeatSpec[], totalSeconds: number): PlannedBeat[] {
   // Durations by weight, clamped to what one scene can carry, in 0.5 s steps.
   const totalWeight = beats.reduce((sum, b) => sum + b.weight, 0) || 1;
   const seen = new Map<string, number>();
@@ -90,7 +125,7 @@ export function planScenes(input: {
   return beats.map((beat, i) => {
     const n = (seen.get(beat.role) ?? 0) + 1;
     seen.set(beat.role, n);
-    const raw = (beat.weight / totalWeight) * input.durationSeconds;
+    const raw = (beat.weight / totalWeight) * totalSeconds;
     const durationSeconds = Math.min(PLAN_MAX_SCENE_SECONDS, Math.max(PLAN_MIN_SCENE_SECONDS, Math.round(raw * 2) / 2));
     return {
       ...beat,

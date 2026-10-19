@@ -49,9 +49,39 @@ export async function recordCost(input: RecordCostInput): Promise<void> {
       note: input.note ?? "",
     },
   });
-  if (input.projectId && !input.estimated) {
-    await syncProjectActualCost(input.projectId);
+  if (!input.estimated) {
+    if (input.sceneId) await syncSceneActualCost(input.sceneId);
+    if (input.projectId) await syncProjectActualCost(input.projectId);
   }
+}
+
+/**
+ * `Scene.actualCost` is a cache of the ledger, exactly like the project's:
+ * recomputed from the rows, never incremented, so a resume or a render that
+ * buys nothing cannot move it and a second sync cannot double it. A scene the
+ * person has since deleted is simply skipped.
+ */
+export async function syncSceneActualCost(sceneId: string): Promise<number> {
+  const agg = await prisma.costEntry.aggregate({
+    where: { sceneId, estimated: false },
+    _sum: { amount: true },
+  });
+  const total = money(agg._sum.amount ?? 0);
+  await prisma.scene.updateMany({ where: { id: sceneId }, data: { actualCost: total } });
+  return total;
+}
+
+/**
+ * What each scene of a project really cost, read from the ledger itself - the
+ * source of truth. Scenes written before the cache existed read right too.
+ */
+export async function sceneActualCosts(projectId: string): Promise<Map<string, number>> {
+  const rows = await prisma.costEntry.groupBy({
+    by: ["sceneId"],
+    where: { projectId, estimated: false, sceneId: { not: null } },
+    _sum: { amount: true },
+  });
+  return new Map(rows.map((r) => [r.sceneId!, money(r._sum.amount ?? 0)]));
 }
 
 export async function syncProjectActualCost(projectId: string): Promise<number> {

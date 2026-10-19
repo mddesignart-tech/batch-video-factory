@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-19 — **V1.5.0 RELEASED** (tag `batch-video-factory-v1.5.0` + GitHub Release; QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS, UI smoke QĐ-140 PASS, $0). Backlog còn lại chờ duyệt từng mục; test API thật cần người dùng duyệt chi. 2026-10-19 — **QĐ-140 DONE** (dọn tồn đọng UAT P2/P3). 2026-10-17 — **QĐ-139 DONE** (lô thành ngữ duyệt chi theo kịch bản thật — sửa P1 UAT; full suite 123/123 file · 1848/1848 PASS). **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
+**Cập nhật:** 2026-10-19 — **REAL API SMOKE TEST PASS ($0,125) + QĐ-141 DONE** (đủ N mục theo yêu cầu, chi phí cảnh/dự án khớp sổ chi; full suite 125/125 file · 1875/1875 PASS, $0). Chưa phát hành bản mới; chờ yêu cầu. 2026-10-19 — **V1.5.0 RELEASED** (tag `batch-video-factory-v1.5.0` + GitHub Release; QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS, UI smoke QĐ-140 PASS, $0). Backlog còn lại chờ duyệt từng mục; test API thật cần người dùng duyệt chi. 2026-10-19 — **QĐ-140 DONE** (dọn tồn đọng UAT P2/P3). 2026-10-17 — **QĐ-139 DONE** (lô thành ngữ duyệt chi theo kịch bản thật — sửa P1 UAT; full suite 123/123 file · 1848/1848 PASS). **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
 121/121 file · 1814/1814 PASS). **QĐ-136 DONE** (Creative Style cho lô thành ngữ, `5060da4` + `84be22f`, đã push; full suite
 120/120 file · 1802/1802 PASS). Cùng ngày: full suite 41,4 phút (xong P1 tốc độ test). 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
 full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa làm, chờ duyệt từng mục.
@@ -8,6 +8,10 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
 ---
 
 ## ✅ XONG sau v1.4.0 (2026-10-17, $0)
+
+- REAL API SMOKE TEST v1.5.0 — PASS (2026-10-19): 1 video 3 cảnh Local Motion, chi thật $0,125, Video AI = 0.
+- QĐ-141 Đủ N mục + chi phí cảnh/dự án — DONE (2026-10-19): sửa 2 tồn đọng của smoke test. Full suite 125/125 file ·
+  1875/1875 PASS. Kế tiếp (chờ xác nhận): có thể chạy lại smoke thật để xác nhận "3 mẹo" đủ 3 với Groq.
 
 - Tăng tốc full test suite — DONE (`dced288`).
 - QĐ-136 Creative Style cho lô thành ngữ — DONE (`5060da4` + sửa sau smoke UI `84be22f`): phong cách cả lô, smoke UI

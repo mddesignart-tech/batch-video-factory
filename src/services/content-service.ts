@@ -28,7 +28,15 @@ import {
   storedCreativeJson,
   type StoredCreativeStyle,
 } from "@/domain/creative-style";
-import { planScenes } from "@/domain/scene-planner";
+import { itemRoleOf, planScenes } from "@/domain/scene-planner";
+import {
+  checkItemCoverage,
+  itemCountRule,
+  itemCoverageMessage,
+  requestedItemsOf,
+  type ItemCoverage,
+  type RequestedItems,
+} from "@/domain/requested-items";
 import { NARRATOR_NAME } from "@/domain/scene-characters";
 import type { ScriptDoc } from "@/domain/script";
 import { ensureProjectDirs, toAbsolute } from "@/lib/paths";
@@ -330,7 +338,17 @@ export async function generateContentProjectScript(projectId: string): Promise<S
   // emotional moment...), the pace and the writer's instructions all follow it.
   const style = content.creative;
   const styledFormat = { ...content.format, beats: applyCreativeStructure(content.format.beats, style, template.creative, template.factual) };
-  const beats = planScenes({ format: styledFormat, durationSeconds: project.targetDuration, audience: audience.id, paceFactor: paceFactor(style) });
+  // "3 mẹo", "5 bước", "Top 7": the request's own count decides how many item
+  // scenes there are, not the running time (real-API smoke test 2026-10-19).
+  const requested = requestedItemsOf(brief.idea);
+  const beats = planScenes({
+    format: styledFormat,
+    durationSeconds: project.targetDuration,
+    audience: audience.id,
+    paceFactor: paceFactor(style),
+    itemCount: requested?.count,
+  });
+  const itemRole = itemRoleOf(styledFormat);
   // The version that writes THIS script (a rewrite of an older project moves it forward).
   const templateVersion = template.promptVersion;
   const creativeBlock = creativeStylePrompt(style, { factual: template.factual, storyGags: template.creative.storyGags });
@@ -395,6 +413,10 @@ export async function generateContentProjectScript(projectId: string): Promise<S
   if (project.contentSourceType === "URL") {
     systemPrompt = `${systemPrompt}\n\n${urlSourceRule(storedUrlSourceOf(project), project.sourceUrl)}`;
   }
+  if (requested) {
+    const label = beats.find((b) => b.role === itemRole)?.label ?? null;
+    systemPrompt = `${systemPrompt}\n\n${itemCountRule(requested, label)}`;
+  }
 
   const request: ContentScriptRequest = {
     contentType: content.contentType,
@@ -445,7 +467,22 @@ export async function generateContentProjectScript(projectId: string): Promise<S
   });
   const { script: raw } = await guardedTextCall(ctx, "content-script", estimate, () => provider.generateContentScript(request));
 
-  const script = withDerivedRouting(normaliseContentScript(raw, request));
+  let script = withDerivedRouting(normaliseContentScript(raw, request));
+  // A counted request is checked at the TEXT stage, before any media: one
+  // rewrite that names what is missing; if that still falls short the gap is
+  // stated and DUYỆT KỊCH BẢN refuses until the storyboard covers it.
+  let coverage = requested ? scriptCoverage(script, requested, itemRole) : null;
+  if (requested && coverage && !coverage.ok) {
+    const retry: ContentScriptRequest = { ...request, systemPrompt: `${systemPrompt}\n\n${itemRewriteNote(coverage, requested)}` };
+    const again = await guardedTextCall(ctx, "content-script-items", estimate, () => provider.generateContentScript(retry));
+    const rewritten = withDerivedRouting(normaliseContentScript(again.script, request));
+    const second = scriptCoverage(rewritten, requested, itemRole);
+    if (second.covered >= coverage.covered) {
+      script = rewritten;
+      coverage = second;
+    }
+  }
+  const coverageProblem = requested && coverage && !coverage.ok ? itemCoverageMessage(coverage, requested) : null;
   await persistScript(projectId, script);
   await applyContentScenePlan(projectId, script, request);
   // Reference intent the writer returned, then deterministic auto-assignment
@@ -462,7 +499,7 @@ export async function generateContentProjectScript(projectId: string): Promise<S
       scriptHash: scriptHashFor(script),
       status: "script_ready",
       scriptApprovedAt: null,
-      errorMessage: null,
+      errorMessage: coverageProblem,
       templateVersion,
     },
   });
@@ -475,6 +512,48 @@ export async function generateContentProjectScript(projectId: string): Promise<S
     message: `${template.name}: ${script.scenes.length} cảnh, ${project.targetDuration}s, ${lang.label}.`,
   });
   return script;
+}
+
+/** `itemCoverageMessage` opens with this - how a stored gap is recognised. */
+const ITEM_GAP_PREFIX = "Yêu cầu có ";
+
+/**
+ * The requested-item check on the storyboard AS IT IS NOW: the person may have
+ * fixed a gap by editing or adding scenes. Roles come from the stored script;
+ * a scene it does not know (added by hand) counts as an item scene. Skipped
+ * scenes are not in the video, so they cover nothing. Null = no count asked.
+ */
+async function storyboardItemCoverage(
+  project: Project,
+): Promise<{ requested: RequestedItems; coverage: ItemCoverage } | null> {
+  const requested = requestedItemsOf(contentBriefOf(project).idea);
+  if (!requested || !project.contentType) return null;
+  const script = parseJson<Partial<ScriptDoc>>(project.scriptJson, {});
+  const roles = new Map((script.scenes ?? []).map((s) => [s.sceneNumber, s.sceneRole ?? null]));
+  const rows = await prisma.scene.findMany({ where: { projectId: project.id, skipped: false }, orderBy: { sceneNumber: "asc" } });
+  const scenes = rows.map((s) => ({ ...s, sceneRole: roles.get(s.sceneNumber) ?? null }));
+  const itemRole = itemRoleOf(projectContent(project).format);
+  const role = scenes.some((s) => s.sceneRole === itemRole) ? itemRole : null;
+  return { requested, coverage: checkItemCoverage(scenes, requested.count, role) };
+}
+
+/** How many of the requested items a written script really carries. */
+function scriptCoverage(script: ScriptDoc, requested: RequestedItems, itemRole: string | null): ItemCoverage {
+  const scenes = script.scenes.map((s) => ({
+    sceneNumber: s.sceneNumber,
+    sceneRole: s.sceneRole,
+    narration: s.narration,
+    dialogue: s.dialogue,
+    subtitle: s.subtitle,
+  }));
+  return checkItemCoverage(scenes, requested.count, scenes.some((s) => s.sceneRole === itemRole) ? itemRole : null);
+}
+
+function itemRewriteNote(c: ItemCoverage, requested: RequestedItems): string {
+  return [
+    `REWRITE: the previous draft covered only ${c.covered} of the ${requested.count} requested ${requested.noun || "items"}.`,
+    `Write all ${requested.count}, each in its own scene with real content. Do not name an item without explaining it.`,
+  ].join(" ");
 }
 
 /**
@@ -560,7 +639,18 @@ export async function approveContentScript(projectId: string): Promise<Project> 
   const project = await prisma.project.findUnique({ where: { id: projectId }, include: { _count: { select: { scenes: true } } } });
   if (!project) throw new ContentProjectError("NOT_FOUND", "Không tìm thấy dự án.");
   if (project._count.scenes === 0) throw new ContentProjectError("NO_SCENES", "Kịch bản chưa có cảnh nào.");
-  const updated = await prisma.project.update({ where: { id: projectId }, data: { scriptApprovedAt: new Date() } });
+  const coverage = await storyboardItemCoverage(project);
+  if (coverage && !coverage.coverage.ok) {
+    throw new ContentProjectError("ITEMS_MISSING", itemCoverageMessage(coverage.coverage, coverage.requested));
+  }
+  const updated = await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      scriptApprovedAt: new Date(),
+      // The gap the writer left is closed now (rewrite or storyboard edits).
+      ...(coverage && project.errorMessage?.startsWith(ITEM_GAP_PREFIX) ? { errorMessage: null } : {}),
+    },
+  });
   await logger.info({ event: "script.approved", projectId, message: "Đã DUYỆT KỊCH BẢN. Chưa tạo media nào." });
   return updated;
 }

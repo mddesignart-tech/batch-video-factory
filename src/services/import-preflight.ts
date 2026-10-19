@@ -1241,9 +1241,15 @@ async function persistPreflight(
     }
   }
   const stored: BatchPlan = creativeStyle ? { ...plan, creativeStyle } : plan;
+  // The ESTIMATE is what was priced for approval, and it stays that once the
+  // money is approved. A preflight after approval (the resume panel polls one)
+  // prices only what is still left to buy - $0 for a finished video - and
+  // writing that over the estimate made a $0.15 video read "dự toán $0".
+  const auth = await prisma.batchAuthorization.findUnique({ where: { batchId }, select: { status: true } });
+  const pricing = !auth || auth.status === "DRAFT";
   await prisma.batch.update({
     where: { id: batchId },
-    data: { planJson: JSON.stringify(stored), estimatedCost: estimatedTotal },
+    data: { planJson: JSON.stringify(stored), ...(pricing ? { estimatedCost: estimatedTotal } : {}) },
   });
   // The draft carries the figures the operator is about to approve - including
   // the per-video ceiling the gateway enforces. It used to receive only the
@@ -1262,7 +1268,7 @@ async function persistPreflight(
   // Each video's own forecast, so the batch table has an estimate beside its
   // actual cost instead of $0.
   for (const video of planned) {
-    if (!video.projectId) continue;
+    if (!video.projectId || !pricing) continue;
     await prisma.project.update({
       where: { id: video.projectId },
       data: { estimatedCost: video.estimatedCost },
