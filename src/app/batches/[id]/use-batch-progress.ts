@@ -6,6 +6,23 @@ import { isTerminalBatchStatus, type BatchStatus } from "@/domain/enums";
 
 export const POLL_INTERVAL_MS = 2500;
 
+/**
+ * Changes whenever something a per-video resume plan is built from changes:
+ * the batch status, whether its run is going, and each video's status, stage
+ * counts and cost. The resume table reloads its plans when this changes, so it
+ * follows the polled progress instead of standing still on stale rows (QĐ-140).
+ */
+export function resumeWatchKey(progress: BatchProgress): string {
+  return [
+    progress.status,
+    progress.running ? "run" : "idle",
+    progress.notStarted,
+    ...progress.videos.map((v) =>
+      [v.projectId, v.status, v.scenesCompleted, v.scenesFailed, v.imagesDone, v.clipsDone, v.voicesDone, v.actualCost].join(":"),
+    ),
+  ].join("|");
+}
+
 export interface ProgressState {
   progress: BatchProgress;
   /** True while a poll is in flight, so the UI can show a quiet indicator. */

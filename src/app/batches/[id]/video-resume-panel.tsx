@@ -23,7 +23,17 @@ import type { RecoveryItem } from "@/services/paid-recovery";
  * the server's resume plan: INCREMENTAL cost only (what already exists is $0),
  * and a paid step always asks first, showing video / batch / global headroom.
  */
-export function VideoResumePanel({ batchId }: { batchId: string }) {
+export function VideoResumePanel({
+  batchId,
+  watchKey,
+  batchRunning = false,
+}: {
+  batchId: string;
+  /** From the batch view's polling: plans are read again whenever it changes. */
+  watchKey?: string;
+  /** The batch's own run is going: keep following even before a row says RUNNING. */
+  batchRunning?: boolean;
+}) {
   const [plans, setPlans] = useState<VideoResumePlan[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -39,13 +49,14 @@ export function VideoResumePanel({ batchId }: { batchId: string }) {
     else setMessage({ ok: false, text: r.message });
   }, [batchId]);
 
+  // First paint, and again each time the polled batch progress changes: a
+  // whole-batch run (DUYỆT & CHẠY / TIẾP TỤC) moves the rows here too (QĐ-140).
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, watchKey]);
 
-  // While a video of this table is running, follow it (the batch table above
-  // polls on its own; this one used to stay on RUNNING until a reload).
-  const anyActive = plans?.some((p) => p.nextStep === "ALREADY_RUNNING") ?? false;
+  // While a video of this table - or the batch itself - is running, follow it.
+  const anyActive = (plans?.some((p) => p.nextStep === "ALREADY_RUNNING") ?? false) || batchRunning;
   useEffect(() => {
     if (!anyActive) return;
     const t = setInterval(() => void load(), 3000);

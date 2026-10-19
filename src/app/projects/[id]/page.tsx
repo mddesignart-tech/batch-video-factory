@@ -41,7 +41,8 @@ import { ReferencePanel } from "./reference-panel";
 import { VideoOutputCard } from "./video-output-card";
 import { controlsOf, subtitleLayout } from "@/domain/output-controls";
 import { logoState, projectLogoReferences } from "@/services/logo-overlay";
-import { listProjectReferences, referenceProblems, sceneReferenceIds } from "@/services/reference-assets";
+import { shownSceneEstimate } from "@/domain/user-clip";
+import { listProjectReferences, referenceProblems, sceneExcludedReferenceIds, sceneReferenceIds } from "@/services/reference-assets";
 import { contentSummary } from "@/services/content-service";
 import { audienceOf, languageOf } from "@/domain/content-options";
 import { spokenLines } from "@/domain/scene-subtitles";
@@ -115,6 +116,7 @@ export default async function ProjectDetailPage({
   } catch (err) {
     previewError = err instanceof Error ? err.message : String(err);
   }
+  const liveEstimate = new Map((preview?.current.scenes ?? []).map((p) => [p.sceneNumber, p.estimatedCost]));
 
   const score = parseJson<ScriptScore | null>(project.scriptScoreJson, null);
   const budget = await videoBudget(id);
@@ -390,6 +392,7 @@ export default async function ProjectDetailPage({
                   id: s.id,
                   sceneNumber: s.sceneNumber,
                   referenceIds: sceneReferenceIds(s),
+                  excludedReferenceIds: [...sceneExcludedReferenceIds(s)],
                   characters: sceneCharacters(s).present,
                   withoutReferences: s.referenceOverride === "NO_REFERENCES_CONFIRMED",
                   referenceProblem:
@@ -438,7 +441,7 @@ export default async function ProjectDetailPage({
                 imageProvider: scene.imageProvider,
                 imageModel: scene.imageModel,
                 voiceModel: scene.voiceModel,
-                estimatedCost: scene.estimatedCost,
+                estimatedCost: shownSceneEstimate(scene, liveEstimate.get(scene.sceneNumber)),
                 actualCost: scene.actualCost,
                 imagePath: scene.imagePath,
                 imageSource: scene.imageSource,

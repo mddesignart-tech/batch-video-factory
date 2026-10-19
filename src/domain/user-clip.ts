@@ -189,6 +189,17 @@ export function usesUserClip(scene: { videoSource?: string | null }): boolean {
   return scene.videoSource === "UPLOADED";
 }
 
+/**
+ * The price the Storyboard shows for a scene. A scene on the person's own clip
+ * buys no Video AI, so the routed price frozen before the clip (e.g. $0.22)
+ * would mislead: it shows the live estimate instead - what is still to be
+ * made for it, the clip itself being $0. Display only: the stored figure and
+ * the cost ledger are not touched (QĐ-140).
+ */
+export function shownSceneEstimate(scene: { videoSource?: string | null; estimatedCost: number }, liveEstimate: number | undefined): number {
+  return usesUserClip(scene) ? (liveEstimate ?? 0) : scene.estimatedCost;
+}
+
 /** Shown wherever a scene's motion source is named, so a user clip is never mistaken for a paid AI clip. */
 export const USER_CLIP_LABEL = "Video của bạn";
 export const USER_CLIP_REASON = "Video của bạn: dùng clip đã tải lên, không gọi Video AI ($0)";

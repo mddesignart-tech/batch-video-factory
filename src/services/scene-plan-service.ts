@@ -19,7 +19,7 @@ import { cutoutImage } from "@/media/cutout";
 import type { AmbientInput, LayerInputs, LocalCameraSpec, PlacedSubject } from "@/media/camera-motion";
 import { slotsForNames, type SubjectSlot } from "@/media/layer-layout";
 import { sideFromSlot, type ScreenSide } from "@/domain/speaker-focus";
-import { listProjectReferences, projectReferenceAssets, sceneReferenceIds, type UniversalReference } from "./reference-assets";
+import { listProjectReferences, projectReferenceAssets, sceneExcludedReferenceIds, sceneReferenceIds, type UniversalReference } from "./reference-assets";
 import { pngHasAlpha, resolveSubjects, subjectCandidates } from "./composite-subjects";
 import { projectFormat } from "./output-profile";
 import { storedProfile } from "@/domain/video-model-profile";
@@ -78,8 +78,9 @@ async function load(projectId: string): Promise<Loaded> {
 
 function sceneRefs(scene: Scene, refs: UniversalReference[]) {
   const ids = new Set(sceneReferenceIds(scene));
+  const excluded = sceneExcludedReferenceIds(scene);
   return refs
-    .filter((r) => ids.has(r.id) || r.useThroughout)
+    .filter((r) => ids.has(r.id) || (r.useThroughout && !excluded.has(r.id)))
     .map((r) => ({ id: r.id, type: r.type, name: r.name, critical: r.priority === "CRITICAL" }));
 }
 
@@ -520,9 +521,12 @@ function renderStill(
  */
 function sceneSubjectRefs(scene: Scene, refs: UniversalReference[]): UniversalReference[] {
   const ids = new Set(sceneReferenceIds(scene));
+  const excluded = sceneExcludedReferenceIds(scene);
   const cast = new Set(sceneCharacters(scene).present.map((n) => n.toLowerCase()));
   return refs.filter((r) =>
-    r.source === "CHARACTER_BIBLE" ? cast.has(r.name.toLowerCase()) && r.images.some((i) => i.exists) : r.enabled && (ids.has(r.id) || r.useThroughout),
+    r.source === "CHARACTER_BIBLE"
+      ? cast.has(r.name.toLowerCase()) && r.images.some((i) => i.exists)
+      : r.enabled && (ids.has(r.id) || (r.useThroughout && !excluded.has(r.id))),
   );
 }
 

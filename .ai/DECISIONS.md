@@ -4222,3 +4222,42 @@ Người dùng chọn hướng 2: có kịch bản thật trước, rồi mới 
 - Không viết kịch bản khi quyền chi đã duyệt.
 - TikTok hồi quy.
 - Model chưa duyệt → `needs_review`, 0 POST video.
+
+## QĐ-140 — Dọn tồn đọng UAT P2/P3 (2026-10-19, local + mock, $0)
+
+**Nguồn:** UAT 2026-10-17, các lỗi P2/P3 còn lại sau QĐ-139. Không thêm feature mới.
+
+**P2-1 Reference "Xuyên suốt video" vs quyết định tay:**
+- Nguyên nhân: cảnh chỉ lưu danh sách `referenceIdsJson`, không lưu việc người dùng đã BỎ một tham chiếu. Bật lại
+  "Xuyên suốt video" (hoặc TỰ GẮN khi cảnh trống) thêm lại tham chiếu đó. Kế hoạch cảnh (`sceneRefs`,
+  `sceneSubjectRefs`) cũng coi mọi tham chiếu xuyên suốt là có mặt ở mọi cảnh.
+- Sửa: cột mới `Scene.referenceManualJson` (refId → INCLUDE | EXCLUDE), migration
+  `20261019000000_scene_reference_manual` (chỉ thêm cột, mặc định `{}`). Chỉ thao tác tích/bỏ trên cảnh
+  (`setSceneReferencesAction` → `setSceneReferences(..., { manual: true })`) ghi quyết định tay; gán tự động không ghi.
+- `autoAssignReferences` không bao giờ thêm lại EXCLUDE; kế hoạch cảnh cũng bỏ qua. Tích lại bằng tay → INCLUDE.
+- Cảnh EXCLUDE không bị "giữ" hay hỏi gì: không đổi danh sách, không làm cũ ảnh GENERATED.
+- UI: cạnh ô bỏ tích hiện "(đã bỏ tay)".
+
+**P2-2 Bảng "tiếp tục riêng" đứng yên khi lô chạy:**
+- Nguyên nhân: bảng chỉ tự đọc lại khi có một dòng ALREADY_RUNNING; lô chạy bằng DUYỆT & CHẠY / TIẾP TỤC cả lô thì
+  không dòng nào báo vậy lúc bảng tải, nên bảng đứng yên.
+- Sửa: `VideoResumePanel` được `BatchProgressView` render, nhận `watchKey = resumeWatchKey(progress)` (trạng thái lô,
+  đang chạy, từng video: status / số cảnh / chi phí) và `batchRunning`. Đọc lại kế hoạch mỗi khi khoá đổi; poll 3 s
+  khi lô hoặc một video đang chạy. Dùng polling sẵn có, không thêm kiến trúc realtime.
+
+**P3-1 Panel phong cách lô ở dự án đơn:** dự án đơn bọc thành lô 1 video (TẠO MEDIA) có `planJson` sau preflight nên
+trang lô hiện thẻ phong cách thành ngữ. Sửa: `batchStyleApplies(batchId)` (= không `pricedFromRows`) quyết định.
+
+**P3-2 Giá cảnh sau khi gán clip:** Storyboard đọc `Scene.estimatedCost` (giá route đóng băng trước khi gán clip).
+Sửa hiển thị: `shownSceneEstimate` — cảnh dùng Video của bạn hiện dự toán sống (`previewProjectCost`). Không ghi
+DB, không đụng ledger.
+
+**P3-3 Logo 0%:** cảnh báo "Logo đang hoàn toàn trong suốt và sẽ không nhìn thấy trong video." khi độ rõ hiển thị 0%.
+Vẫn lưu được.
+
+**P3-4 START_TOOL.bat (local, để ngoài git):** trước đây chỉ build khi chưa có `.next/BUILD_ID`. Nay:
+- cổng 3000 đang có server (có thể bản cũ) → báo đóng server cũ, không chạy chồng;
+- file trong `src`, `prisma`, `public`, `package*.json`, `next.config.ts`, `tsconfig.json` mới hơn `BUILD_ID` →
+  `prisma generate` + `npm run build`;
+- `prisma migrate status` báo thiếu migration → cảnh báo + hướng dẫn `npm run backup` → `npx prisma migrate deploy`,
+  hỏi có khởi động tiếp không. KHÔNG tự áp migration.

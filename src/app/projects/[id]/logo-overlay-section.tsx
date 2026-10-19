@@ -2,7 +2,7 @@
 
 import { Alert, Button, Field, Input, Select } from "@/components/ui";
 import { LOGO_POSITIONS, LOGO_SIZES, VI_LOGO_POSITION, VI_LOGO_SIZE, type OutputControls } from "@/domain/output-controls";
-import { LOGO_MISSING_MESSAGE } from "@/domain/logo-overlay";
+import { LOGO_INVISIBLE_MESSAGE, LOGO_MISSING_MESSAGE, logoInvisible } from "@/domain/logo-overlay";
 import type { LogoReferenceOption, LogoState } from "@/services/logo-overlay";
 
 const media = (p: string) => `/api/media/${p.split(/[\\/]/).map(encodeURIComponent).join("/")}`;
@@ -186,6 +186,7 @@ export function LogoOverlaySection({
             </div>
           </div>
 
+          {logoInvisible(logo.opacity) ? <Alert tone="warn" title={LOGO_INVISIBLE_MESSAGE} /> : null}
           {state.alphaWarning ? <Alert tone="warn" title={state.alphaWarning} /> : null}
           {state.clash ? (
             <Alert tone="warn" title={state.clash.message}>

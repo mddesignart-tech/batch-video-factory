@@ -1,9 +1,29 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.4.0 — QĐ-140 Dọn tồn đọng UAT P2/P3 DONE (2026-10-19, local + mock, $0)
+
+```
+FULL SUITE  124/124 file · 1861/1861 test PASS · 0 skip   (một process vitest, 2665 s; AI_MOCK_MODE=true, key giả)
+RELATED     tests/qd140-uat-fixes.test.ts 13/13 + 13 file liên quan (reference, scene-layers, clip, logo, lô) PASS
+lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0
+MIGRATION   20261019000000_scene_reference_manual (chỉ thêm cột) — đã áp data/app.db sau sao lưu
+            backups/app-before-scene-reference-manual-20261019-123504.db; số dòng + sổ chi $10,824435 không đổi
+```
+
+- P2-1: quyết định tay trên cảnh (`Scene.referenceManualJson`, INCLUDE/EXCLUDE) thắng gán tự động / "Xuyên suốt video"
+  / kế hoạch cảnh; không làm cũ ảnh âm thầm.
+- P2-2: bảng "tiếp tục riêng" đọc lại theo polling của trang lô (`resumeWatchKey`) và poll khi lô chạy.
+- P3-1: thẻ phong cách lô chỉ cho lô thành ngữ (`batchStyleApplies`), không cho dự án đơn bọc lô.
+- P3-2: cảnh dùng Video của bạn hiện dự toán sống (`shownSceneEstimate`), không còn $0.22 cũ; DB/ledger không đổi.
+- P3-3: cảnh báo logo 0% (vẫn lưu được).
+- P3-4: `START_TOOL.bat` (local, ngoài git) build lại khi code mới hơn bản build, báo server cũ ở cổng 3000, cảnh báo
+  migration thiếu (không tự áp).
+- Chi tiết: `.ai/DECISIONS.md` QĐ-140.
 
 ## Sau v1.4.0 — QĐ-139 Duyệt chi lô theo kịch bản thật DONE (2026-10-17, local + mock, $0)
 

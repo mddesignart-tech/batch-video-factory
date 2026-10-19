@@ -98,8 +98,9 @@ export async function updateReferenceAction(
         message: `Cảnh ${r.staleScenes!.join(", ")} đã có ảnh tạo sẵn với tham chiếu này. Đổi thì các ảnh đó không còn khớp: cảnh cần ảnh mới (trả phí - xem chi phí ở PREFLIGHT trước khi tạo). Chưa lưu gì.`,
       };
     }
-    // "Xuyên suốt video" ON adds this reference where it is missing; OFF and
-    // "Đang dùng" never touch a scene's list (a hand-made assignment stays).
+    // "Xuyên suốt video" ON adds this reference where it is missing - except
+    // where a person removed it by hand; OFF and "Đang dùng" never touch a
+    // scene's list (a hand-made assignment stays).
     const assigned = change.useThroughout === true ? await autoAssignReferences(projectId, { onlyRefIds: [refId] }) : null;
     if (change.useThroughout !== undefined || change.enabled !== undefined) await replan(projectId);
     revalidatePath(`/projects/${projectId}`);
@@ -118,7 +119,7 @@ export async function updateReferenceAction(
 
 export async function setSceneReferencesAction(projectId: string, sceneId: string, ids: string[], opts: { confirm?: boolean } = {}): Promise<ReferenceActionResult> {
   try {
-    const r = await setSceneReferences(sceneId, ids, { confirmInvalidate: opts.confirm === true });
+    const r = await setSceneReferences(sceneId, ids, { confirmInvalidate: opts.confirm === true, manual: true });
     if (r.needsConfirmation) {
       return {
         ok: false,

@@ -63,6 +63,16 @@ export async function pricedFromRows(batchId: string): Promise<boolean> {
   );
 }
 
+/**
+ * PHONG CÁCH CẢ LÔ (QĐ-136) belongs to a batch the idiom planner writes. An
+ * imported storyboard keeps its own script, and a project wrapped into a batch
+ * of one by TẠO MEDIA keeps the style chosen on its own page - its batch card
+ * would show the idiom defaults for a video that is not an idiom (QĐ-140).
+ */
+export async function batchStyleApplies(batchId: string): Promise<boolean> {
+  return !(await pricedFromRows(batchId));
+}
+
 /** Planned idiom videos that do not have a project yet. */
 export async function pendingIdiomVideos(batchId: string): Promise<number> {
   const batch = await prisma.batch.findUniqueOrThrow({ where: { id: batchId } });

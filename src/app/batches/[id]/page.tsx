@@ -1,10 +1,10 @@
 import { notFound } from "next/navigation";
 import { batchProgress, storedPlan } from "@/services/batch-runner";
+import { batchStyleApplies } from "@/services/batch-sources";
 import { templateOf } from "@/domain/content-templates";
 import { creativeBadges, creativeSummary, resolveCreativeStyle } from "@/domain/creative-style";
 import { BatchCreativeCard } from "./batch-creative-card";
 import { BatchProgressView } from "./batch-progress-view";
-import { VideoResumePanel } from "./video-resume-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -29,16 +29,19 @@ export default async function BatchDetailPage({
   const { id } = await params;
   const progress = await batchProgress(id);
   if (!progress) notFound();
-  // PHONG CÁCH (QĐ-136): idiom batches only - an imported storyboard keeps its own script.
-  const plan = progress.importBatch ? null : storedPlan(progress.batch);
+  // PHONG CÁCH (QĐ-136): idiom batches only - an imported storyboard keeps its
+  // own script, and a project wrapped into a batch of one (TẠO MEDIA) keeps the
+  // style chosen on its own page (QĐ-140).
+  const plan = progress.importBatch || !(await batchStyleApplies(id)) ? null : storedPlan(progress.batch);
   const idiomCreative = templateOf("ENGLISH_IDIOM").creative;
   const style = plan?.creativeStyle ?? null;
   const effective = resolveCreativeStyle(idiomCreative, style);
 
   return (
     <div className="space-y-4">
-      <BatchProgressView initial={progress} />
-      {plan ? (
+      <BatchProgressView
+        initial={progress}
+        middle={plan ? (
         <BatchCreativeCard
           batchId={progress.batch.id}
           creative={idiomCreative}
@@ -51,9 +54,8 @@ export default async function BatchDetailPage({
               : "Kế hoạch lô: Tự động - bộ viết kịch bản thành ngữ gốc (lô cũ / chưa chọn phong cách)."
           }
         />
-      ) : null}
-      {/* Per-video resume (QĐ-110): one plan, one button per video. */}
-      <VideoResumePanel batchId={progress.batch.id} />
+        ) : null}
+      />
     </div>
   );
 }

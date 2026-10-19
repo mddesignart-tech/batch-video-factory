@@ -220,6 +220,22 @@ export function sceneReferenceIds(scene: Pick<Scene, "referenceIdsJson">): strin
   return parseJson<string[]>(scene.referenceIdsJson, []).filter((x) => typeof x === "string");
 }
 
+export type ManualReferenceDecision = "INCLUDE" | "EXCLUDE";
+
+/** What a person ticked / unticked on this scene (QĐ-140). Absent = the list came from auto-assignment. */
+export function sceneManualReferences(scene: Pick<Scene, "referenceManualJson">): Record<string, ManualReferenceDecision> {
+  const raw = parseJson<Record<string, unknown>>(scene.referenceManualJson, {});
+  const out: Record<string, ManualReferenceDecision> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [id, v] of Object.entries(raw)) if (v === "INCLUDE" || v === "EXCLUDE") out[id] = v;
+  return out;
+}
+
+/** References a person removed from this scene by hand: no automatic pass puts them back. */
+export function sceneExcludedReferenceIds(scene: Pick<Scene, "referenceManualJson">): Set<string> {
+  return new Set(Object.entries(sceneManualReferences(scene)).filter(([, v]) => v === "EXCLUDE").map(([id]) => id));
+}
+
 /**
  * A scene showing a reference whose picture must be exact (CRITICAL product or
  * logo) is animated locally by default: Video AI is the step that tends to
@@ -252,7 +268,12 @@ export interface SceneReferencesResult {
   needsConfirmation: boolean;
 }
 
-export async function setSceneReferences(sceneId: string, ids: string[], opts: { confirmInvalidate?: boolean } = {}): Promise<SceneReferencesResult> {
+/**
+ * `manual`: the change is a person's tick on this scene. What they added is
+ * recorded as INCLUDE and what they removed as EXCLUDE, so a later automatic
+ * pass ("xuyên suốt video", TỰ GẮN) never undoes it.
+ */
+export async function setSceneReferences(sceneId: string, ids: string[], opts: { confirmInvalidate?: boolean; manual?: boolean } = {}): Promise<SceneReferencesResult> {
   const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
   const own = await projectReferenceAssets(scene.projectId);
   const unknown = ids.filter((id) => !own.some((r) => r.id === id));
@@ -263,9 +284,16 @@ export async function setSceneReferences(sceneId: string, ids: string[], opts: {
   const base = { sceneNumber: scene.sceneNumber, changed: false, invalidated: false, needsConfirmation: false };
   if (!changed) return base;
   if (hasGeneratedMedia(scene) && !opts.confirmInvalidate) return { ...base, needsConfirmation: true };
+  let manual: { referenceManualJson: string } | Record<string, never> = {};
+  if (opts.manual) {
+    const decisions = sceneManualReferences(scene);
+    for (const id of next) if (!before.includes(id)) decisions[id] = "INCLUDE";
+    for (const id of before) if (!next.includes(id)) decisions[id] = "EXCLUDE";
+    manual = { referenceManualJson: JSON.stringify(decisions) };
+  }
   await prisma.scene.update({
     where: { id: sceneId },
-    data: { referenceIdsJson: JSON.stringify(next), ...fidelityMotion(scene, own.filter((r) => next.includes(r.id))) },
+    data: { referenceIdsJson: JSON.stringify(next), ...manual, ...fidelityMotion(scene, own.filter((r) => next.includes(r.id))) },
   });
   const invalidated = await invalidateGeneratedPicture(sceneId, "danh sách tham chiếu của cảnh đã đổi");
   return { ...base, changed: true, invalidated };
@@ -287,6 +315,8 @@ export interface AssignmentResult {
  *    rest of every list.
  * A scene with a GENERATED picture/clip is held, not changed, and reported:
  * the person decides (ticking it on that scene asks first).
+ * A reference the person removed from a scene by hand (EXCLUDE) is never
+ * added back to that scene - the person's decision wins (QĐ-140).
  */
 export async function autoAssignReferences(projectId: string, opts: { onlyRefIds?: string[] } = {}): Promise<AssignmentResult> {
   const [refs, scenes] = await Promise.all([
@@ -317,7 +347,8 @@ export async function autoAssignReferences(projectId: string, opts: { onlyRefIds
     const kf = keyframes.find((k) => k.id === scene.imageAssetId);
     const owner = kf ? (pictureOwner.get(kf.id) ?? (kf.sha256 ? shaOwner.get(kf.sha256) : undefined)) : undefined;
     if (owner) ids.add(owner);
-    const wanted = refs.filter((r) => ids.has(r.id) && (!only || only.has(r.id)) && !current.includes(r.id));
+    const excluded = sceneExcludedReferenceIds(scene);
+    const wanted = refs.filter((r) => ids.has(r.id) && (!only || only.has(r.id)) && !current.includes(r.id) && !excluded.has(r.id));
     if (wanted.length === 0) continue;
     if (hasGeneratedMedia(scene)) {
       out.held.push({ sceneNumber: scene.sceneNumber, names: wanted.map((r) => r.name) });

@@ -100,7 +100,9 @@ describe("REFERENCE ASSIGNMENT SAFETY", () => {
     expect((await updateReferenceAction(projectId, truckId, { useThroughout: true })).ok).toBe(true);
     const after = await lists();
     for (const [i, l] of after.entries()) {
-      expect(l).toContain(truckId);
+      // Scene 3 had the truck removed by hand in B: that decision wins (QĐ-140).
+      if (i === 2) expect(l).not.toContain(truckId);
+      else expect(l).toContain(truckId);
       for (const id of before[i]!) expect(l).toContain(id); // nothing removed
     }
     expect(after[0]).toContain(ballId);

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import {
   Alert,
   Badge,
@@ -33,8 +34,9 @@ import {
 } from "./batch-controls";
 import { ApproveRunPanel } from "@/components/approve-run-panel";
 import { ContinueVideoButton } from "@/components/continue-video-button";
+import { VideoResumePanel } from "./video-resume-panel";
 import { LIFECYCLE_TONE } from "@/domain/video-lifecycle";
-import { POLL_INTERVAL_MS, useBatchProgress } from "./use-batch-progress";
+import { POLL_INTERVAL_MS, resumeWatchKey, useBatchProgress } from "./use-batch-progress";
 
 const PROJECT_TONE: Record<string, "neutral" | "info" | "ok" | "warn" | "danger"> = {
   draft: "neutral",
@@ -59,8 +61,11 @@ const PROJECT_TONE: Record<string, "neutral" | "info" | "ok" | "warn" | "danger"
  */
 export function BatchProgressView({
   initial,
+  middle,
 }: {
   initial: BatchProgress;
+  /** Rendered between the progress tables and the per-video resume table. */
+  middle?: ReactNode;
 }) {
   const { progress, refreshing, error, polling } = useBatchProgress(
     initial.batch.id,
@@ -392,6 +397,9 @@ export function BatchProgressView({
           </Table>
         </CardContent>
       </Card>
+      {middle}
+      {/* Per-video resume (QĐ-110), fed by this view's polling (QĐ-140). */}
+      <VideoResumePanel batchId={batch.id} watchKey={resumeWatchKey(progress)} batchRunning={polling && progress.running} />
     </>
   );
 }

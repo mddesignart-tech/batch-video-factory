@@ -30,6 +30,8 @@ export interface PanelScene {
   id: string;
   sceneNumber: number;
   referenceIds: string[];
+  /** Removed by hand on this scene: "xuyên suốt video" does not put them back. */
+  excludedReferenceIds?: string[];
   characters: string[];
   withoutReferences: boolean;
   referenceProblem: string | null;
@@ -259,6 +261,9 @@ export function ReferencePanel({ projectId, references, scenes, title }: { proje
                         }}
                       />
                       {r.name}
+                      {!s.referenceIds.includes(r.id) && s.excludedReferenceIds?.includes(r.id) ? (
+                        <span className="text-ink-500" title="Bạn đã bỏ tham chiếu này ở cảnh này. Tự gắn / Xuyên suốt video không gắn lại.">(đã bỏ tay)</span>
+                      ) : null}
                     </label>
                   ))}
                   {s.referenceProblem ? (

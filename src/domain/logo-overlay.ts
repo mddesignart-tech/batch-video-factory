@@ -122,3 +122,10 @@ export function logoAlphaWarning(filename: string): string | null {
 }
 
 export const LOGO_MISSING_MESSAGE = "Không tìm thấy file logo.";
+
+export const LOGO_INVISIBLE_MESSAGE = "Logo đang hoàn toàn trong suốt và sẽ không nhìn thấy trong video.";
+
+/** Độ rõ 0% (as the slider shows it): the logo is drawn but cannot be seen. A warning only - saving stays allowed (QĐ-140). */
+export function logoInvisible(opacity: number): boolean {
+  return Math.round(opacity * 100) <= 0;
+}

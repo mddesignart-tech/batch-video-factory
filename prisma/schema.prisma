@@ -668,6 +668,9 @@ model Scene {
   /// NO_REFERENCES_CONFIRMED = the person chose "tiếp tục không dùng tham chiếu"
   /// for a model that cannot take them. Null = references are required.
   referenceOverride String?
+  /// QĐ-140: what a PERSON decided on this scene, refId → INCLUDE | EXCLUDE.
+  /// Auto-assignment (and "xuyên suốt video") never adds an EXCLUDE back.
+  referenceManualJson String @default("{}")
 
   /// UPLOADED VIDEO CLIP INPUT. GENERATED = whatever the pipeline made or will
   /// make (V1 behaviour). UPLOADED = a clip a PERSON supplied is this scene's
