@@ -1,6 +1,6 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
@@ -23,6 +23,11 @@ MIGRATION   20261019000000_scene_reference_manual (chỉ thêm cột) — đã �
 - P3-3: cảnh báo logo 0% (vẫn lưu được).
 - P3-4: `START_TOOL.bat` (local, ngoài git) build lại khi code mới hơn bản build, báo server cũ ở cổng 3000, cảnh báo
   migration thiếu (không tự áp).
+- UI SMOKE QĐ-140 PASS (2026-10-19): sandbox production build cổng 3103, DB + data riêng ở temp (migrate deploy + seed),
+  AI_MOCK_MODE=true, key giả; DB thật không đổi. 6/6: Reference bỏ tay → "Xuyên suốt" tắt/bật không gắn lại, tích lại =
+  INCLUDE · lô 16 thành ngữ tự cập nhật tiến trình (READY → RUNNING 45…79 % → COMPLETED, không tải lại trang) · thẻ phong
+  cách chỉ ở lô thành ngữ · giá cảnh $0.18 → $0.0010 sau khi gán clip · logo 0 % có cảnh báo, vẫn lưu · launcher phát hiện
+  code mới (dry-run). 69 job đều provider mock. Không sửa code.
 - Chi tiết: `.ai/DECISIONS.md` QĐ-140.
 
 ## Sau v1.4.0 — QĐ-139 Duyệt chi lô theo kịch bản thật DONE (2026-10-17, local + mock, $0)

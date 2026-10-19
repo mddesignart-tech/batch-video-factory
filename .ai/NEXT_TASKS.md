@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-19 — **QĐ-140 DONE** (dọn tồn đọng UAT P2/P3; full suite 124/124 file · 1861/1861 PASS). Chờ người dùng xác nhận trước khi phát hành v1.5.0 / chạy API thật. 2026-10-17 — **QĐ-139 DONE** (lô thành ngữ duyệt chi theo kịch bản thật — sửa P1 UAT; full suite 123/123 file · 1848/1848 PASS). **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
+**Cập nhật:** 2026-10-19 — **V1.5.0 RELEASED** (tag `batch-video-factory-v1.5.0` + GitHub Release; QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS, UI smoke QĐ-140 PASS, $0). Backlog còn lại chờ duyệt từng mục; test API thật cần người dùng duyệt chi. 2026-10-19 — **QĐ-140 DONE** (dọn tồn đọng UAT P2/P3). 2026-10-17 — **QĐ-139 DONE** (lô thành ngữ duyệt chi theo kịch bản thật — sửa P1 UAT; full suite 123/123 file · 1848/1848 PASS). **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
 121/121 file · 1814/1814 PASS). **QĐ-136 DONE** (Creative Style cho lô thành ngữ, `5060da4` + `84be22f`, đã push; full suite
 120/120 file · 1802/1802 PASS). Cùng ngày: full suite 41,4 phút (xong P1 tốc độ test). 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
 full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa làm, chờ duyệt từng mục.
@@ -16,7 +16,7 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
 - QĐ-140 Dọn tồn đọng UAT P2/P3 — DONE (2026-10-19): Reference bỏ tay thắng "Xuyên suốt video", bảng tiếp tục riêng
   tự làm mới, thẻ phong cách lô đúng ngữ cảnh, giá cảnh sau khi gán clip, cảnh báo logo 0%, START_TOOL.bat build lại
   khi code đổi. Full suite 124/124 file · 1861/1861 PASS. Migration `20261019000000_scene_reference_manual` đã áp production.
-  - Kế tiếp (chờ xác nhận): phát hành v1.5.0 (QĐ-136 → QĐ-140), rồi test API thật.
+  - UI smoke thật 6/6 PASS (sandbox, mock). V1.5.0 đã phát hành. Kế tiếp (chờ xác nhận): test API thật.
 - QĐ-138 URL Content Extraction — DONE: nguồn URL (đọc → xem trước → chấp nhận → snapshot), chống SSRF, trích bài viết /
   sản phẩm (JSON-LD), đọc lại chỉ đổi nguồn. Chi tiết: `.ai/STATE.md`, `.ai/DECISIONS.md`.
 - QĐ-137 An toàn vòng đời lô + dọn UX nhỏ — DONE: DỪNG BATCH dừng thật (kiểm tra trước mỗi bước, không FAILED, không
