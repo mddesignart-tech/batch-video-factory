@@ -14,6 +14,7 @@
  */
 
 import { z } from "zod";
+import { VoiceDirectionSchema } from "./voice-director";
 
 export const SUBTITLE_SIZES = ["SMALL", "MEDIUM", "LARGE", "CUSTOM"] as const;
 export const SUBTITLE_POSITIONS = ["BOTTOM", "MIDDLE", "TOP"] as const;
@@ -116,7 +117,11 @@ export const OutputControlsSchema = z.object({
       endSec: z.number().min(0).nullable().default(null),
     })
     .default({}),
-  /** The project's narrator voice. Null fields = the Narrator character's own settings. */
+  /**
+   * The project's narrator voice. Null fields = the Narrator character's own settings.
+   * With the Voice Director on (QĐ-142), `voiceId` overrides the preset's voice,
+   * `speed` is the exact speed (Nâng cao) and `instructions` is extra direction.
+   */
   voice: z
     .object({
       provider: z.string().nullable().default(null),
@@ -125,6 +130,7 @@ export const OutputControlsSchema = z.object({
       speed: z.number().min(0.5).max(2).nullable().default(null),
       instructions: z.string().max(500).nullable().default(null),
     })
+    .merge(VoiceDirectionSchema)
     .default({}),
 });
 export type OutputControls = z.infer<typeof OutputControlsSchema>;

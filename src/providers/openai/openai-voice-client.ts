@@ -36,6 +36,10 @@ export const OPENAI_VOICES = [
   { id: "onyx", label: "Onyx - nam, trầm", gender: "male" as const },
   { id: "sage", label: "Sage - nữ, điềm tĩnh", gender: "female" as const },
   { id: "shimmer", label: "Shimmer - nữ, nhẹ", gender: "female" as const },
+  // gpt-4o-mini-tts only (QĐ-142). Marin and Cedar are the newest, most natural.
+  { id: "verse", label: "Verse - nam, biểu cảm", gender: "male" as const },
+  { id: "marin", label: "Marin - nữ, tự nhiên (mới)", gender: "female" as const },
+  { id: "cedar", label: "Cedar - nam, tự nhiên (mới)", gender: "male" as const },
 ] as const;
 
 export function isKnownVoice(id: string): boolean {

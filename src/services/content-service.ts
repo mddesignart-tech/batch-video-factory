@@ -216,6 +216,9 @@ export async function createContentProject(input: CreateContentProjectInput): Pr
       audience: audienceOf(input.audience ?? template.defaultAudience).id,
       tone: toneOf(input.creativeStyle?.tone ?? input.tone ?? template.defaultTone).id,
       creativeStyleJson: storedCreativeJson(input.creativeStyle),
+      // QĐ-142: a new project's narration is directed by its style and scenes.
+      // Projects made before keep their voice exactly as it was bought.
+      outputControlsJson: JSON.stringify({ voice: { director: true } }),
       voiceMode,
       bilingualMode,
       contentBriefJson: JSON.stringify({

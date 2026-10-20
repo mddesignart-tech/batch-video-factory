@@ -1,5 +1,6 @@
 import { MISSING_CLIP_MESSAGE, usesUserClip } from "@/domain/user-clip";
 import { narratorOverride } from "./output-controls";
+import { voiceDirectorFor } from "./voice-direction";
 import { isNarrator } from "@/domain/scene-characters";
 import { limitMessage, planReferenceSend, type SendCandidate } from "@/domain/reference";
 import { criticalPictureCount, sceneReferences, type UniversalReference } from "./reference-assets";
@@ -2665,9 +2666,12 @@ export async function generateSceneVoice(
   }
 
   const written: string[] = [];
+  // QĐ-142: the same direction the preview, the plan and the estimate use.
+  const direct = await voiceDirectorFor(scene);
 
   for (const line of lines) {
-    const settings = await voiceSettingsFor(line.speaker, scene.projectId);
+    const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId));
+    const spokenText = settings.spokenText ?? line.text;
 
     // A line that is ALREADY this audio - same words, voice, instructions,
     // speed (and the pinned model, if any) - with its file on disk is handed
@@ -2694,6 +2698,7 @@ export async function generateSceneVoice(
           speed: settings.speed,
           accent: settings.accent,
           targetDuration: scene.duration,
+          spokenText: settings.spokenText,
         }),
       ))
     ) {
@@ -2705,7 +2710,7 @@ export async function generateSceneVoice(
       routeFor(
         c,
         "voice",
-        { characters: line.text.length, jobs: 1 },
+        { characters: spokenText.length, jobs: 1 },
         { provider: settings.provider, model: settings.model },
       );
     // Budget-free probe first (see reuseByProbe): an identical line that exists
@@ -2726,6 +2731,7 @@ export async function generateSceneVoice(
         speed: settings.speed,
         accent: settings.accent,
         targetDuration: scene.duration,
+        spokenText: settings.spokenText,
       });
       const found = await findReusableAsset({ reuseKey: probeKey, sceneId: scene.id, projectId: project.id });
       if (found.status !== "REUSE") throw blocked;
@@ -2748,6 +2754,7 @@ export async function generateSceneVoice(
         speed: settings.speed,
         accent: settings.accent,
         targetDuration: scene.duration,
+        spokenText: settings.spokenText,
       });
     const done = await prisma.dialogueLine.findUnique({
       where: { sceneId_lineNumber: { sceneId: scene.id, lineNumber: line.lineNumber } },
@@ -2895,7 +2902,7 @@ export async function generateSceneVoice(
                 projectId: project.id,
                 sceneId: scene.id,
                 model: d.modelId,
-                text: line.text,
+                text: spokenText,
                 voiceId: settings.voiceId,
                 instructions: settings.instructions,
                 accent: settings.accent,
@@ -3032,13 +3039,15 @@ export async function existingVoiceLines(
 ): Promise<{ lines: (ParsedLine & { state: "DONE" | "MISSING_LOCAL_FILE" | "CHANGED" | "NONE" })[]; allDone: boolean }> {
   const parsed = parseDialogueLines(scene.dialogue, scene.narration, sceneCharacters(scene).speaking);
   const settingsBySpeaker = new Map<string, Awaited<ReturnType<typeof voiceSettingsFor>>>();
+  const direct = await voiceDirectorFor(scene);
   const lines: (ParsedLine & { state: "DONE" | "MISSING_LOCAL_FILE" | "CHANGED" | "NONE" })[] = [];
   for (const line of parsed) {
-    let settings = settingsBySpeaker.get(line.speaker);
-    if (!settings) {
-      settings = await voiceSettingsFor(line.speaker, scene.projectId);
-      settingsBySpeaker.set(line.speaker, settings);
+    let base = settingsBySpeaker.get(line.speaker);
+    if (!base) {
+      base = await voiceSettingsFor(line.speaker, scene.projectId);
+      settingsBySpeaker.set(line.speaker, base);
     }
+    const settings = direct(line, base);
     const row = scene.dialogueLines.find((r) => r.lineNumber === line.lineNumber);
     const state = !row
       ? "NONE"
@@ -3100,8 +3109,10 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
   const parsed = parseDialogueLines(scene.dialogue, scene.narration, sceneCharacters(scene).speaking);
   const rows = await prisma.dialogueLine.findMany({ where: { sceneId: scene.id } });
   const out: SceneVoiceLinePlan[] = [];
+  const direct = await voiceDirectorFor(scene);
   for (const line of parsed) {
-    const settings = await voiceSettingsFor(line.speaker, scene.projectId);
+    const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId));
+    const spokenChars = (settings.spokenText ?? line.text).length;
     const row = rows.find((r) => r.lineNumber === line.lineNumber) ?? null;
     const base = {
       lineNumber: line.lineNumber,
@@ -3111,7 +3122,8 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
       paidCost: 0,
       durationSec: null as number | null,
       audioPath: null as string | null,
-      message: null as string | null,
+      // QĐ-142: a narration too long for its scene is said before anything is bought.
+      message: (settings.directed?.warnings[0] ?? null) as string | null,
     };
     // Existing audio first, judged on the model it WAS made with - the same
     // order as generateSceneVoice, so a model retired since never matters here.
@@ -3122,7 +3134,7 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
       (await lineAssetMatches(
         scene.id,
         row.outputPath,
-        voiceReuseKey({ provider: row.provider, model: row.model, text: line.text, voiceId: settings.voiceId, instructions: settings.instructions, speed: settings.speed, accent: settings.accent, targetDuration: scene.duration }),
+        voiceReuseKey({ provider: row.provider, model: row.model, text: line.text, voiceId: settings.voiceId, instructions: settings.instructions, speed: settings.speed, accent: settings.accent, targetDuration: scene.duration, spokenText: settings.spokenText }),
       ))
     ) {
       const bytes = fs.statSync(toAbsolute(row.outputPath)).size;
@@ -3141,7 +3153,7 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
     }
     let decision: RouteDecision;
     try {
-      decision = routeFor(ctx, "voice", { characters: line.text.length, jobs: 1 }, { provider: settings.provider, model: settings.model });
+      decision = routeFor(ctx, "voice", { characters: spokenChars, jobs: 1 }, { provider: settings.provider, model: settings.model });
     } catch (err) {
       if (!(err instanceof RoutingError) || err.code !== "over_budget") {
         out.push({
@@ -3154,7 +3166,7 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
         });
         continue;
       }
-      decision = routeFor({ ...ctx, budgetRemaining: Number.MAX_SAFE_INTEGER }, "voice", { characters: line.text.length, jobs: 1 }, { provider: settings.provider, model: settings.model });
+      decision = routeFor({ ...ctx, budgetRemaining: Number.MAX_SAFE_INTEGER }, "voice", { characters: spokenChars, jobs: 1 }, { provider: settings.provider, model: settings.model });
       base.message = errorText(err);
     }
     const key = voiceReuseKey({
@@ -3166,6 +3178,7 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
       speed: settings.speed,
       accent: settings.accent,
       targetDuration: scene.duration,
+      spokenText: settings.spokenText,
     });
     // A pin on a model the vendor is retiring still runs, but never silently.
     if (decision.reason.includes("NGỪNG DÙNG")) {

@@ -1,6 +1,6 @@
 # Việc tiếp theo
 
-**Cập nhật:** 2026-10-20 — **V1.5.1 RELEASED** (QĐ-141 REAL API VALIDATION PASS $0,125924, sổ $11,326473/$15; sửa dòng thông báo sai cảnh; full suite gần nhất 1875/1875 PASS). Chờ yêu cầu mới. 2026-10-19 — **REAL API SMOKE TEST PASS ($0,125) + QĐ-141 DONE** (đủ N mục theo yêu cầu, chi phí cảnh/dự án khớp sổ chi; full suite 125/125 file · 1875/1875 PASS, $0). Chưa phát hành bản mới; chờ yêu cầu. 2026-10-19 — **V1.5.0 RELEASED** (tag `batch-video-factory-v1.5.0` + GitHub Release; QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS, UI smoke QĐ-140 PASS, $0). Backlog còn lại chờ duyệt từng mục; test API thật cần người dùng duyệt chi. 2026-10-19 — **QĐ-140 DONE** (dọn tồn đọng UAT P2/P3). 2026-10-17 — **QĐ-139 DONE** (lô thành ngữ duyệt chi theo kịch bản thật — sửa P1 UAT; full suite 123/123 file · 1848/1848 PASS). **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
+**Cập nhật:** 2026-10-20 — **QĐ-142 VOICE DIRECTOR DONE** (mock, $0; full suite 1896/1896 PASS). Kế tiếp (chờ người dùng duyệt chi): A/B giọng thật — 10 TTS POST, ~$0,000320 ước tính. 2026-10-20 — **V1.5.1 RELEASED** (QĐ-141 REAL API VALIDATION PASS $0,125924, sổ $11,326473/$15; sửa dòng thông báo sai cảnh; full suite gần nhất 1875/1875 PASS). Chờ yêu cầu mới. 2026-10-19 — **REAL API SMOKE TEST PASS ($0,125) + QĐ-141 DONE** (đủ N mục theo yêu cầu, chi phí cảnh/dự án khớp sổ chi; full suite 125/125 file · 1875/1875 PASS, $0). Chưa phát hành bản mới; chờ yêu cầu. 2026-10-19 — **V1.5.0 RELEASED** (tag `batch-video-factory-v1.5.0` + GitHub Release; QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS, UI smoke QĐ-140 PASS, $0). Backlog còn lại chờ duyệt từng mục; test API thật cần người dùng duyệt chi. 2026-10-19 — **QĐ-140 DONE** (dọn tồn đọng UAT P2/P3). 2026-10-17 — **QĐ-139 DONE** (lô thành ngữ duyệt chi theo kịch bản thật — sửa P1 UAT; full suite 123/123 file · 1848/1848 PASS). **QĐ-138 DONE** (URL Content Extraction; full suite 122/122 file · 1843/1843 PASS). **QĐ-137 DONE** (DỪNG BATCH dừng thật, tên lô tăng dần, empty-state lô thành ngữ; full suite
 121/121 file · 1814/1814 PASS). **QĐ-136 DONE** (Creative Style cho lô thành ngữ, `5060da4` + `84be22f`, đã push; full suite
 120/120 file · 1802/1802 PASS). Cùng ngày: full suite 41,4 phút (xong P1 tốc độ test). 2026-10-16 — **V1.4.0 RELEASED** (tag `batch-video-factory-v1.4.0` + GitHub Release; QĐ-132 → QĐ-135,
 full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa làm, chờ duyệt từng mục.
@@ -13,7 +13,15 @@ full suite 1786/1786 PASS, $0). Backlog dưới đây là SAU v1.4.0 — chưa l
   cộng tiền. Chi thật $0,125924; sổ $11,326473 / $15 (còn $3,673527).
 - Sửa dòng thông báo xanh hiện sai cảnh ("Cảnh 5 dùng ảnh nhập" khi đang mở cảnh 1) — `tests/scene-result.test.ts`.
 
+## ✅ XONG — QĐ-142 Voice Director (2026-10-20, mock, $0)
+
+- Đạo diễn giọng theo Creative Style + vai trò cảnh + cảm xúc + tốc độ; 12 Voice Preset; 13 giọng OpenAI (marin,
+  cedar, verse mới); chuẩn hoá lời đọc; cảm xúc riêng từng cảnh; khoá giọng theo text thật được đọc.
+- Chờ duyệt: A/B giọng thật (`npx tsx scripts/voice-ab-preview.ts [PRESET_ID]` để xem request + giá trước).
+
 ## Backlog — CHƯA làm, chờ duyệt
+
+- Voice (ngoài QĐ-142): ElevenLabs, voice cloning, thay provider TTS.
 
 - **Thời lượng đích vs thời lượng thật:** đặt 12 s nhưng MP4 thật 28,08 s vì lời đọc dài hơn thời lượng đặt
   (dự án `6b8a7dd7`, 2026-10-20). Cần quyết định: rút gọn lời đọc ở Text stage, cảnh báo trước khi duyệt, hay chấp

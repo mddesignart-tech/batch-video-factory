@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Mic, Play } from "lucide-react";
-import { Badge, Button } from "@/components/ui";
+import { Badge, Button, Select } from "@/components/ui";
 import { getSceneVoicePlan, makeSceneVoiceAction } from "@/app/actions/projects";
+import { sceneVoiceDirectionAction, setSceneVoiceEmotionAction, type SceneVoiceDirection } from "@/app/actions/output-controls";
+import { VOICE_EMOTIONS, type VoiceEmotionId } from "@/domain/voice-director";
 import type { SceneVoiceLinePlan, SceneVoicePlan } from "@/services/generation";
 import type { SceneVoiceResult } from "@/services/scene-voice";
 import { BudgetProblemBox } from "@/components/video-budget";
@@ -48,14 +50,26 @@ export function SceneVoicePanel({
   const [playing, setPlaying] = useState<string | null>(null);
   const [budget, setBudget] = useState<SceneVoiceResult["budget"] | null>(null);
 
+  const [direction, setDirection] = useState<SceneVoiceDirection | null>(null);
+
   const load = useCallback(async () => {
-    const r = await getSceneVoicePlan(sceneId);
+    const [r, d] = await Promise.all([getSceneVoicePlan(sceneId), sceneVoiceDirectionAction(sceneId)]);
     if (r.ok && r.plan) setPlan(r.plan);
     else setMessage({ ok: false, text: r.message });
+    setDirection(d.direction ?? null);
   }, [sceneId]);
+
+  // QĐ-142: this scene's own emotion. Saved only; the new price shows on the button.
+  async function setEmotion(emotion: VoiceEmotionId) {
+    const r = await setSceneVoiceEmotionAction(sceneId, emotion === "AUTO" ? null : emotion);
+    setMessage({ ok: r.ok, text: r.message });
+    setConfirmCost(null);
+    await load();
+  }
 
   useEffect(() => {
     setPlan(null);
+    setDirection(null);
     setMessage(null);
     setConfirmCost(null);
     setPlaying(null);
@@ -113,6 +127,27 @@ export function SceneVoicePanel({
           </span>
         ) : null}
       </div>
+
+      {direction?.enabled && lines.length > 0 ? (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-ink-400">
+          <span>
+            Đạo diễn giọng: {direction.roleLabel ?? "-"} · {direction.emotionLabel}
+            {direction.speed !== null ? ` · ${direction.speed.toFixed(2)}x` : ""}
+          </span>
+          <Select
+            className="ml-auto h-7 w-auto text-[11px]"
+            value={direction.sceneEmotion ?? "AUTO"}
+            disabled={busy}
+            onChange={(e) => void setEmotion(e.currentTarget.value as VoiceEmotionId)}
+          >
+            {VOICE_EMOTIONS.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.id === "AUTO" ? "Cảm xúc: theo dự án" : `Cảm xúc: ${e.label}`}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : null}
 
       {!plan ? (
         <p className="text-ink-500">Đang đọc trạng thái giọng...</p>

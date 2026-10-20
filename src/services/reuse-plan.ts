@@ -8,6 +8,7 @@ import { fileSha256OrNull } from "./asset-content";
 import { imageReuseKey, videoReuseKey, voiceReuseKey } from "./asset-keys";
 import { reusableKeys } from "./asset-reuse";
 import { buildSceneImageRequest, GenerationError, voiceSettingsFor } from "./generation";
+import { voiceDirectorFor } from "./voice-direction";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
 
 /**
@@ -82,8 +83,9 @@ export async function sceneReuseFacts(
     }
     const lines = parseDialogueLines(scene.dialogue, scene.narration, sceneCharacters(scene).speaking);
     const entries: string[] = [];
+    const direct = await voiceDirectorFor(scene);
     for (const line of lines) {
-      const settings = await voiceSettingsFor(line.speaker, scene.projectId);
+      const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId));
       for (const m of voiceModels) {
         entries.push(
           `${mk(m)}|${line.lineNumber}|${voiceReuseKey({
@@ -95,6 +97,7 @@ export async function sceneReuseFacts(
             speed: settings.speed,
             accent: settings.accent,
             targetDuration: scene.duration,
+            spokenText: settings.spokenText,
           })}`,
         );
       }

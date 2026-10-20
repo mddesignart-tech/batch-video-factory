@@ -4303,3 +4303,51 @@ Không thêm feature mới.
 
 **Test:** `tests/qd141-items-and-cost.test.ts` 14/14 (mutation: bỏ itemCount → 4 fail; bỏ sync cảnh + guard preflight
 → 4 fail).
+
+## QĐ-142 — VOICE DIRECTOR: đạo diễn giọng đọc theo phong cách + cảnh (2026-10-20, mock, $0)
+
+**Nguồn:** sau v1.5.1, người dùng thấy giọng cứng, thô, thiếu cảm xúc, video khác phong cách vẫn đọc giống nhau.
+Vẫn `gpt-4o-mini-tts`, không đổi provider, không ElevenLabs / clone giọng / sửa pipeline video.
+
+**Root cause (audit luồng giọng):**
+- Người dẫn chuyện (`ensureNarrator`) lấy giọng của nhân vật đầu tiên có giới tính nữ (Mia → `coral`) và MỘT chỉ dẫn
+  cố định "Warm, clear narrator. Speak naturally in the language of the text." cho mọi câu, mọi cảnh, mọi dự án.
+- `voiceSettingsFor(speaker)` chỉ biết người nói: không có Creative Style, loại nội dung, vai trò cảnh (hook /
+  punchline / CTA…), cảm xúc hay nhịp. Tốc độ luôn 1 (hoặc một số người dùng đặt), không theo cảnh.
+- Text gửi TTS = lời thô của kịch bản: "%", "km", "$", emoji, hashtag, "!!!", "...." đi thẳng vào giọng.
+- 13 giọng OpenAI: danh sách app chỉ có 10 (thiếu `verse`, `marin`, `cedar`).
+- Nghe thử và chạy thật đã dùng chung một đường (QĐ-117) nên khớp nhau — giữ nguyên tính chất này.
+
+**Sửa:**
+- `src/domain/voice-director.ts` (thuần): 13 giọng, 12 Voice Preset (6 NAM / 6 NỮ — nhóm theo cảm nhận, không rẽ nhánh
+  theo giới tính) map tới voice + base instructions + speed + energy + emotional range; 10 kiểu đọc từ Creative
+  Style + loại nội dung (Hài TikTok, Chuyên nghiệp, Documentary, Review sản phẩm, Kể chuyện, Dễ thương…); vai trò cảnh
+  (HOOK / EXPLAIN / BUILD / PUNCHLINE / EMOTIONAL / CLOSING / CTA) từ `sceneRole` của kịch bản, cảnh không có vai trò
+  theo vị trí; 10 cảm xúc; tốc độ Tự động / Chậm / Vừa / Nhanh.
+- **VOICE IDENTITY ≠ SCENE EMOTION:** dòng đầu chỉ dẫn ("Voice identity: …") và voice giống hệt ở mọi cảnh của cùng
+  người dẫn; phần Style / Scene / Emotion đổi theo cảnh. Nhân vật hội thoại giữ voice + chỉ dẫn riêng của nhân vật
+  (CHARACTER → VOICE PROFILE), chỉ thêm chỉ dẫn cảnh.
+- Tốc độ AUTO = tốc độ preset × nhịp × vai trò × cảm xúc, kẹp 0,88–1,15 (nhanh hơn nghe như máy), lưới 0,05.
+  Lời quá dài cho cảnh → nhanh nhẹ trong giới hạn, quá nữa → cảnh báo `NARRATION_TOO_LONG` ở kế hoạch giọng (trước
+  khi mua), không ép. Tốc độ chính xác (Nâng cao) luôn thắng.
+- `src/domain/speech-text.ts`: chuẩn hoá lời đọc (đơn vị, %, $, viết tắt, emoji, hashtag, markdown, dấu câu, một
+  "..." mỗi câu, gạch ngang → dấu phẩy). Không đổi số, không thêm "...", không sửa tên sản phẩm/model. Phụ đề và
+  `DialogueLine.text` giữ lời gốc; chỉ text GỬI TTS đổi.
+- `src/services/voice-direction.ts`: `voiceDirectorFor(scene)` dùng chung cho tạo giọng, kế hoạch giọng, ước tính,
+  reuse-plan, nghe thử — cùng đầu vào → cùng request → cùng khoá.
+- Khoá giọng: `voiceReuseKey({ spokenText })` — text trong khoá là text thật được đọc; không có `spokenText` thì khoá
+  cũ y nguyên. Khoá vẫn = model + voice + instructions + speed + text (ngôn ngữ nằm trong instructions + text).
+- Bật/tắt: `outputControlsJson.voice.director`. Dự án nội dung MỚI bật mặc định; dự án cũ TẮT → giọng đã mua vẫn hợp
+  lệ, không mua lại; người dùng bật bằng nút "Bật Voice Director" (đi đường xem giá / xác nhận như mọi thay đổi giọng).
+  Cảm xúc từng cảnh: `voice.sceneEmotions[sceneId]` (không migration).
+- UI: VIDEO OUTPUT → Giọng thuyết minh: GIỌNG (preset, "Tự động" hiện preset được chọn), PHONG CÁCH (theo Creative
+  Style), CẢM XÚC, TỐC ĐỘ, ▶ Nghe thử; Nâng cao: voice model, voice thay preset, tốc độ chính xác, instruction thêm,
+  xem instruction gửi đi, tắt director. Storyboard → VOICE: "Đạo diễn giọng: vai trò · cảm xúc · tốc độ" + cảm xúc
+  riêng của cảnh.
+- Pin model `tts-1*` (không có giọng mới) → marin/cedar/verse/ballad đổi sang giọng cổ điển gần nhất.
+
+**A/B:** `src/domain/voice-ab.ts` + `npx tsx scripts/voice-ab-preview.ts [PRESET_ID]` — cùng kịch bản tiếng Việt 5 câu,
+in request A (cũ) và B (director), không gọi API. Chạy thật: 10 TTS POST, 534 ký tự, ước tính $0,000320 theo giá
+registry ($0,0006/1k ký tự) — CHỜ người dùng duyệt.
+
+**Không làm (backlog):** ElevenLabs, voice cloning, thay provider TTS, sửa pipeline video, thời lượng đặt vs thật.

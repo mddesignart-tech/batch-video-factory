@@ -1,9 +1,24 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-20 (**V1.5.1 RELEASED** — tag `batch-video-factory-v1.5.1` → commit này + GitHub Release (Latest), ghi chú `RELEASE_NOTES_V1.5.1.md`; QĐ-141 + REAL API VALIDATION PASS + sửa dòng thông báo sai cảnh; xem mục đầu). 2026-10-19 (**QĐ-141 DONE** — đủ N mục theo yêu cầu + chi phí cảnh/dự án khớp sổ chi, sau REAL API SMOKE TEST đầu tiên PASS $0,125; xem mục đầu). 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-20 (**QĐ-142 VOICE DIRECTOR DONE** — đạo diễn giọng theo phong cách + vai trò cảnh, 12 preset, 13 giọng OpenAI, chuẩn hoá lời đọc; full suite 127/127 file · 1896/1896 PASS, mock, $0; chưa chạy A/B giọng thật — chờ duyệt; xem mục đầu). 2026-10-20 (**V1.5.1 RELEASED** — tag `batch-video-factory-v1.5.1` → commit này + GitHub Release (Latest), ghi chú `RELEASE_NOTES_V1.5.1.md`; QĐ-141 + REAL API VALIDATION PASS + sửa dòng thông báo sai cảnh; xem mục đầu). 2026-10-19 (**QĐ-141 DONE** — đủ N mục theo yêu cầu + chi phí cảnh/dự án khớp sổ chi, sau REAL API SMOKE TEST đầu tiên PASS $0,125; xem mục đầu). 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## Sau v1.5.1 — QĐ-142 VOICE DIRECTOR DONE (2026-10-20, mock, $0)
+
+```
+FULL SUITE  127/127 file · 1896/1896 test PASS (2874 s, một process vitest, mock)
+RELATED     tests/voice-director.test.ts 17/17 (5 phong cách, VI/EN, đổi cảm xúc cảnh, cùng người dẫn, 2 người nói,
+            nghe thử → chạy reuse, render lại / phụ đề / camera = 0 TTS POST, đổi cài đặt → chỉ invalid đúng phần, A/B)
+lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0 · không migration
+A/B THẬT    CHƯA chạy. Preflight: 10 TTS POST, 534 ký tự, ước tính $0,000320 (scripts/voice-ab-preview.ts)
+```
+
+- Root cause: người dẫn chuyện có MỘT chỉ dẫn cố định + tốc độ 1 cho mọi cảnh/dự án; Creative Style, vai trò cảnh,
+  cảm xúc không tới TTS; text thô (%, km, emoji, "!!!") gửi thẳng; thiếu giọng verse/marin/cedar.
+- Voice Director bật mặc định cho dự án nội dung MỚI (`outputControlsJson.voice.director`); dự án cũ giữ giọng cũ
+  (không mua lại) tới khi người dùng bấm "Bật Voice Director". Chi tiết: `.ai/DECISIONS.md` QĐ-142.
 
 ## V1.5.1 — QĐ-141 REAL API VALIDATION PASS + sửa thông báo sai cảnh (2026-10-20)
 

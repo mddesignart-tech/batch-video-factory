@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, Loader2, Play, RefreshCw } from "lucide-react";
-import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, Select } from "@/components/ui";
+import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, Select, Textarea } from "@/components/ui";
 import {
   clearMusicAction,
   narratorInfoAction,
@@ -24,6 +24,7 @@ import {
   VI_SUBTITLE_STYLE,
   type OutputControls,
 } from "@/domain/output-controls";
+import { SPEED_MODES, VOICE_EMOTIONS, VOICE_PRESETS, type SpeedModeId, type VoiceEmotionId } from "@/domain/voice-director";
 import type { LogoReferenceOption, LogoState } from "@/services/logo-overlay";
 import { LogoOverlaySection } from "./logo-overlay-section";
 
@@ -85,6 +86,12 @@ export function VideoOutputCard({
   const aud = (p: Partial<OutputControls["audio"]>, persist = true) => {
     setC((x) => ({ ...x, audio: { ...x.audio, ...p } }));
     if (persist) save({ audio: p });
+  };
+
+  // Any voice change is new speech: saved here, priced and confirmed at Nghe thử.
+  const voice = (p: Partial<OutputControls["voice"]>) => {
+    setC((x) => ({ ...x, voice: { ...x.voice, ...p } }));
+    save({ voice: p });
   };
 
   const logo = (p: Partial<OutputControls["logo"]>, persist = true) => {
@@ -190,35 +197,142 @@ export function VideoOutputCard({
               {narrator.provider} · {narrator.model} · {narrator.language}
             </p>
           ) : null}
+          {c.voice.director ? (
+            <div className="grid gap-2 sm:grid-cols-4">
+              <Field label="Giọng">
+                <Select value={c.voice.preset} onChange={(e) => voice({ preset: e.currentTarget.value })}>
+                  <option value="AUTO">Tự động ({narrator?.director.autoPresetLabel ?? "theo phong cách"})</option>
+                  {(["NAM", "NỮ"] as const).map((g) => (
+                    <optgroup key={g} label={g}>
+                      {VOICE_PRESETS.filter((p) => p.group === g).map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Phong cách">
+                <p className="py-1.5 text-xs text-ink-300">{narrator?.director.styleLabel ?? "-"}</p>
+                <p className="text-[10px] text-ink-500">Theo Phong cách sáng tạo của dự án.</p>
+              </Field>
+              <Field label="Cảm xúc">
+                <Select value={c.voice.emotion} onChange={(e) => voice({ emotion: e.currentTarget.value as VoiceEmotionId })}>
+                  {VOICE_EMOTIONS.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Tốc độ">
+                <Select value={c.voice.speedMode} onChange={(e) => voice({ speedMode: e.currentTarget.value as SpeedModeId })}>
+                  {SPEED_MODES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </Select>
+                {c.voice.speed !== null ? <p className="text-[10px] text-warn-500">Đang dùng tốc độ chính xác {c.voice.speed.toFixed(2)}x (Nâng cao).</p> : null}
+              </Field>
+            </div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Field label="Giọng">
+                <Select value={c.voice.voiceId ?? narrator?.voiceId ?? ""} onChange={(e) => voice({ voiceId: e.currentTarget.value })}>
+                  {narrator && !narrator.voices.some((v) => v.id === narrator.voiceId) ? <option value={narrator.voiceId}>{narrator.voiceId}</option> : null}
+                  {(narrator?.voices ?? []).map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label={`Tốc độ: ${(c.voice.speed ?? narrator?.speed ?? 1).toFixed(2)}x`}>
+                {slider(
+                  c.voice.speed ?? narrator?.speed ?? 1,
+                  0.5,
+                  2,
+                  0.05,
+                  (v) => setC((x) => ({ ...x, voice: { ...x.voice, speed: v } })),
+                  (v) => save({ voice: { speed: v } }),
+                )}
+                <p className="text-[10px] text-ink-500">Đổi giọng/tốc độ = cần tạo giọng mới (xem giá khi Nghe thử).</p>
+              </Field>
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-2 rounded-lg border border-ink-800 bg-ink-850 p-2 text-xs text-ink-400">
+                Voice Director chưa bật cho dự án này - giọng đã tạo được giữ nguyên.
+                <Button size="sm" variant="outline" disabled={pending} onClick={() => voice({ director: true })}>
+                  Bật Voice Director
+                </Button>
+              </div>
+            </div>
+          )}
+          {c.voice.director && narrator ? (
+            <>
+              <p className="text-[11px] text-ink-500">
+                Cảnh nghe thử: {narrator.director.roleLabel ?? "-"} · {narrator.director.presetLabel} · {narrator.director.emotionLabel} · {narrator.speed.toFixed(2)}x. Mỗi cảnh được đọc theo vai trò và cảm xúc riêng, cùng một giọng.
+              </p>
+              {narrator.director.warnings.map((w) => (
+                <p key={w} className="text-[11px] text-warn-500">
+                  {w}
+                </p>
+              ))}
+              <details className="rounded-lg border border-ink-800 p-2 text-xs">
+                <summary className="cursor-pointer text-ink-300">Nâng cao</summary>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <Field label="Voice model">
+                    <p className="py-1.5 text-ink-300">
+                      {narrator.provider} · {narrator.model}
+                    </p>
+                  </Field>
+                  <Field label="Voice (thay giọng của preset)">
+                    <Select value={c.voice.voiceId ?? ""} onChange={(e) => voice({ voiceId: e.currentTarget.value || null })}>
+                      <option value="">Theo preset ({narrator.voiceId})</option>
+                      {narrator.voices.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label={`Tốc độ chính xác: ${c.voice.speed === null ? "tự động" : `${c.voice.speed.toFixed(2)}x`}`}>
+                    {slider(
+                      c.voice.speed ?? narrator.speed,
+                      0.5,
+                      2,
+                      0.05,
+                      (v) => setC((x) => ({ ...x, voice: { ...x.voice, speed: v } })),
+                      (v) => save({ voice: { speed: v } }),
+                    )}
+                    {c.voice.speed !== null ? (
+                      <Button size="sm" variant="ghost" onClick={() => voice({ speed: null })}>
+                        Bỏ tốc độ chính xác
+                      </Button>
+                    ) : null}
+                  </Field>
+                  <Field label="Voice instruction thêm (tuỳ chọn)">
+                    <Textarea
+                      rows={3}
+                      maxLength={500}
+                      defaultValue={c.voice.instructions ?? ""}
+                      placeholder="Ví dụ: nhấn mạnh tên sản phẩm, giọng miền Nam nhẹ nhàng"
+                      onBlur={(e) => {
+                        const instructions = e.currentTarget.value.trim() || null;
+                        if (instructions !== c.voice.instructions) voice({ instructions });
+                      }}
+                    />
+                  </Field>
+                </div>
+                <p className="mt-2 text-[10px] text-ink-500">Instruction gửi cho cảnh nghe thử:</p>
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-ink-900 p-2 text-[10px] text-ink-400">{narrator.instructions}</pre>
+                <Button size="sm" variant="ghost" className="mt-2" onClick={() => voice({ director: false })}>
+                  Tắt Voice Director
+                </Button>
+              </details>
+            </>
+          ) : null}
           <div className="grid gap-2 sm:grid-cols-3">
-            <Field label="Giọng">
-              <Select
-                value={c.voice.voiceId ?? narrator?.voiceId ?? ""}
-                onChange={(e) => {
-                  const voiceId = e.currentTarget.value;
-                  setC((x) => ({ ...x, voice: { ...x.voice, voiceId } }));
-                  save({ voice: { voiceId } });
-                }}
-              >
-                {narrator && !narrator.voices.some((v) => v.id === narrator.voiceId) ? <option value={narrator.voiceId}>{narrator.voiceId}</option> : null}
-                {(narrator?.voices ?? []).map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label={`Tốc độ: ${(c.voice.speed ?? narrator?.speed ?? 1).toFixed(2)}x`}>
-              {slider(
-                c.voice.speed ?? narrator?.speed ?? 1,
-                0.5,
-                2,
-                0.05,
-                (v) => setC((x) => ({ ...x, voice: { ...x.voice, speed: v } })),
-                (v) => save({ voice: { speed: v } }),
-              )}
-              <p className="text-[10px] text-ink-500">Đổi giọng/tốc độ = cần tạo giọng mới (xem giá khi Nghe thử).</p>
-            </Field>
             <Field label={`Âm lượng lời đọc: ${pct(c.audio.narrationVolume)}`}>
               {slider(c.audio.narrationVolume, 0, 2, 0.05, (v) => aud({ narrationVolume: v }, false), (v) => aud({ narrationVolume: v }))}
               <label className="flex items-center gap-2 text-xs text-ink-300">

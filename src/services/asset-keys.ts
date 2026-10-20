@@ -89,13 +89,18 @@ export function voiceReuseKey(opts: {
    * not part of the key, and changing a scene's length does not re-buy speech.
    */
   targetDuration?: number | null;
+  /**
+   * QĐ-142: what the voice is actually handed when the Voice Director prepared
+   * the words (the subtitle keeps `text`). Absent = `text` is what is spoken.
+   */
+  spokenText?: string | null;
 }): string {
   const durationSensitive = opts.provider === "mock";
   return buildAssetReuseKey({
     kind: "audio",
     provider: opts.provider,
     model: opts.model,
-    text: opts.text,
+    text: opts.spokenText ?? opts.text,
     voiceId: opts.voiceId,
     instructions: opts.instructions ?? "",
     speed: opts.speed ?? 1,
