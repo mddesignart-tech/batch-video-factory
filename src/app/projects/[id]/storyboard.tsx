@@ -32,6 +32,7 @@ import {
   skipScene,
   updateScene,
 } from "@/app/actions/projects";
+import { resultForScene, type SceneResult } from "@/lib/scene-result";
 import { formatUSD } from "@/lib/utils";
 import {
   COMPLEXITIES,
@@ -171,10 +172,15 @@ export function Storyboard({
   clipLibrary?: ClipView[];
 }) {
   const [selectedId, setSelectedId] = useState(scenes[0]?.id ?? "");
-  const [result, setResult] = useState<ActionResult | null>(null);
+  // Tagged with the scene the action started from, so switching scenes never shows another scene's message.
+  const [sceneResult, setSceneResult] = useState<SceneResult | null>(null);
 
   const selected = scenes.find((s) => s.id === selectedId) ?? scenes[0];
   if (!selected) return null;
+
+  const result = resultForScene(sceneResult, selected.id);
+  const actionSceneId = selected.id;
+  const setResult = (r: ActionResult) => setSceneResult({ sceneId: actionSceneId, result: r });
 
   const routing = routingByScene[selected.sceneNumber];
   // The model a PERSON pinned, if any - never the router's plan or record (QĐ-069).
@@ -443,6 +449,7 @@ export function Storyboard({
               onDone={setResult}
             />
             <SceneImagePanel
+              key={`image-${selected.id}`}
               sceneId={selected.id}
               sceneNumber={selected.sceneNumber}
               imageSource={selected.imageSource}

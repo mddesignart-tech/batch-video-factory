@@ -1,9 +1,31 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-19 (**QĐ-141 DONE** — đủ N mục theo yêu cầu + chi phí cảnh/dự án khớp sổ chi, sau REAL API SMOKE TEST đầu tiên PASS $0,125; xem mục đầu). 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-20 (**V1.5.1 RELEASED** — tag `batch-video-factory-v1.5.1` → commit này + GitHub Release (Latest), ghi chú `RELEASE_NOTES_V1.5.1.md`; QĐ-141 + REAL API VALIDATION PASS + sửa dòng thông báo sai cảnh; xem mục đầu). 2026-10-19 (**QĐ-141 DONE** — đủ N mục theo yêu cầu + chi phí cảnh/dự án khớp sổ chi, sau REAL API SMOKE TEST đầu tiên PASS $0,125; xem mục đầu). 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## V1.5.1 — QĐ-141 REAL API VALIDATION PASS + sửa thông báo sai cảnh (2026-10-20)
+
+```
+REAL API        dự án 6b8a7dd7 · lô 76cb9fe3 · trần người dùng $0,20, trần lô $0,16 · build 5396422 (next start)
+VALIDATION      Groq viết 5 cảnh (hook + Mẹo 1/2/3 + tóm tắt) trong 1 lần gọi, không viết lại, không ITEMS_MISSING.
+                Cảnh 1 + 5 nhập lại ảnh của dự án 4c25708b (IMPORTED, REUSE $0); hook dùng LOCAL MOTION; Video AI = 0.
+                Chi thật $0,125924 (text $0,002269 + 3 ảnh $0,12348 + 5 TTS $0,000175).
+                Sổ $11,200549 → $11,326473 / hạn mức $15 (còn $3,673527). Tổng cảnh + text = Project.actualCost = sổ;
+                estimatedCost giữ $0,1485. Mở lại + RENDER LẠI: MP4 mới, sổ không đổi (294 dòng).
+                Sao lưu trước khi chạy: backups/app-before-qd141-real-validation-20261020-121533.db
+UI FIX          RELATED 4 file · 44/44 PASS (scene-result mới + imported-images, scene-save-routing, composite-ui)
+                lint PASS · typecheck PASS · build PASS · secret scan PASS · PAID API POST = 0 (mock)
+FULL SUITE      giữ kết quả gần nhất 125/125 file · 1875/1875 PASS ở 5396422 — KHÔNG chạy lại: thay đổi chỉ là
+                state UI cục bộ của storyboard, không chạm media routing / cost / pipeline trả phí.
+```
+
+- Lỗi: mở cảnh 1 vẫn thấy dòng xanh "Cảnh 5 dùng ảnh nhập". Nguyên nhân: dòng thông báo của storyboard là MỘT state
+  chung (`useState<ActionResult>`), không gắn cảnh; đổi cảnh không xoá, và action đang chạy khi đổi cảnh cũng hiện ở
+  cảnh mới. Sửa: thông báo gắn `sceneId` của cảnh bấm nút (`src/lib/scene-result.ts`, `resultForScene`), chỉ hiện ở
+  đúng cảnh đó; `SceneImagePanel` có `key` theo cảnh nên lịch sử ảnh / khung / busy của cảnh trước không sót lại.
+- Tồn đọng (CHƯA sửa): đặt 12 s nhưng MP4 thật 28,08 s vì lời đọc dài hơn — xem `.ai/NEXT_TASKS.md`.
 
 ## Sau v1.5.0 — REAL API SMOKE TEST PASS + QĐ-141 DONE (2026-10-19)
 
