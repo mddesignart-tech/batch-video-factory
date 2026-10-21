@@ -55,6 +55,7 @@ import { keyframeRequired, type MotionResolution } from "@/domain/local-motion";
 import { parseDialogueLines, splitSpeakerLabel, type ParsedLine } from "@/domain/dialogue-lines";
 import { voiceRowMatches } from "@/domain/voice-line-match";
 import { MIN_VOICE_BYTES } from "@/services/voice-validity";
+import { isFreeVoiceProvider } from "@/providers/voice-config";
 import { NEEDS_SELECTION_STATUS, needsSelectionMessage } from "@/domain/video-selection";
 import { marksProviderUnsuitable, withFlag } from "@/domain/video-suitability";
 import { deriveSceneVideoFacts } from "./low-auto-facts";
@@ -509,7 +510,11 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
     //
     // It sits inside this branch on purpose: resuming a job that was already
     // paid for must never be blocked by a cap the earlier charge helped reach.
-    await assertCanSpend({
+    //
+    // A FREE local voice (CIT Voice Studio, QĐ-144) spends nothing: no cap, no
+    // batch reservation, no create token - none of them has money to guard.
+    const free = kind === "audio" && isFreeVoiceProvider(decision.provider);
+    if (!free) await assertCanSpend({
       provider: decision.provider,
       model: decision.modelId,
       estimatedCost: decision.estimatedCost,
@@ -533,7 +538,7 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
     // They are mutually exclusive by construction: `needsCreatePermit` returns
     // false exactly when a batch approval applies. Requiring both would make
     // batches impossible; requiring neither would make them unaccountable.
-    if (ctx.batchId) {
+    if (ctx.batchId && !free) {
       const gate = await assertBatchAuthorized({
         batchId: ctx.batchId,
         projectId: ctx.project.id,
@@ -562,7 +567,7 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
       });
     }
 
-    if (needsCreatePermit(kind, decision.provider, Boolean(ctx.batchId))) {
+    if (!free && needsCreatePermit(kind, decision.provider, Boolean(ctx.batchId))) {
       await consumeCreateToken({
         provider: decision.provider,
         model: decision.modelId,
@@ -922,6 +927,9 @@ async function saveAsset(opts: {
       inputsJson: JSON.stringify(opts.inputs ?? {}),
     },
   });
+  // Local generation (CIT Voice Studio, QĐ-144) is not a purchase: no ledger
+  // line at all. The Asset row above keeps provider, time and file.
+  if (kind === "audio" && isFreeVoiceProvider(decision.provider)) return;
   await recordCost({
     projectId: ctx.project.id,
     batchId: ctx.project.batchId,
@@ -2588,7 +2596,10 @@ export async function voiceSettingsFor(
   // `openai/gpt-4o-mini-tts` is not a mock model - so pinning it would fail
   // routing outright rather than run free. Mock Mode is a hard gate, so the
   // router picks a mock voice and the character's choice waits for real mode.
-  const pin = !isMockMode();
+  // A FREE local provider (CIT Voice Studio, QĐ-144) is pinned even in Mock
+  // Mode: it cannot spend, and a person chose it.
+  const pinFor = (provider: string | null | undefined) => !isMockMode() || isFreeVoiceProvider(provider ?? "");
+  const pin = pinFor(character?.voiceProvider);
 
   const base = {
     characterId: character?.id ?? null,
@@ -2609,8 +2620,8 @@ export async function voiceSettingsFor(
     if (own) {
       return {
         ...base,
-        provider: pin ? (own.provider ?? base.provider) : null,
-        model: pin ? (own.model ?? base.model) : null,
+        provider: pinFor(own.provider ?? character?.voiceProvider) ? (own.provider ?? character?.voiceProvider ?? null) : null,
+        model: pinFor(own.provider ?? character?.voiceProvider) ? (own.model ?? character?.voiceModel ?? null) : null,
         voiceId: own.voiceId ?? base.voiceId,
         speed: own.speed ?? base.speed,
         instructions: own.instructions ?? base.instructions,
@@ -2908,6 +2919,7 @@ export async function generateSceneVoice(
                 speed: settings.speed,
                 targetDuration: scene.duration,
                 outputPath,
+                ...(settings.language ? { language: settings.language } : {}),
               }),
             poll: (id) => provider.getJobStatus(id),
             download: (id) => provider.downloadResult(id),

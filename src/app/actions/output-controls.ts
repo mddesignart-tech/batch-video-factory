@@ -31,6 +31,8 @@ import {
   type VoiceEmotionId,
 } from "@/domain/voice-director";
 import type { ActionResult } from "./idioms";
+import { citStatusView, refreshCitCatalog, type CitStatusView } from "@/services/cit-catalog";
+import { CIT_PROVIDER } from "@/domain/cit";
 
 /**
  * VIDEO OUTPUT card (QĐ-125). Everything but the voice is local-render only:
@@ -146,7 +148,7 @@ export async function narratorInfoAction(projectId: string): Promise<{ ok: boole
     } catch {
       voices = [];
     }
-    if (own.director) {
+    if (own.director && provider !== CIT_PROVIDER) {
       // The director speaks with gpt-4o-mini-tts voices, whatever a mock lists.
       const listed = new Set(voices.map((v) => v.id));
       voices = [...VOICE_CATALOG.filter((v) => !listed.has(v.id)).map((v) => ({ id: v.id, label: `${v.label} - ${v.note}` })), ...voices];
@@ -257,6 +259,19 @@ export async function setSceneVoiceEmotionAction(sceneId: string, emotion: Voice
     await saveProjectControls(scene.projectId, { voice: { sceneEmotions } } as never);
     revalidatePath(`/projects/${scene.projectId}`);
     return { ok: true, message: `Cảnh ${scene.sceneNumber}: đã đổi cảm xúc giọng. Bấm NGHE THỬ GIỌNG để xem giá - chưa có request nào được gửi.` };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+/**
+ * CIT Voice Studio (QĐ-144): ask the local CIT for /health, /voices and its
+ * OpenAPI. Read-only, $0, makes no audio. Offline is reported, never an error.
+ */
+export async function citStatusAction(): Promise<{ ok: boolean; message: string; status?: CitStatusView }> {
+  try {
+    const status = citStatusView(await refreshCitCatalog());
+    return { ok: true, message: status.message, status };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

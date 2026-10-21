@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { toAbsolute } from "@/lib/paths";
+import { LOCAL_PROVIDERS } from "@/providers/provider-credentials";
 
 /**
  * Paid requests whose outcome is not settled - NEEDS_RECOVERY (V1.2 Phase 3,
@@ -47,7 +48,8 @@ export const RECOVERY_MESSAGE =
 export async function jobPossiblyBilled(
   job: Pick<ProviderJob, "provider" | "idempotencyKey" | "externalId" | "billedUnits">,
 ): Promise<boolean> {
-  if (job.provider === "mock") return false;
+  // Mock and local providers (CIT Voice Studio, QĐ-144) never bill.
+  if (job.provider === "mock" || LOCAL_PROVIDERS.has(job.provider)) return false;
   // The vendor said it charged nothing: a fact beats any inference.
   // (ProviderJob.actualCost defaults to 0, so only billedUnits carries that fact.)
   if (job.billedUnits === 0) return false;

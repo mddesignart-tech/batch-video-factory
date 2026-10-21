@@ -17,6 +17,18 @@ import {
   type VoiceIdentity,
   type VoiceTimbre,
 } from "@/domain/voice-director";
+import {
+  CIT_AUTO_VOICE,
+  CIT_PROVIDER,
+  citDirection,
+  citDirectionSummary,
+  citLanguageFor,
+  clampCitSpeed,
+  pickCitVoice,
+  type CitEngineId,
+} from "@/domain/cit";
+import { OPENAI_VOICES } from "@/providers/openai/openai-voice-client";
+import { cachedCitCatalog, engineOfVoice, type CitCatalog } from "./cit-catalog";
 
 /**
  * VOICE DIRECTOR, wired to a scene (QĐ-142).
@@ -34,12 +46,16 @@ export interface LineVoiceSettings {
   instructions: string;
   speed: number;
   model: string | null;
+  /** Who speaks it (QĐ-144: CIT gets its own adapter). Absent = not known here. */
+  provider?: string | null;
 }
 
 export interface Directed {
   /** Exactly what is sent to the voice model; absent = the line's own words. */
   spokenText?: string;
   directed?: DirectedVoice;
+  /** Language code sent to a provider that takes one (CIT). */
+  language?: string;
 }
 
 type SceneInput = Pick<Scene, "dialogue" | "narration"> &
@@ -65,11 +81,18 @@ export async function voiceDirectorFor(
   const project = await prisma.project.findUnique({ where: { id: scene.projectId } });
   if (!project) return untouched;
   const voice = controlsOf(project).voice;
-  if (!voice.director) return untouched;
+  const content = projectContent(project);
+  // CIT Voice Studio (QĐ-144) gets its own adapter, director on or off.
+  const catalog = await cachedCitCatalog();
+  const cit = <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T, directed: DirectedVoice | null): T & Directed =>
+    citDirected(line, base, directed, content.language, catalog);
+  if (!voice.director) {
+    return <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T) =>
+      base.provider === CIT_PROVIDER ? cit(line, base, null) : (base as T & Directed);
+  }
 
   const context = await sceneContext(project, scene);
   const narrator = await prisma.character.findUnique({ where: { name: "Narrator" } });
-  const content = projectContent(project);
   const styleId = voiceStyleFor(content.creative, content.legacy ? null : content.contentType);
   const preset = voicePresetOf(voice.preset) ?? autoPresetFor(styleId, timbreOf(narrator));
   const emotion = (scene.id ? voice.sceneEmotions[scene.id] : undefined) ?? voice.emotion;
@@ -112,6 +135,7 @@ export async function voiceDirectorFor(
       narrator: narrated,
       charsPerSecond: cps,
     });
+    if (base.provider === CIT_PROVIDER) return cit(line, { ...base, speed: directed.speed }, directed);
     const classic = base.model && /^tts-1/.test(base.model) ? CLASSIC_EQUIVALENT[identity.voiceId] : undefined;
     return {
       ...base,
@@ -121,6 +145,58 @@ export async function voiceDirectorFor(
       spokenText,
       directed,
     };
+  };
+}
+
+const NOT_CIT_VOICES = new Set<string>(OPENAI_VOICES.map((v) => v.id));
+
+/**
+ * A line spoken by CIT Voice Studio (QĐ-144). The OpenAI `instructions` are
+ * NOT sent; the director's intent becomes CIT's own inline tags in the text
+ * (see citDirection), and `instructions` records the CIT direction for the
+ * voice key and the line row. Engine and voice come from the KEPT catalog, so
+ * the key does not depend on whether CIT is open right now.
+ */
+function citDirected<T extends LineVoiceSettings>(
+  line: { speaker: string; text: string },
+  base: T,
+  directed: DirectedVoice | null,
+  projectLanguage: string,
+  catalog: CitCatalog | null,
+): T & Directed {
+  const lineLanguage = speechLanguageOf(projectLanguage, line.text);
+  const language = citLanguageFor(projectLanguage, lineLanguage);
+  const known = catalog?.voices.some((v) => v.id === base.voiceId) ?? false;
+  // A voice id CIT does not have (an OpenAI or mock voice left on the narrator) means "Tự động".
+  const foreign = !base.voiceId || NOT_CIT_VOICES.has(base.voiceId) || base.voiceId.startsWith("mock-");
+  const chosen = known || (!catalog?.voices.length && !foreign) ? base.voiceId : CIT_AUTO_VOICE;
+  let voiceId = chosen;
+  let engine: CitEngineId = engineOfVoice(catalog, chosen);
+  if (chosen === CIT_AUTO_VOICE) {
+    const pick = catalog ? pickCitVoice(catalog.voices, catalog.health, language) : null;
+    if (pick?.ok) {
+      voiceId = pick.voice.id;
+      engine = pick.voice.engine;
+    } else {
+      // Resolved by CIT at generation time; the language decides the engine.
+      engine = language === "vi" ? "VIENEU" : language === "en" ? "SUPERTONIC" : "UNKNOWN";
+    }
+  }
+  const tagged = citDirection({
+    text: prepareSpeechText(line.text, lineLanguage),
+    engine,
+    style: directed?.styleId ?? null,
+    role: directed?.role ?? null,
+    emotion: directed?.emotion ?? null,
+  });
+  return {
+    ...base,
+    voiceId,
+    speed: clampCitSpeed(base.speed),
+    instructions: citDirectionSummary({ engine, language, style: directed?.styleId ?? null, role: directed?.role ?? null, emotion: directed?.emotion ?? null }),
+    spokenText: tagged.text,
+    language,
+    ...(directed ? { directed } : {}),
   };
 }
 

@@ -26,10 +26,12 @@ export const DEFAULT_BASE_URLS: Record<string, string> = {
   // Local runtimes: no key, no cost, ideal for testing an integration.
   ollama: "http://localhost:11434/v1",
   lmstudio: "http://localhost:1234/v1",
+  // CIT Voice Studio (QĐ-144): local TTS, same machine only.
+  cit: "http://127.0.0.1:8001",
 };
 
 /** Providers that run locally and therefore need no API key and cost nothing. */
-export const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio"]);
+export const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio", "cit"]);
 
 export class ProviderConfigError extends Error {
   constructor(message: string) {

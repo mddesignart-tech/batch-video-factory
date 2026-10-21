@@ -42,6 +42,7 @@ export const KNOWN_PROVIDERS: Record<string, ModelType[]> = {
   runway: ["video"],
   kling: ["video"],
   elevenlabs: ["voice"],
+  cit: ["voice"],
 };
 
 /**
@@ -62,6 +63,7 @@ export const IMPLEMENTED_PROVIDERS = new Set<string>([
   "google",
   "ollama",
   "lmstudio",
+  "cit",
 ]);
 
 /** Which slots a given provider can actually fill in THIS build. */
@@ -76,6 +78,7 @@ export const IMPLEMENTED_TYPES: Record<string, ModelType[]> = {
   google: ["text", "video"],
   ollama: ["text"],
   lmstudio: ["text"],
+  cit: ["voice"],
 };
 
 export function isTypeImplemented(name: string, type: ModelType): boolean {
@@ -173,6 +176,14 @@ export async function getVoiceProvider(
   name: string,
   model: string,
 ): Promise<VoiceProvider> {
+  // CIT Voice Studio runs on this machine and costs nothing, so Mock Mode -
+  // which exists to make spending impossible - has nothing to protect here
+  // (QĐ-144). It is only ever used when a person picked it.
+  if (name === "cit") {
+    const { resolveBaseUrl } = await import("./provider-credentials");
+    const { CitVoiceProvider } = await import("./cit/cit-voice-provider");
+    return new CitVoiceProvider({ baseUrl: await resolveBaseUrl("cit").catch(() => "http://127.0.0.1:8001") });
+  }
   if (isMockMode() || name === "mock") return mockVoice;
 
   const { VOICE_PROVIDERS, buildVoiceConfig } = await import("./voice-config");

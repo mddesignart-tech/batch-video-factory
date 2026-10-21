@@ -4382,3 +4382,55 @@ registry ($0,0006/1k ký tự) — CHỜ người dùng duyệt.
 
 **Kiểm tra:** `tests/speaker-label.test.ts` (A–G + speechTextFor + khoá giọng), `tests/multi-speaker-dialogue.test.ts`
 (mock end-to-end: request TTS / DialogueLine / phụ đề không có nhãn, đúng giọng từng người, lần 2 = 0 TTS).
+
+## QĐ-144 — CIT VOICE STUDIO: LOCAL TTS PROVIDER đa ngôn ngữ, $0 (2026-10-21, mock, $0)
+
+**Nguồn:** người dùng yêu cầu tích hợp CIT Voice Studio (github.com/Cuongyd196/cit-voice-studio, v1.0.3) như một
+LOCAL TTS PROVIDER cùng máy, cạnh OpenAI TTS; không đổi provider mặc định; không reverse-engineer, không copy source —
+chỉ dùng public Local API. (Người dùng gọi là "QD-143"; số QĐ-143 đã dùng cho nhãn người nói nên ghi là QĐ-144.)
+
+**Tài liệu công khai (README):** `http://127.0.0.1:8001`; GET `/health`, GET `/voices`, GET/POST `/stream`,
+POST `/api/tts/generate` (`text`, `voice_id` → bytes âm thanh), `/api/tts/generate-with-subtitles`,
+`/api/tts/conversation`; `/docs`, `/openapi.json`. Tag VieNeu `[cười] [thở dài] [hắng giọng]`, Supertonic
+`<laugh> <breath> <sigh>`, nghỉ `[nghỉ 500ms]` / `[nghỉ 2s]` (≤ 10 s). Người dùng bổ sung: v1.0.3 có `language`.
+Cấu trúc JSON của /health, /voices và mọi field ngoài `text`/`voice_id` KHÔNG có trong README → máy này chưa cài CIT
+nên chưa đọc được OpenAPI thật.
+
+**Thiết kế (không đoán schema):**
+- `src/domain/cit.ts` (thuần): đọc /health, /voices theo kiểu dung sai (mảng / `{voices}` / `{data}` / map), đọc
+  `/openapi.json` (resolve `$ref`, `anyOf`, `allOf`, query params) để biết field nào của POST /api/tts/generate thật sự có.
+  Request: LUÔN `text` + `voice_id` (đã tài liệu hoá); `speed` / `language` / `format` CHỈ khi OpenAPI khai báo (speed
+  kẹp theo min/max của spec, mặc định 0,75–1,5 như UI CIT; `format=wav` nếu enum cho phép). Không có OpenAPI → chỉ 2 field.
+- Provider `cit`, model `cit-local` (giá $0, lifecycle PIN_ONLY → router không bao giờ tự chọn; mặc định giữ nguyên).
+  Engine theo giọng: VieNeu-TTS v3 Turbo (Apache-2.0) / Supertonic 3 (OpenRAIL-M, tải riêng trong CIT). Giọng "Tự động":
+  vi → VieNeu, en → Supertonic nếu đã tải (chưa tải → `SUPERTONIC_NOT_READY` + hướng dẫn CIT → Cài đặt → Mô hình),
+  ngôn ngữ khác → chỉ khi /health + /voices báo hỗ trợ (`LANGUAGE_UNSUPPORTED`).
+- Discovery lưu ở Setting `cit.catalog` (giữ danh sách giọng khi offline) → Voice Director đọc engine KHÔNG cần mạng →
+  khoá giọng không phụ thuộc CIT đang mở hay không; render lại = 0 TTS.
+- Voice Director adapter (`citDirection`): KHÔNG gửi OpenAI `instructions`. Professional / Educational / Natural / Review /
+  Cute / Energetic: chỉ lời; Documentary / Dramatic / Storytelling: `[nghỉ 500ms]` giữa câu (≤ 2); punchline: nghỉ trước
+  câu cuối, Hài TikTok thêm MỘT tiếng cười đúng cú pháp engine; cảm động: `[thở dài]`/`<sigh>` + `[nghỉ 1s]`; ≤ 1 tag cảm xúc
+  mỗi câu; engine không rõ → chỉ pause. `[hắng giọng]` không tự chèn. Director tắt → chỉ lời.
+- Khoá giọng (voiceReuseKey có sẵn): provider + model + voice_id + spokenText (đã gắn tag) + speed + `instructions` =
+  tóm tắt `CIT cit-v1 engine=… lang=… style/role/emotion` (KHÔNG gửi CIT). DialogueLine.text + phụ đề giữ lời gốc.
+- Chi phí: Asset actualCost 0, KHÔNG ghi CostEntry, KHÔNG qua spend cap / batch reservation / create token
+  (`isFreeVoiceProvider`); `jobPossiblyBilled` = false cho provider local. Metadata: CIT_LOCAL, localGeneration, engine,
+  license, attribution, generationDurationMs.
+- Mock Mode: CIT là $0 nên vẫn gọi được khi người dùng chọn (registry, voiceSettingsFor, availableProviderNames); OpenAI vẫn bị khoá.
+- Fallback: chọn CIT = ghim tay → router không có fallback; CIT offline → `CIT_OFFLINE` (không retry) + hướng dẫn mở CIT.
+- Audio: WAV đi thẳng vào pipeline (trim + loudnorm per clip, trộn 24 kHz như mọi giọng); không phải WAV → ffmpeg đổi
+  sang WAV một lần. Render cuối không đổi.
+- Hội thoại nhiều người: theo pipeline sẵn có, mỗi câu một request `/api/tts/generate` với giọng CIT của từng nhân vật
+  (Characters → Nhà cung cấp `cit`, model `cit-local`, giọng = voice_id CIT). `/api/tts/conversation` chỉ được phát
+  hiện, chưa dùng (Phase 1).
+- Từ điển phát âm: chỉ phát hiện đường dẫn trong OpenAPI và hiển thị; KHÔNG sửa từ điển của người dùng.
+- UI: VIDEO OUTPUT → Giọng thuyết minh → "Nhà cung cấp giọng": Mặc định / "CIT Voice Studio — Local / $0"; trạng thái
+  Online/Offline + Kiểm tra lại, Provider / Engine / Language / Voice, danh sách giọng theo engine, engine + giấy phép.
+
+**Chưa làm (Phase 1):** voice cloning, CIT qua LAN, direct VieNeu SDK, ElevenLabs, đóng gói CIT, /stream,
+/generate-with-subtitles, /conversation. Real A/B CIT chờ người dùng cài/mở CIT và xác nhận.
+
+**Kiểm tra:** `tests/cit-voice.test.ts` 10/10 (mock CIT server HTTP thật: discovery, 35 giọng động, offline, request chỉ
+field khai báo, vi/en, Supertonic chưa tải, tag, Narrator không bị đọc, cùng giọng nhiều cảnh, preview → run → render lại
+= 0 request, đổi tốc độ chỉ invalid đúng câu, offline không gọi provider khác, $0 không ghi sổ, nhiều người nói, dự án
+OpenAI cũ không đổi).

@@ -27,6 +27,7 @@ import {
 import { SPEED_MODES, VOICE_EMOTIONS, VOICE_PRESETS, type SpeedModeId, type VoiceEmotionId } from "@/domain/voice-director";
 import type { LogoReferenceOption, LogoState } from "@/services/logo-overlay";
 import { LogoOverlaySection } from "./logo-overlay-section";
+import { CitVoicePanel } from "./cit-voice-panel";
 
 const media = (p: string) => `/api/media/${p.split(/[\\/]/).map(encodeURIComponent).join("/")}`;
 const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -197,6 +198,7 @@ export function VideoOutputCard({
               {narrator.provider} · {narrator.model} · {narrator.language}
             </p>
           ) : null}
+          <CitVoicePanel voice={c.voice} language={narrator?.language ?? "-"} onChange={voice} disabled={pending} />
           {c.voice.director ? (
             <div className="grid gap-2 sm:grid-cols-4">
               <Field label="Giọng">

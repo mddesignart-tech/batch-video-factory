@@ -279,6 +279,8 @@ export interface VoiceRequest {
   speed: number;
   targetDuration: number;
   outputPath: string;
+  /** Language code of the line (QĐ-144); sent only to providers that take one. */
+  language?: string;
 }
 
 export interface VoiceProvider extends BaseProvider {

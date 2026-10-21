@@ -40,6 +40,9 @@ export function deriveStatus(
 ): ProviderStatus {
   // Mock mode makes every provider slot answerable locally, so nothing is
   // reported as broken just because the operator has no keys yet.
+  // CIT Voice Studio (QĐ-144): local and free - usable in Mock Mode too, needs
+  // no key and no Internet. Whether it is RUNNING is asked of CIT itself.
+  if (config.name === "cit") return config.enabled ? "connected" : "disabled";
   if (isMockMode()) return config.name === "mock" ? "connected" : "disabled";
 
   // Outside mock mode the mock provider is NOT a provider. It is a simulator,
@@ -129,7 +132,11 @@ function noteFor(status: ProviderStatus, name: string): string {
  * routing, cost preview, generation - filters through this one list.
  */
 export async function availableProviderNames(): Promise<string[]> {
-  if (isMockMode()) return ["mock"];
+  if (isMockMode()) {
+    // CIT is $0 and pin-only, so it stays reachable for a person who chose it.
+    const cit = await prisma.providerConfig.findUnique({ where: { name: "cit" }, select: { enabled: true } });
+    return cit?.enabled ? ["mock", "cit"] : ["mock"];
+  }
   const health = await listProviderHealth();
   return health
     .filter((h) => h.status === "connected")

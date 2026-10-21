@@ -278,6 +278,8 @@ export async function saveCharacterVoice(
     };
   }
   try {
+    // QĐ-144: a character voiced by CIT Voice Studio needs its $0 provider/model rows.
+    if (parsed.data.voiceProvider === "cit") await (await import("@/services/cit-catalog")).ensureCitRegistry();
     await prisma.character.update({
       where: { id: characterId },
       // Voice does NOT bump the character version. Version tracks appearance,
