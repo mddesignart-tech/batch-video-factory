@@ -1,5 +1,5 @@
 import { parseDialogueLines, type ParsedLine } from "./dialogue-lines";
-import { sceneCharacters, type SceneCharacterColumns } from "./scene-characters";
+import { isNarrator, sceneCharacters, type SceneCharacterColumns } from "./scene-characters";
 
 /**
  * A scene's subtitles come from the SAME ordered lines its voice is made from
@@ -28,11 +28,14 @@ export function usesAuthorSubtitle(lineCount: number, subtitle: string): boolean
 /**
  * The scene's subtitle as text (metadata, the storyboard view): the author's
  * line for a one-line scene, every line "Speaker: text" in order otherwise.
+ * QĐ-143: a subtitle is the spoken text - a one-line scene and the narrator
+ * (a voice, not a person on screen) never carry a speaker label.
  */
 export function sceneSubtitleText(scene: SceneSpeech & { subtitle: string }): string {
   const lines = spokenLines(scene);
   if (usesAuthorSubtitle(lines.length, scene.subtitle)) return scene.subtitle.trim();
-  return lines.map((l) => (l.speaker ? `${l.speaker}: ${l.text}` : l.text)).join("\n");
+  if (lines.length <= 1) return lines[0]?.text ?? "";
+  return lines.map((l) => (l.speaker && !isNarrator(l.speaker) ? `${l.speaker}: ${l.text}` : l.text)).join("\n");
 }
 
 /**

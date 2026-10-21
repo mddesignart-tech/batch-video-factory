@@ -1,9 +1,20 @@
 # Trạng thái dự án
 
-**Cập nhật:** 2026-10-20 (**QĐ-142 VOICE DIRECTOR DONE** — đạo diễn giọng theo phong cách + vai trò cảnh, 12 preset, 13 giọng OpenAI, chuẩn hoá lời đọc; full suite 127/127 file · 1896/1896 PASS, mock, $0; chưa chạy A/B giọng thật — chờ duyệt; xem mục đầu). 2026-10-20 (**V1.5.1 RELEASED** — tag `batch-video-factory-v1.5.1` → commit này + GitHub Release (Latest), ghi chú `RELEASE_NOTES_V1.5.1.md`; QĐ-141 + REAL API VALIDATION PASS + sửa dòng thông báo sai cảnh; xem mục đầu). 2026-10-19 (**QĐ-141 DONE** — đủ N mục theo yêu cầu + chi phí cảnh/dự án khớp sổ chi, sau REAL API SMOKE TEST đầu tiên PASS $0,125; xem mục đầu). 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
+**Cập nhật:** 2026-10-21 (**QĐ-143 DONE** — TTS không còn đọc nhãn người nói "Narrator:"; chỉ bỏ nhãn khớp người nói / nhãn vai trò, "Lưu ý:" giữ nguyên; full suite 128/128 file · 1906/1906 PASS, mock, $0). 2026-10-21 (REAL VOICE A/B 6 giọng: $0,000744, sổ $11,327552/$15; file ở data/voice-ab/2026-10-21T06-59-50). 2026-10-20 (**QĐ-142 VOICE DIRECTOR DONE** — đạo diễn giọng theo phong cách + vai trò cảnh, 12 preset, 13 giọng OpenAI, chuẩn hoá lời đọc; full suite 127/127 file · 1896/1896 PASS, mock, $0; chưa chạy A/B giọng thật — chờ duyệt; xem mục đầu). 2026-10-20 (**V1.5.1 RELEASED** — tag `batch-video-factory-v1.5.1` → commit này + GitHub Release (Latest), ghi chú `RELEASE_NOTES_V1.5.1.md`; QĐ-141 + REAL API VALIDATION PASS + sửa dòng thông báo sai cảnh; xem mục đầu). 2026-10-19 (**QĐ-141 DONE** — đủ N mục theo yêu cầu + chi phí cảnh/dự án khớp sổ chi, sau REAL API SMOKE TEST đầu tiên PASS $0,125; xem mục đầu). 2026-10-19 (**V1.5.0 RELEASED** — tag `batch-video-factory-v1.5.0` → commit release-housekeeping này + GitHub Release, ghi chú `RELEASE_NOTES_V1.5.md`; gồm QĐ-136 → QĐ-140, full suite 124/124 file · 1861/1861 PASS ở `fea00f7`, UI smoke QĐ-140 PASS). 2026-10-19 (**QĐ-140 DONE** — dọn tồn đọng UAT P2/P3; xem mục đầu). 2026-10-17 (**QĐ-139 DONE** — lô thành ngữ duyệt chi theo kịch bản thật, sửa P1 của UAT; xem mục đầu). 2026-10-17 (**QĐ-138 DONE** — URL Content Extraction; xem mục đầu). 2026-10-17 (**QĐ-137 DONE** — DỪNG BATCH dừng thật + tên lô tăng dần + empty-state lô thành ngữ; xem mục đầu). 2026-10-17 (**QĐ-136 DONE** — Creative Style cho lô thành ngữ, main = origin/main sau `84be22f`; xem mục đầu). 2026-10-17 (full suite 41,4 phút thay vì 2 giờ 37 phút — xem mục đầu). 2026-10-16 (**V1.4.0 RELEASED** — tag `batch-video-factory-v1.4.0` → commit release-housekeeping này
 + GitHub Release, ghi chú `RELEASE_NOTES_V1.4.md`. Gồm QĐ-132 → QĐ-135, full suite 119/119 file · 1786/1786 PASS ở
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
+
+## QĐ-143 — NHÃN NGƯỜI NÓI KHÔNG PHẢI LỜI ĐỌC (2026-10-21, mock, $0)
+
+```
+FULL SUITE  128/128 file · 1906/1906 test PASS (3384 s, một process vitest, mock)
+RELATED     tests/speaker-label.test.ts 9/9 (A–G), tests/multi-speaker-dialogue.test.ts 5/5 (end-to-end mock)
+lint PASS · typecheck PASS · build PASS · PAID API POST = 0 · không migration
+CACHE       data/app.db: 78 dòng giọng, 72 giữ nguyên khoá; 6 dòng dự án 88709340 (có "Narrator:") đổi lời — cần tạo lại khi người dùng chạy
+```
+
+- Root cause: text model ghi "Narrator: ..." vào cột narration; parseDialogueLines không bỏ nhãn ở nhánh narration. Chi tiết: `.ai/DECISIONS.md` QĐ-143.
 
 ## Sau v1.5.1 — QĐ-142 VOICE DIRECTOR DONE (2026-10-20, mock, $0)
 

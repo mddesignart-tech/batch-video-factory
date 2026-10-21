@@ -4351,3 +4351,34 @@ in request A (cũ) và B (director), không gọi API. Chạy thật: 10 TTS POS
 registry ($0,0006/1k ký tự) — CHỜ người dùng duyệt.
 
 **Không làm (backlog):** ElevenLabs, voice cloning, thay provider TTS, sửa pipeline video, thời lượng đặt vs thật.
+
+## QĐ-143 — NHÃN NGƯỜI NÓI KHÔNG PHẢI LỜI ĐỌC: TTS không đọc "Narrator:" (2026-10-21, mock, $0)
+
+**Nguồn:** người dùng nghe giọng đọc cả chữ "Narrator" ("Narrator: Hôm nay chúng ta sẽ...").
+
+**Root cause:**
+- Text model viết `Narrator: ...` vào CỘT `narration` (dự án `88709340`, 6 cảnh, cả 6 dòng giọng đã mua có chữ
+  "Narrator:"). Prompt chỉ nói "one narrator reads every scene (narration field)", không cấm nhãn.
+- `parseDialogueLines` nhánh narration (dialogue rỗng) trả nguyên văn narration làm lời đọc — không bỏ nhãn. Nhánh
+  dialogue chỉ bỏ nhãn khi tên nằm trong danh sách người nói; nhãn vai trò ("Speaker A:", "VO:") rơi vào lời.
+- Cùng chuỗi đó đi tiếp vào `DialogueLine.text`, `voiceReuseKey`, phụ đề (cảnh một câu không có subtitle tác giả,
+  metadata `sceneSubtitleText` tự thêm "Narrator: ").
+- `speechTextFor` (ước tính / kế hoạch) dùng regex mù `^[A-Za-z ]{1,20}:` — sẽ cắt "Note: ..." của câu thường.
+
+**Sửa:**
+- `src/domain/dialogue-lines.ts`: `splitSpeakerLabel(text, known)` + `isSpeakerLabel`. Chỉ bỏ nhãn đầu dòng khi nó là
+  người nói của cảnh (danh sách speaking, tên Character) hoặc nhãn vai trò: Narrator, Người dẫn (chuyện), Host,
+  Voice Over, VO, Speaker A/B/1… "Lưu ý:", "Chim cánh cụt:", "Note:" giữ nguyên. Áp dụng cho narration và dialogue
+  không có nhãn hợp lệ. Người nói vẫn lấy từ `speakingCharactersJson` (source of truth), không từ chuỗi.
+- `speechTextFor`: bỏ regex mù, dùng cùng luật + danh sách người nói của cảnh.
+- `content-service`: kịch bản mới lưu `narration` đã bỏ nhãn (chuẩn hoá một lần lúc lưu); prompt NARRATION / MIXED
+  thêm "only the spoken words, never a 'Narrator:' label".
+- Phụ đề: `sceneSubtitleText` không gắn nhãn cho cảnh một câu và cho người dẫn; hội thoại nhiều người giữ tên (như
+  QĐ-122). Render: dòng giọng cũ còn "Narrator: ..." chỉ hiện lời (bỏ nhãn khớp tên nhân vật của dòng) — không mua lại.
+- Không migration, không sửa dữ liệu production.
+
+**Ảnh hưởng cache (đo trên data/app.db):** 78 dòng giọng → 72 giữ nguyên lời/khoá (0 TTS), 6 dòng của dự án `88709340`
+đổi lời (bỏ "Narrator:") — đúng các câu cần tạo lại; chỉ mua khi người dùng chạy giọng cho dự án đó.
+
+**Kiểm tra:** `tests/speaker-label.test.ts` (A–G + speechTextFor + khoá giọng), `tests/multi-speaker-dialogue.test.ts`
+(mock end-to-end: request TTS / DialogueLine / phụ đề không có nhãn, đúng giọng từng người, lần 2 = 0 TTS).

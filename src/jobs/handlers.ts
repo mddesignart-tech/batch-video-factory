@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { Job } from "@prisma/client";
 import { spokenLines } from "@/domain/scene-subtitles";
+import { splitSpeakerLabel } from "@/domain/dialogue-lines";
 import { isNeedsSelection, NEEDS_SELECTION_STATUS, stoppedSceneStatus } from "@/domain/video-selection";
 import type { JobType } from "@/domain/enums";
 import { prisma } from "@/lib/prisma";
@@ -227,7 +228,9 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
         .map((l) => ({
           lineNumber: l.lineNumber,
           speaker: l.character?.name ?? "",
-          text: l.text,
+          // A line bought before QĐ-143 may still hold "Narrator: ..." - the
+          // caption shows only the words, without buying the line again.
+          text: splitSpeakerLabel(l.text, l.character?.name ? [l.character.name] : []).text.trim(),
           audioPath: toAbsolute(l.outputPath),
           durationSec: l.durationSec,
           pauseAfterMs: l.pauseAfterMs,

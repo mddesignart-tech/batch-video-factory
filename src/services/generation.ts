@@ -52,7 +52,7 @@ import {
 } from "./batch-authorization";
 import { commit as commitReservation, release as releaseReservation } from "./cost-reservation";
 import { keyframeRequired, type MotionResolution } from "@/domain/local-motion";
-import { parseDialogueLines, type ParsedLine } from "@/domain/dialogue-lines";
+import { parseDialogueLines, splitSpeakerLabel, type ParsedLine } from "@/domain/dialogue-lines";
 import { voiceRowMatches } from "@/domain/voice-line-match";
 import { MIN_VOICE_BYTES } from "@/services/voice-validity";
 import { NEEDS_SELECTION_STATUS, needsSelectionMessage } from "@/domain/video-selection";
@@ -2552,15 +2552,13 @@ export async function generateSceneVideo(sceneId: string): Promise<string | null
 
 // ------------------------------------------------------------------ voice ---
 
-export function speechTextFor(scene: Pick<Scene, "dialogue" | "narration">): string {
+export function speechTextFor(scene: Pick<Scene, "dialogue" | "narration"> & Partial<Pick<Scene, "speakingCharactersJson">>): string {
   // Dialogue carries the comedy; narration is the fallback when a beat has none.
-  const dialogue = stripSpeakerLabel(scene.dialogue.trim());
-  const narration = scene.narration.trim();
+  // Only a real speaker label comes off (QĐ-143) - "Lưu ý: ..." is read as written.
+  const speaking = parseJson<string[]>(scene.speakingCharactersJson ?? "[]", []);
+  const dialogue = splitSpeakerLabel(scene.dialogue.trim(), speaking).text.replace(/^"|"$/g, "");
+  const narration = splitSpeakerLabel(scene.narration.trim(), speaking).text;
   return dialogue.length > 0 ? dialogue : narration;
-}
-
-function stripSpeakerLabel(line: string): string {
-  return line.replace(/^[A-Za-z ]{1,20}:\s*/, "").replace(/^"|"$/g, "");
 }
 
 /**

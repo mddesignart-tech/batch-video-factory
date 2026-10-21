@@ -15,6 +15,7 @@ import { materialiseImport, scanImportSource, validateImport } from "@/services/
 import { approveAndRun } from "@/services/batch-executor";
 import { continueVideo } from "@/services/video-resume";
 import { generateSceneVoice } from "@/services/generation";
+import { ensureNarrator } from "@/services/content-service";
 import { captionsFromSrt } from "@/services/output-export";
 
 /**
@@ -189,6 +190,42 @@ describe("QĐ-122 — giọng → phụ đề → render (mock, $0)", () => {
     await generateSceneVoice(scenes[0]!.id);
     await generateSceneVoice(scenes[1]!.id);
     expect((await voicePurchases()) - before).toBe(1);
+  }, 600_000);
+
+  it("QĐ-143: 'Narrator: ...' / 'Speaker A: ...' / 'Mia: ...' → TTS + dòng thoại + phụ đề chỉ có lời; lần 2 = 0 TTS", async () => {
+    await ensureNarrator();
+    const v = await importVideo([
+      { dialogue: `Max: "x ${tag}"`, subtitle: "", cast: ["Max"] },
+      { dialogue: `Max: "y ${tag}"`, subtitle: "", cast: ["Max"] },
+      { dialogue: `Mia: "z ${tag}"`, subtitle: "", cast: ["Mia"] },
+    ]);
+    const scenes = await prisma.scene.findMany({ where: { projectId: v.projectId }, orderBy: { sceneNumber: "asc" } });
+    const setups = [
+      { dialogue: "", narration: `Narrator: Xin chào mọi người ${tag}`, speaking: ["Narrator"], expected: ["Narrator", `Xin chào mọi người ${tag}`] },
+      { dialogue: `Speaker A: Bạn khỏe không ${tag}?`, narration: "", speaking: ["Max"], expected: ["Max", `Bạn khỏe không ${tag}?`] },
+      { dialogue: `Mia: Let's go ${tag}!`, narration: "", speaking: ["Mia"], expected: ["Mia", `Let's go ${tag}!`] },
+    ];
+    for (const [i, s] of setups.entries()) {
+      await prisma.scene.update({
+        where: { id: scenes[i]!.id },
+        data: { dialogue: s.dialogue, narration: s.narration, subtitle: "", speakingCharactersJson: JSON.stringify(s.speaking) },
+      });
+    }
+    for (const s of scenes) await generateSceneVoice(s.id);
+    const chars = Object.fromEntries((await prisma.character.findMany()).map((c) => [c.name, c.voiceId]));
+    for (const [i, s] of setups.entries()) {
+      const lines = await prisma.dialogueLine.findMany({ where: { sceneId: scenes[i]!.id }, include: { character: true } });
+      expect(lines.map((l) => [l.character?.name, l.text])).toEqual([s.expected]);
+      expect(lines[0]!.voiceId).toBe(chars[s.expected[0]!]);
+      // What the provider job was asked to say.
+      const job = await prisma.providerJob.findFirstOrThrow({ where: { sceneId: scenes[i]!.id, kind: "audio" } });
+      expect(job.requestJson).toContain(s.expected[1]!);
+      expect(job.requestJson).not.toMatch(/Narrator:|Speaker A:|Mia:/);
+      expect(sceneSubtitleText({ ...(await prisma.scene.findUniqueOrThrow({ where: { id: scenes[i]!.id } })) })).toBe(s.expected[1]);
+    }
+    const before = await voicePurchases();
+    for (const s of scenes) await generateSceneVoice(s.id);
+    expect(await voicePurchases()).toBe(before);
   }, 600_000);
 
   it("cảnh nhiều người chưa có giọng (hoặc dự án kiểu cũ): phụ đề vẫn đủ từng câu theo thứ tự, không chỉ câu cuối", async () => {

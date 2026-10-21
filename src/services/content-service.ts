@@ -38,6 +38,7 @@ import {
   type RequestedItems,
 } from "@/domain/requested-items";
 import { NARRATOR_NAME } from "@/domain/scene-characters";
+import { splitSpeakerLabel } from "@/domain/dialogue-lines";
 import type { ScriptDoc } from "@/domain/script";
 import { ensureProjectDirs, toAbsolute } from "@/lib/paths";
 import { buildPrompt } from "@/lib/prompts";
@@ -309,9 +310,9 @@ const BILINGUAL_RULE: Record<string, string> = {
 };
 
 const VOICE_MODE_RULE: Record<string, string> = {
-  NARRATION: "one narrator reads every scene (narration field).",
+  NARRATION: "one narrator reads every scene (narration field: only the spoken words, never a 'Narrator:' label).",
   DIALOGUE: "characters speak to each other; dialogue lines are 'Name: line'.",
-  MIXED: "narration carries the video; characters may say short lines 'Name: line'.",
+  MIXED: "narration carries the video (only the spoken words, never a 'Narrator:' label); characters may say short lines 'Name: line'.",
   NO_VOICE: "no spoken words at all: leave dialogue and narration empty, put the text in subtitle.",
 };
 
@@ -568,6 +569,8 @@ export function normaliseContentScript(script: ScriptDoc, req: ContentScriptRequ
   const known = new Set(req.userAssets.map((a) => a.id));
   let scenes = script.scenes.map((s, i) => ({
     ...s,
+    // QĐ-143: the speaker is the narrator, not words - "Narrator: ..." is stored as its words.
+    narration: splitSpeakerLabel(s.narration ?? "", [req.narrator]).text.trim(),
     sceneRole: s.sceneRole ?? req.beats[i]?.role,
     beatLabel: s.beatLabel ?? req.beats[i]?.label,
     motionHint: s.motionHint ?? req.beats[i]?.motion ?? "AUTO",

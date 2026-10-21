@@ -27,6 +27,43 @@ export interface ParsedLine {
 /** `Max: "..."` or `Max: ...` at the start of a segment. */
 const SPEAKER_LABEL = /([A-Z][A-Za-z '-]{0,19}):\s*/g;
 
+/**
+ * SPEAKER LABEL IS NOT SPOKEN TEXT (QĐ-143). A text model sometimes writes
+ * "Narrator: ..." into the narration field, and the voice read "Narrator" aloud.
+ *
+ * Labels that name a voice ROLE rather than a person. Only these, and the
+ * scene's own speakers, are ever stripped: "Lưu ý: ..." or "Chim cánh cụt: ..."
+ * are words to read, so nothing before a ":" is dropped on shape alone.
+ */
+const ROLE_LABELS = new Set(["narrator", "người dẫn chuyện", "người dẫn", "host", "voice over", "voice-over", "voiceover", "vo"]);
+const NUMBERED_SPEAKER = /^speaker [a-z0-9]$/;
+
+/** A leading `Label:` (optionally quoted or bold) - a CANDIDATE only. */
+const LEADING_LABEL = /^\s*[*"“]*\s*([\p{L}\p{N}][\p{L}\p{N} .'’-]{0,29}?)\s*[*"”]*\s*:\s*\**\s*/u;
+
+/** Is `name` a speaker label for a scene whose speakers are `known`? */
+export function isSpeakerLabel(name: string, known: readonly string[]): boolean {
+  const n = name.trim().toLowerCase().replace(/\s+/g, " ");
+  if (n.length === 0) return false;
+  return ROLE_LABELS.has(n) || NUMBERED_SPEAKER.test(n) || known.some((k) => k.trim().toLowerCase() === n);
+}
+
+/**
+ * Split a legacy "Speaker: words" line into its speaker and the words to say.
+ * Only a label that is a speaker of this scene or a voice role is taken off;
+ * any other "X:" stays part of the text. Applied per line of a multi-line text.
+ */
+export function splitSpeakerLabel(text: string, known: readonly string[]): { speaker: string | null; text: string } {
+  let speaker: string | null = null;
+  const lines = text.split("\n").map((line) => {
+    const m = LEADING_LABEL.exec(line);
+    if (!m || !isSpeakerLabel(m[1] ?? "", known)) return line;
+    speaker ??= (m[1] ?? "").trim();
+    return line.slice(m[0].length);
+  });
+  return { speaker, text: lines.join("\n") };
+}
+
 function clean(text: string): string {
   return text
     .trim()
@@ -54,7 +91,9 @@ export function parseDialogueLines(
   if (source.length === 0) {
     // Narration has no speaker. It belongs to the scene, and the first speaking
     // character reads it only because someone has to.
-    const text = clean(narration);
+    // A legacy "Narrator: ..." keeps its speaker in the speaking list and its
+    // words here - the label is never handed to the voice.
+    const text = clean(splitSpeakerLabel(narration.trim(), speaking).text);
     if (text.length === 0) return [];
     const speaker = speaking[0] ?? "";
     return speaker ? [{ speaker, text, lineNumber: 1 }] : [];
@@ -74,7 +113,8 @@ export function parseDialogueLines(
   if (marks.length === 0) {
     // Unlabelled dialogue, or labels naming nobody who is speaking. Give the
     // whole thing to the first speaker rather than inventing an attribution.
-    const text = clean(source);
+    // A role label ("Speaker A:", "VO:") is still not read aloud.
+    const text = clean(splitSpeakerLabel(source, speaking).text);
     const speaker = speaking[0] ?? "";
     if (text.length === 0 || !speaker) return [];
     return [{ speaker, text, lineNumber: 1 }];
