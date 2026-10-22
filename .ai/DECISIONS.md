@@ -4475,3 +4475,44 @@ nghe thử nhân vật dùng provider local không qua cổng chi tiêu và khô
 
 **Chưa làm:** GPU (PyTorch CUDA ~3 GB), voice cloning, micro, đa ngôn ngữ Supertonic ngoài en, hội thoại một request
 (conversation), xoá CIT.
+
+## QĐ-146 — CHẤT LƯỢNG MIND VOICE: ĐIỂM NGƯỜI NGHE, GỢI Ý GIỌNG, EMOTION ADAPTER THEO KHẢ NĂNG THẬT (2026-10-22, $0)
+
+**Đầu vào:** người dùng nghe và chấm thủ công 12 WAV + 3 MP4 của QĐ-145 (Tự nhiên / Phát âm / Cảm xúc / Phù hợp, 1–5).
+Lưu NGUYÊN trong `src/domain/voice-quality.ts` (`VOICE_RATINGS`, đóng băng, mỗi mục trỏ file đã nghe trong
+`data/voice-ab/…`). Code không tự tính lại hay sửa điểm.
+
+**Gợi ý giọng** (`MIND_VOICE_SUGGESTIONS`, theo lựa chọn của người dùng): Review AI/công nghệ Hải Đăng, Trúc Ly · Review
+sản phẩm Trúc Ly, Thục Đoan · Kể chuyện Thục Đoan, Thiện Minh · Comedy Adam bựa (ứng viên cần thử thêm) · English F1
+(nữ), M1 (nam). `mindUseCaseFor` chọn danh sách theo ngôn ngữ → phong cách giọng → loại nội dung; không có căn cứ → không
+gợi ý. Chỉ hiển thị (VIDEO OUTPUT → Mind Voice, và Mind Voice Studio) và đổi giọng khi người dùng BẤM; "Tự động" và mọi
+dự án cũ giữ nguyên.
+
+**Mẫu 06 (Ngọc Huyền, `[thở dài]`, 3/3/3/3) — nguyên nhân gốc, đã kiểm từng bước:**
+1. Raw input `[thở dài] Một ngày dài cuối cùng cũng kết thúc.` → 2. spokenText giống hệt (director tắt) → 3. không có
+   emotion instruction (không gửi instructions) → 4. VieNeu SDK (`vieneu_utils.phonemize_text`) đổi `[thở dài]` thành
+   token `<|emotion_2|>` (tokenizer id 10, một token) — KHÔNG đọc thành chữ, không cắt chunk, frame cap 130 (không cắt).
+5. Audio: đoạn 0,28 s có cao độ rõ (86 % hữu thanh) trước câu nói. SDK ghi tiếng thở dài tự nhiên dài 5–12 frame
+   (0,4–1,0 s) và là hơi thở. 6. 8 mẫu local tối thiểu (Ngọc Huyền đầu/giữa/cuối câu ×2, Thục Đoan đầu câu ×2,
+   `data/voice-ab/qd146-emotion-2026-10-22/`): 1/8 mất hẳn, 7/8 thành âm hữu thanh 0,29–0,38 s ở MỌI vị trí, CẢ HAI giọng.
+→ Không do app, không do giọng, không do vị trí: model VieNeu v3 Turbo nhận đúng token nhưng không thể hiện được tiếng
+thở dài. `[cười]` (mẫu 05: 5/5) và `[hắng giọng]` (07: 4/5) thì ổn. Supertonic `<sigh>` (mẫu 12): không đo được tiếng
+thở dài nào; SDK Supertonic không xử lý thẻ (chuyển nguyên ký tự cho model, theo công bố của Supertone).
+
+**Emotion adapter** (`MIND_CUES` trong `src/domain/mind-voice.ts`): mỗi thẻ của mỗi engine có mức `reliable` /
+`unreliable` + bằng chứng. Reliable: VieNeu `[cười]` `[hắng giọng]`, Supertonic `<laugh>`. Unreliable: VieNeu
+`[thở dài]`, Supertonic `<sigh>` `<breath>`. Voice Director chỉ gửi thẻ reliable; cảm xúc TOUCHING giữ nhịp câu (xuống
+dòng với VieNeu), không còn chèn tiếng thở. Thẻ người dùng tự gõ (`adaptMindCues`): reliable → viết theo cú pháp engine
+(`[cười]` ↔ `<laugh>`), unreliable/không hỗ trợ → bỏ khỏi câu và báo lý do trong Studio; chữ trong ngoặc khác giữ nguyên.
+Không xoá emotion tag trên mọi engine; không chèn âm thanh thở giả. Công tắc mới `voice.emotionCues` (mặc định bật; tắt
+→ không gửi thẻ nào, nhịp câu giữ nguyên; khoá giọng thêm `cues=off` chỉ khi tắt). CIT legacy không đổi.
+
+**Giữ giọng tốt:** `MIND_ADAPTER_VERSION` KHÔNG tăng. Khoá giọng gồm chữ gửi đi + summary; chỉ dòng có thẻ không ổn định
+mới đổi chữ → chỉ dòng đó tạo lại; mẫu 01/02/03/05/07/08/10/11 và V1/V3 giữ nguyên chữ gửi đi và summary → dùng lại
+audio cũ (test hồi quy). Không đổi normalization hay render.
+
+**Multi-speaker V2 (Cảm xúc 3/5) — đo, không đoán:** phân biệt người nói tốt (F0 Thiện Minh 103–116 Hz, Ngọc Huyền
+211 Hz), mỗi câu đúng giọng gán, nhãn Max/Leo không gửi TTS, âm lượng từng câu −15,9…−16,7 LUFS, nghỉ đổi lượt
+0,42–0,45 s (0,28 s timeline + biên im lặng của clip). Nguyên nhân có dữ liệu: (1) Voice Director TẮT trong test V2 →
+không có cảm xúc/nhịp nào; cảm xúc theo cảnh chứ không theo từng người nói; (2) mỗi câu tạo riêng, câu ngắn (1,1–2,9 s)
+ra ngữ điệu phẳng: biến thiên cao độ 14–17 % so với 22–38 % của chính các giọng đó ở câu dài. Không sửa ở QĐ này.
