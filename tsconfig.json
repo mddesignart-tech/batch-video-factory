@@ -29,5 +29,5 @@
     "**/*.tsx",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules", ".next", "data"]
+  "exclude": ["node_modules", ".next", "data", "voice-engine"]
 }

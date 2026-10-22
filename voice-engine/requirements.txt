@@ -1,0 +1,9 @@
+# Mind Voice (QĐ-145) - installed into voice-engine\.venv ONLY, never the system Python.
+# Official SDKs, pinned. Models are NOT here: they are installed from the app
+# (Mind Voice Studio -> Quản lý model), from the publishers' own repos.
+vieneu==3.8.3
+supertonic @ git+https://github.com/supertone-oss-archive/supertonic-py.git@df0f9686dac7fbbde391b759e2ee5286a3737622
+onnxruntime==1.31.0
+huggingface_hub==2.2.0
+numpy==2.4.6
+soundfile==0.14.0

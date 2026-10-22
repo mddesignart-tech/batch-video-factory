@@ -40,3 +40,13 @@ coverage/
 # Throwaway world for the import end-to-end mock run (scripts/import-e2e-mock.ts)
 data/.import-e2e/
 data/.real-import/
+
+# Mind Voice (QĐ-145): the private Python environment and downloaded models
+# stay on this machine - never committed, never redistributed.
+voice-engine/.venv/
+voice-engine/models/
+voice-engine/.hf-cache*/
+__pycache__/
+
+# Launcher / Mind Voice logs
+/logs/

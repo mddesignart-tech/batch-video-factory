@@ -8,6 +8,9 @@ export default tseslint.config(
       "data/**",
       "next-env.d.ts",
       "src/generated/**",
+      // Mind Voice (QĐ-145): a private Python environment and models, not app code.
+      "voice-engine/**",
+      "logs/**",
     ],
   },
   ...tseslint.configs.recommended,
