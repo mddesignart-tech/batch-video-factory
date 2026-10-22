@@ -48,6 +48,8 @@ export async function saveProjectControls(projectId: string, patch: Parameters<t
   }
   // QĐ-144: choosing CIT Voice Studio makes sure its $0 provider/model rows exist.
   if (controls.voice.provider === "cit") await (await import("./cit-catalog")).ensureCitRegistry();
+  // QĐ-145: likewise for Mind Voice.
+  if (controls.voice.provider === "mindvoice") await (await import("./mind-voice-catalog")).ensureMindRegistry();
   const changed = JSON.stringify(before) !== JSON.stringify(controls);
   if (!changed) return { controls, rerenderNeeded: false, voiceChanged: false };
   await prisma.project.update({

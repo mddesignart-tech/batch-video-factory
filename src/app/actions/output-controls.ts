@@ -33,6 +33,7 @@ import {
 import type { ActionResult } from "./idioms";
 import { citStatusView, refreshCitCatalog, type CitStatusView } from "@/services/cit-catalog";
 import { CIT_PROVIDER } from "@/domain/cit";
+import { MIND_PROVIDER } from "@/domain/mind-voice";
 
 /**
  * VIDEO OUTPUT card (QĐ-125). Everything but the voice is local-render only:
@@ -148,7 +149,7 @@ export async function narratorInfoAction(projectId: string): Promise<{ ok: boole
     } catch {
       voices = [];
     }
-    if (own.director && provider !== CIT_PROVIDER) {
+    if (own.director && provider !== CIT_PROVIDER && provider !== MIND_PROVIDER) {
       // The director speaks with gpt-4o-mini-tts voices, whatever a mock lists.
       const listed = new Set(voices.map((v) => v.id));
       voices = [...VOICE_CATALOG.filter((v) => !listed.has(v.id)).map((v) => ({ id: v.id, label: `${v.label} - ${v.note}` })), ...voices];

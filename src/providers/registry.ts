@@ -43,6 +43,7 @@ export const KNOWN_PROVIDERS: Record<string, ModelType[]> = {
   kling: ["video"],
   elevenlabs: ["voice"],
   cit: ["voice"],
+  mindvoice: ["voice"],
 };
 
 /**
@@ -64,6 +65,7 @@ export const IMPLEMENTED_PROVIDERS = new Set<string>([
   "ollama",
   "lmstudio",
   "cit",
+  "mindvoice",
 ]);
 
 /** Which slots a given provider can actually fill in THIS build. */
@@ -79,6 +81,7 @@ export const IMPLEMENTED_TYPES: Record<string, ModelType[]> = {
   ollama: ["text"],
   lmstudio: ["text"],
   cit: ["voice"],
+  mindvoice: ["voice"],
 };
 
 export function isTypeImplemented(name: string, type: ModelType): boolean {
@@ -183,6 +186,12 @@ export async function getVoiceProvider(
     const { resolveBaseUrl } = await import("./provider-credentials");
     const { CitVoiceProvider } = await import("./cit/cit-voice-provider");
     return new CitVoiceProvider({ baseUrl: await resolveBaseUrl("cit").catch(() => "http://127.0.0.1:8001") });
+  }
+  // Mind Voice (QĐ-145): the app's own local TTS service - $0, same rule as CIT.
+  if (name === "mindvoice") {
+    const { resolveBaseUrl } = await import("./provider-credentials");
+    const { MindVoiceProvider } = await import("./mindvoice/mind-voice-provider");
+    return new MindVoiceProvider({ baseUrl: await resolveBaseUrl("mindvoice").catch(() => "http://127.0.0.1:8011") });
   }
   if (isMockMode() || name === "mock") return mockVoice;
 

@@ -280,6 +280,7 @@ export async function saveCharacterVoice(
   try {
     // QĐ-144: a character voiced by CIT Voice Studio needs its $0 provider/model rows.
     if (parsed.data.voiceProvider === "cit") await (await import("@/services/cit-catalog")).ensureCitRegistry();
+    if (parsed.data.voiceProvider === "mindvoice") await (await import("@/services/mind-voice-catalog")).ensureMindRegistry();
     await prisma.character.update({
       where: { id: characterId },
       // Voice does NOT bump the character version. Version tracks appearance,
@@ -372,7 +373,10 @@ export async function previewVoice(
       const request = { projectId: "preview", sceneId: "preview", ...settings, outputPath };
       const estimate = await provider.estimateCost(request);
 
-      if (!isMockMode()) {
+      // A free local voice (CIT, Mind Voice) spends nothing: no cap, no
+      // confirmation - the same rule generation.ts applies to a scene line.
+      const { isFreeVoiceProvider } = await import("@/providers/voice-config");
+      if (!isMockMode() && !isFreeVoiceProvider(character.voiceProvider)) {
         await assertCanSpend({
           provider: character.voiceProvider,
           model: character.voiceModel,
@@ -383,7 +387,8 @@ export async function previewVoice(
       const job = await provider.createVoice(request);
       const asset = await provider.downloadResult(job.externalId);
 
-      await recordCost({
+      // Local generation is not a purchase: no ledger line (as in generation.ts).
+      if (!isFreeVoiceProvider(character.voiceProvider) || isMockMode()) await recordCost({
         category: "voice",
         provider: spokenBy,
         model: isMockMode() ? "mock-voice" : character.voiceModel,

@@ -27,8 +27,19 @@ import {
   pickCitVoice,
   type CitEngineId,
 } from "@/domain/cit";
+import {
+  clampMindSpeed,
+  engineForLanguage,
+  MIND_AUTO_VOICE,
+  MIND_PROVIDER,
+  mindDirection,
+  mindDirectionSummary,
+  pickMindVoice,
+  type MindEngineId,
+} from "@/domain/mind-voice";
 import { OPENAI_VOICES } from "@/providers/openai/openai-voice-client";
 import { cachedCitCatalog, engineOfVoice, type CitCatalog } from "./cit-catalog";
+import { cachedMindCatalog, engineOfMindVoice, variantOfMindEngine, type MindCatalog } from "./mind-voice-catalog";
 
 /**
  * VOICE DIRECTOR, wired to a scene (QĐ-142).
@@ -54,7 +65,7 @@ export interface Directed {
   /** Exactly what is sent to the voice model; absent = the line's own words. */
   spokenText?: string;
   directed?: DirectedVoice;
-  /** Language code sent to a provider that takes one (CIT). */
+  /** Language code sent to a provider that takes one (CIT, Mind Voice). */
   language?: string;
 }
 
@@ -84,11 +95,16 @@ export async function voiceDirectorFor(
   const content = projectContent(project);
   // CIT Voice Studio (QĐ-144) gets its own adapter, director on or off.
   const catalog = await cachedCitCatalog();
-  const cit = <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T, directed: DirectedVoice | null): T & Directed =>
-    citDirected(line, base, directed, content.language, catalog);
+  const mindCatalog = await cachedMindCatalog();
+  // A local engine (CIT legacy, Mind Voice QĐ-145) gets its own adapter; null = not local.
+  const local = <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T, directed: DirectedVoice | null): (T & Directed) | null =>
+    base.provider === CIT_PROVIDER
+      ? citDirected(line, base, directed, content.language, catalog)
+      : base.provider === MIND_PROVIDER
+        ? mindDirected(line, base, directed, content.language, mindCatalog)
+        : null;
   if (!voice.director) {
-    return <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T) =>
-      base.provider === CIT_PROVIDER ? cit(line, base, null) : (base as T & Directed);
+    return <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T) => local(line, base, null) ?? (base as T & Directed);
   }
 
   const context = await sceneContext(project, scene);
@@ -135,7 +151,8 @@ export async function voiceDirectorFor(
       narrator: narrated,
       charsPerSecond: cps,
     });
-    if (base.provider === CIT_PROVIDER) return cit(line, { ...base, speed: directed.speed }, directed);
+    const localLine = local(line, { ...base, speed: directed.speed }, directed);
+    if (localLine) return localLine;
     const classic = base.model && /^tts-1/.test(base.model) ? CLASSIC_EQUIVALENT[identity.voiceId] : undefined;
     return {
       ...base,
@@ -211,4 +228,55 @@ async function sceneContext(project: Project, scene: SceneInput): Promise<{ role
   });
   const index = Math.max(0, order.findIndex((s) => s.sceneNumber === scene.sceneNumber));
   return { role, index, count: order.length };
+}
+
+/**
+ * A line spoken by Mind Voice (QĐ-145). Same contract as CIT: no OpenAI
+ * `instructions`; the director's intent becomes the engine's own inline cues
+ * (mindDirection); `instructions` records engine, model variant, language and
+ * direction for the voice key. Voice, engine and variant come from the KEPT
+ * catalog, so the key does not depend on whether Mind Voice is running.
+ */
+function mindDirected<T extends LineVoiceSettings>(
+  line: { speaker: string; text: string },
+  base: T,
+  directed: DirectedVoice | null,
+  projectLanguage: string,
+  catalog: MindCatalog | null,
+): T & Directed {
+  const language = speechLanguageOf(projectLanguage, line.text);
+  const known = engineOfMindVoice(catalog, base.voiceId);
+  let voiceId = known ? base.voiceId : MIND_AUTO_VOICE;
+  let engine: MindEngineId = known ?? engineForLanguage(language) ?? "vieneu";
+  if (!known) {
+    const pick = catalog ? pickMindVoice(catalog.voices, language) : null;
+    if (pick?.ok) {
+      voiceId = pick.voice.id;
+      engine = pick.voice.engine;
+    }
+    // else: resolved by the service at generation time ("AUTO"), engine by language.
+  }
+  const tagged = mindDirection({
+    text: prepareSpeechText(line.text, language),
+    engine,
+    style: directed?.styleId ?? null,
+    role: directed?.role ?? null,
+    emotion: directed?.emotion ?? null,
+  });
+  return {
+    ...base,
+    voiceId,
+    speed: clampMindSpeed(base.speed),
+    instructions: mindDirectionSummary({
+      engine,
+      variant: variantOfMindEngine(catalog, engine),
+      language,
+      style: directed?.styleId ?? null,
+      role: directed?.role ?? null,
+      emotion: directed?.emotion ?? null,
+    }),
+    spokenText: tagged.text,
+    language,
+    ...(directed ? { directed } : {}),
+  };
 }

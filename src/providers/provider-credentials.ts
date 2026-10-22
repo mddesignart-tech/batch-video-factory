@@ -31,7 +31,7 @@ export const DEFAULT_BASE_URLS: Record<string, string> = {
 };
 
 /** Providers that run locally and therefore need no API key and cost nothing. */
-export const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio", "cit"]);
+export const LOCAL_PROVIDERS = new Set(["ollama", "lmstudio", "cit", "mindvoice"]);
 
 export class ProviderConfigError extends Error {
   constructor(message: string) {

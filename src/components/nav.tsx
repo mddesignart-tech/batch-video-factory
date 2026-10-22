@@ -19,6 +19,7 @@ import {
   FileUp,
   ListChecks,
   Library,
+  Mic,
   Rocket,
   WandSparkles,
 } from "lucide-react";
@@ -35,6 +36,7 @@ const NAV_ITEMS = [
   { href: "/import", label: "Nhập Storyboard", icon: FileUp },
   { href: "/queue", label: "Hàng đợi", icon: ListChecks },
   { href: "/characters", label: "Nhân vật", icon: Users },
+  { href: "/mind-voice", label: "Mind Voice Studio", icon: Mic },
   { href: "/styles", label: "Phong cách", icon: Palette },
   { href: "/media", label: "Media", icon: Film },
   { href: "/assets", label: "Thư viện asset", icon: Library },

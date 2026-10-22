@@ -19,7 +19,7 @@ import {
  */
 
 /** Voice providers this build speaks to. */
-export const VOICE_PROVIDERS = new Set(["openai", "cit"]);
+export const VOICE_PROVIDERS = new Set(["openai", "cit", "mindvoice"]);
 
 /** Speech is short; a long timeout here just delays a clear failure. */
 export const DEFAULT_VOICE_TIMEOUT_MS = 120_000;

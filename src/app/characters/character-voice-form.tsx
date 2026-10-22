@@ -98,7 +98,7 @@ export function CharacterVoiceForm({
         submitVariant="secondary"
       >
         <div className="grid gap-2 sm:grid-cols-2">
-          <Field label="Nhà cung cấp" hint="ví dụ: openai, cit (CIT Voice Studio tại máy, $0), mock">
+          <Field label="Nhà cung cấp" hint="ví dụ: openai, mindvoice (Mind Voice tại máy, $0), cit (CIT - legacy), mock">
             <Input
               name="voiceProvider"
               defaultValue={voice.voiceProvider}
@@ -106,7 +106,8 @@ export function CharacterVoiceForm({
             />
             <datalist id="voice-providers">
               <option value="openai" />
-              <option value="cit">CIT Voice Studio — Local / $0</option>
+              <option value="mindvoice">Mind Voice Local — $0</option>
+              <option value="cit">CIT Voice Studio — Legacy / $0</option>
               <option value="mock" />
             </datalist>
           </Field>
@@ -119,7 +120,8 @@ export function CharacterVoiceForm({
             />
             <datalist id="voice-models">
               <option value="gpt-4o-mini-tts" />
-              <option value="cit-local">CIT Voice Studio (VieNeu / Supertonic)</option>
+              <option value="mind-local">Mind Voice (VieNeu / Supertonic)</option>
+              <option value="cit-local">CIT Voice Studio (VieNeu / Supertonic) - legacy</option>
               <option value="mock-voice-std" />
             </datalist>
           </Field>

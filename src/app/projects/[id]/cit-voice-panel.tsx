@@ -5,14 +5,18 @@ import { RefreshCw } from "lucide-react";
 import { Button, Field, Select } from "@/components/ui";
 import { citStatusAction } from "@/app/actions/output-controls";
 import type { CitStatusView } from "@/services/cit-catalog";
-import { CIT_AUTO_VOICE, CIT_LABEL, CIT_MODEL, CIT_OFFLINE_GUIDE, CIT_PROVIDER } from "@/domain/cit";
+import { CIT_AUTO_VOICE, CIT_MODEL, CIT_OFFLINE_GUIDE, CIT_PROVIDER } from "@/domain/cit";
 import type { OutputControls } from "@/domain/output-controls";
+import { MIND_LABEL, MIND_MODEL, MIND_PROVIDER } from "@/domain/mind-voice";
+import { MindVoiceDetails } from "./mind-voice-panel";
 
 /**
- * GIỌNG THUYẾT MINH → Nhà cung cấp (QĐ-144). Choosing CIT Voice Studio pins the
- * narrator to the local CIT ($0); "Mặc định" leaves the narrator as it was.
- * Offline CIT is shown with what to do - nothing falls back to a paid voice.
+ * GIỌNG THUYẾT MINH → Nhà cung cấp. Tự động leaves the narrator as it was;
+ * OpenAI pins the paid TTS; Mind Voice Local (QĐ-145) and CIT - Legacy (QĐ-144)
+ * pin a local, $0 voice. An offline local service is shown with what to do -
+ * nothing falls back to a paid voice.
  */
+const OPENAI = { provider: "openai", model: "gpt-4o-mini-tts" } as const;
 export function CitVoicePanel({
   voice,
   language,
@@ -45,20 +49,28 @@ export function CitVoicePanel({
     <div className="space-y-2">
       <Field label="Nhà cung cấp giọng">
         <Select
-          value={usingCit ? CIT_PROVIDER : ""}
+          value={voice.provider === CIT_PROVIDER || voice.provider === MIND_PROVIDER || voice.provider === OPENAI.provider ? voice.provider : ""}
           disabled={disabled}
-          onChange={(e) =>
+          onChange={(e) => {
+            const v = e.currentTarget.value;
             onChange(
-              e.currentTarget.value === CIT_PROVIDER
+              v === CIT_PROVIDER
                 ? { provider: CIT_PROVIDER, model: CIT_MODEL, voiceId: null }
-                : { provider: null, model: null, voiceId: null },
-            )
-          }
+                : v === MIND_PROVIDER
+                  ? { provider: MIND_PROVIDER, model: MIND_MODEL, voiceId: null }
+                  : v === OPENAI.provider
+                    ? { provider: OPENAI.provider, model: OPENAI.model, voiceId: null }
+                    : { provider: null, model: null, voiceId: null },
+            );
+          }}
         >
-          <option value="">Mặc định (giọng của Người dẫn chuyện)</option>
-          <option value={CIT_PROVIDER}>{CIT_LABEL}</option>
+          <option value="">Tự động (giọng của Người dẫn chuyện)</option>
+          <option value={OPENAI.provider}>OpenAI TTS (trả phí)</option>
+          <option value={MIND_PROVIDER}>{MIND_LABEL}</option>
+          <option value={CIT_PROVIDER}>CIT Local — Legacy ($0)</option>
         </Select>
       </Field>
+      {voice.provider === MIND_PROVIDER ? <MindVoiceDetails voice={voice} language={language} onChange={onChange} disabled={disabled} /> : null}
       {usingCit ? (
         <div className="space-y-2 rounded-lg border border-ink-800 bg-ink-850 p-2 text-xs">
           <div className="flex flex-wrap items-center gap-2">
@@ -108,7 +120,7 @@ export function CitVoicePanel({
           <p className="text-ink-500">{status?.pronunciation ?? ""}</p>
           <p className="text-[10px] text-ink-500">
             Chạy tại máy, $0, không ghi sổ chi. Khi CIT tắt, giọng sẽ KHÔNG tự chuyển sang nhà cung cấp trả phí. Voice instruction kiểu OpenAI không được gửi cho CIT;
-            Voice Director chỉ thêm ít tag CIT hỗ trợ ([nghỉ 500ms], [cười]…).
+            Voice Director chỉ thêm ít tag engine hỗ trợ ([cười], [thở dài]…); ngắt nghỉ bằng xuống dòng, không dùng thẻ [nghỉ].
           </p>
         </div>
       ) : null}

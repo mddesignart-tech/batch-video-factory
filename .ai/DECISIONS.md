@@ -4434,3 +4434,44 @@ nên chưa đọc được OpenAPI thật.
 field khai báo, vi/en, Supertonic chưa tải, tag, Narrator không bị đọc, cùng giọng nhiều cảnh, preview → run → render lại
 = 0 request, đổi tốc độ chỉ invalid đúng câu, offline không gọi provider khác, $0 không ghi sổ, nhiều người nói, dự án
 OpenAI cũ không đổi).
+
+## QĐ-145 — MIND VOICE: TTS LOCAL ĐỘC LẬP (VieNeu-TTS + Supertonic 3), KHÔNG CẦN CIT (2026-10-22, $0)
+
+Người dùng gọi "QD-144 — MIND VOICE STUDIO"; số 144 đã dùng cho CIT nên ghi QĐ-145. Mục tiêu: không phụ thuộc CIT Voice
+Studio; chạy SDK + model mã nguồn mở chính thức ngay trong Batch Video Factory. CIT giữ lại (legacy) cho tới khi Mind
+Voice được kiểm chứng.
+
+**Bằng chứng trước khi làm (real smoke CIT 2026-10-22 + đọc SDK):** CIT /health trả `engine` (chuỗi, số ít) → code cũ
+coi mọi giọng là UNKNOWN → "Tự động" tiếng Việt báo NO_VOICE; nghe thử nhân vật bị cổng chi tiêu chặn cit/cit-local;
+VieNeu (`vieneu_utils.phonemize_text`) chỉ hiểu `[cười] [thở dài] [hắng giọng]` — thẻ `[..]` khác bị ĐỌC THÀNH CHỮ, nên
+`[nghỉ 500ms]` / `[nghỉ 1s]` mà adapter QĐ-144 chèn sẽ bị đọc to. CIT gán vùng miền sai (Quang Sơn "South", SDK "Trung").
+
+**Kiến trúc:** service Python riêng `voice-engine/` (venv riêng `.venv`, không đụng Python Windows), stdlib HTTP server,
+chỉ `127.0.0.1:8011`, chặn Host lạ (403) và POST không phải JSON (415). Engine nạp lười, mỗi engine một khoá.
+- VieNeu v3 Turbo qua `vieneu==3.8.3`, backend ONNX CPU (fp32 mặc định; int8 tuỳ chọn — SDK khuyên CPU có VNNI).
+  Loader ONNX của SDK tự tải codec vào HF cache (symlink → onnxruntime 1.31 từ chối "External data path escapes model
+  directory") → Mind Voice trỏ `_fetch` của SDK vào thư mục model đã cài; KHÔNG BAO GIỜ tải ngầm.
+- Supertonic 3 qua `supertonic-py@df0f9686` (archive chính thức), `model_dir` + `auto_download=False`.
+- Model Manager: catalog ghim repo + commit, `/models/install` chỉ khi người dùng bấm, kiểm SHA-256 / git SHA-1 theo Hub,
+  staging → move (lỗi = không để bản dở), `manifest.json` (nguồn, commit, giấy phép, attribution), `/models/verify`.
+- Giọng: VieNeu từ `vieneu/assets/voices_v3_turbo.json` của SDK (25 giọng, giới tính, vùng miền, phong cách, featured,
+  default "Hải Đăng"); Supertonic từ `voice_styles/*.json` của model (M1–M5, F1–F5). Không danh sách cố định.
+
+**Batch Video Factory:** provider `mindvoice`, model `mind-local` ($0, PIN_ONLY, không ghi sổ, không qua spend cap,
+không fallback). `src/domain/mind-voice.ts` (thuần: parse strict, pickMindVoice vi→VieNeu / en→Supertonic, adapter
+`mindDirection` — chỉ thẻ engine hiểu, ≤ 1 thẻ cảm xúc, ngắt nghỉ VieNeu = xuống dòng, Supertonic không thêm gì;
+summary `MIND mind-v1 engine=<engine>/<variant> lang=… style/role/emotion` vào khoá giọng). `MindVoiceProvider`: VieNeu
+không có tốc độ gốc → ffmpeg `atempo` một lần (giữ cao độ); Supertonic tốc độ gốc. Catalog lưu Setting
+`mindvoice.catalog` → khoá giọng không phụ thuộc service đang chạy (render lại = 0 TTS kể cả khi Mind Voice tắt).
+Voice Director: nhánh `mindDirected` song song CIT. UI: VIDEO OUTPUT → Nhà cung cấp giọng: Tự động / OpenAI TTS (trả
+phí) / Mind Voice Local — $0 / CIT Local — Legacy. Tab mới **Mind Voice Studio** (`/mind-voice`): nhập nội dung,
+ngôn ngữ, engine, giọng, phong cách, cảm xúc, tốc độ, ngắt nghỉ, Nghe thử, Tạo giọng, phát lại, tải WAV/MP3, lưu thư
+viện giọng, lịch sử (`data/mind-voice/library.json`, dùng lại khi cùng khoá), Quản lý model (cài có xác nhận dung lượng
++ giấy phép, tiến độ, kiểm checksum). START_TOOL.bat: có `.venv` → tự mở Mind Voice; không có → chỉ nhắc, không tải.
+
+**Sửa CIT (giữ CIT không hỏng):** đọc `engine` số ít ở /health và gán cho giọng không có engine khi chỉ có 1 engine;
+bỏ thẻ `[nghỉ]` (xuống dòng cho VieNeu) — `CIT_ADAPTER_VERSION` cit-v1 → cit-v2 (chưa có audio CIT nào trong DB thật);
+nghe thử nhân vật dùng provider local không qua cổng chi tiêu và không ghi sổ.
+
+**Chưa làm:** GPU (PyTorch CUDA ~3 GB), voice cloning, micro, đa ngôn ngữ Supertonic ngoài en, hội thoại một request
+(conversation), xoá CIT.
