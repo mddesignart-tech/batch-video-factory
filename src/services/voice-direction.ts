@@ -101,7 +101,7 @@ export async function voiceDirectorFor(
     base.provider === CIT_PROVIDER
       ? citDirected(line, base, directed, content.language, catalog)
       : base.provider === MIND_PROVIDER
-        ? mindDirected(line, base, directed, content.language, mindCatalog)
+        ? mindDirected(line, base, directed, content.language, mindCatalog, voice.emotionCues)
         : null;
   if (!voice.director) {
     return <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T) => local(line, base, null) ?? (base as T & Directed);
@@ -243,6 +243,7 @@ function mindDirected<T extends LineVoiceSettings>(
   directed: DirectedVoice | null,
   projectLanguage: string,
   catalog: MindCatalog | null,
+  cues: boolean,
 ): T & Directed {
   const language = speechLanguageOf(projectLanguage, line.text);
   const known = engineOfMindVoice(catalog, base.voiceId);
@@ -262,6 +263,7 @@ function mindDirected<T extends LineVoiceSettings>(
     style: directed?.styleId ?? null,
     role: directed?.role ?? null,
     emotion: directed?.emotion ?? null,
+    cues,
   });
   return {
     ...base,
@@ -274,6 +276,7 @@ function mindDirected<T extends LineVoiceSettings>(
       style: directed?.styleId ?? null,
       role: directed?.role ?? null,
       emotion: directed?.emotion ?? null,
+      cues,
     }),
     spokenText: tagged.text,
     language,

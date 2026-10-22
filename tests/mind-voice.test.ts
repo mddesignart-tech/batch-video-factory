@@ -32,6 +32,7 @@ import { ensureNarrator } from "@/services/content-service";
 import { generateSceneVoice, voiceSettingsFor } from "@/services/generation";
 import { saveProjectControls } from "@/services/output-controls";
 import { makeSceneVoice } from "@/services/scene-voice";
+import { speakInStudio } from "@/services/mind-voice-studio";
 import { setSpendCap, spendStatus } from "@/services/spend-guard";
 import { materialiseImport, scanImportSource, validateImport } from "@/services/storyboard-import";
 import { approveAndRun } from "@/services/batch-executor";
@@ -294,7 +295,9 @@ describe("QĐ-145 Mind Voice - discovery + adapter (thuần)", () => {
     expect(mindDirection({ text: two, engine: "vieneu", style: "DOCUMENTARY", role: "EXPLAIN", emotion: "SERIOUS" }).text).toBe("Câu một rất hay.\nCâu hai còn hay hơn!");
     expect(mindDirection({ text: two, engine: "vieneu", style: "COMEDY", role: "PUNCHLINE", emotion: "HUMOROUS" }).text).toBe("Câu một rất hay.\nCâu hai còn hay hơn! [cười]");
     expect(mindDirection({ text: two, engine: "supertonic", style: "COMEDY", role: "PUNCHLINE", emotion: "HUMOROUS" }).text).toBe(`${two} <laugh>`);
-    expect(mindDirection({ text: two, engine: "supertonic", style: "STORYTELLING", role: "EMOTIONAL", emotion: "TOUCHING" }).text).toBe(`<sigh> ${two}`);
+    // QĐ-146: no engine performs a sigh reliably - a touching line gets its beat, never a <sigh>/[thở dài].
+    expect(mindDirection({ text: two, engine: "supertonic", style: "STORYTELLING", role: "EMOTIONAL", emotion: "TOUCHING" }).text).toBe(two);
+    expect(mindDirection({ text: two, engine: "vieneu", style: "STORYTELLING", role: "EMOTIONAL", emotion: "TOUCHING" }).text).toBe("Câu một rất hay.\nCâu hai còn hay hơn!");
     const tags = (s: string) => (s.match(/\[(cười|thở dài|hắng giọng)\]|<(laugh|sigh|breath)>/g) ?? []).length;
     for (const engine of ["vieneu", "supertonic"] as const) {
       for (const style of ["COMEDY", "DOCUMENTARY", "STORYTELLING", "DRAMATIC", "PROFESSIONAL"] as const) {
@@ -418,14 +421,14 @@ describe("QĐ-145 Mind Voice - mock server, Mock Mode, $0", () => {
     expect(requests[requests.length - 1]).toMatchObject({ voice: "Giọng 9" });
   }, 900_000);
 
-  it("Voice Director bật + tiếng Anh → Supertonic: tag <sigh>, không gửi instructions; Supertonic chưa cài → báo rõ, không gọi nhà cung cấp khác", async () => {
+  it("Voice Director bật + tiếng Anh → Supertonic: không gửi <sigh> (QĐ-146), không gửi instructions; Supertonic chưa cài → báo rõ, không gọi nhà cung cấp khác", async () => {
     const v = await narratedVideo([`Welcome back ${tag}. Today we test three gadgets.`], "en");
     await saveProjectControls(v.projectId, { voice: { provider: "mindvoice", model: "mind-local", voiceId: null, director: true, emotion: "TOUCHING" } });
     const before = requests.length;
     await generateSceneVoice(v.sceneIds[0]!);
     const body = requests[before]!;
     expect(body).toMatchObject({ engine: "supertonic", language: "en", voice: "M1" });
-    expect(body.text).toBe(`<sigh> Welcome back ${tag}. Today we test three gadgets.`);
+    expect(body.text).toBe(`Welcome back ${tag}. Today we test three gadgets.`);
     expect(body).not.toHaveProperty("instructions");
     const line = (await mindLines(v.projectId))[0]!;
     expect(line.text).toBe(`Welcome back ${tag}. Today we test three gadgets.`);
@@ -509,6 +512,26 @@ describe("QĐ-145 Mind Voice - mock server, Mock Mode, $0", () => {
       await prisma.character.update({ where: { id: leo.id }, data: { voiceProvider: leo.voiceProvider, voiceModel: leo.voiceModel, voiceId: leo.voiceId } });
     }
   });
+
+  it("QĐ-146 Studio: [thở dài] không được gửi (báo lý do), [cười] vẫn gửi; tắt thẻ cảm xúc → không gửi thẻ nào; chữ khác giữ nguyên", async () => {
+    const studio = (text: string, cues?: boolean) =>
+      speakInStudio({ text, language: "vi", voiceId: "Giọng 5", style: null, emotion: "AUTO", speed: 1, pause: "natural", preview: false, cues });
+    const before = requests.length;
+    const sigh = await studio(`[thở dài] Một ngày dài ${tag} cuối cùng cũng kết thúc.`);
+    expect(sigh.ok).toBe(true);
+    expect(requests[before]).toMatchObject({ engine: "vieneu", text: `Một ngày dài ${tag} cuối cùng cũng kết thúc.` });
+    expect(sigh.ok && sigh.notice).toMatch(/Không gửi \[thở dài\]/);
+
+    const laugh = await studio(`Tôi tưởng mình giỏi lắm ${tag}. [cười] Hóa ra lại quên chìa khóa.`);
+    expect(requests[before + 1]!.text).toBe(`Tôi tưởng mình giỏi lắm ${tag}. [cười] Hóa ra lại quên chìa khóa.`);
+    expect(laugh.ok && laugh.notice).toBeUndefined();
+
+    const off = await studio(`Tôi tưởng mình giỏi lắm ${tag}. [cười] Hóa ra lại quên chìa khóa.`, false);
+    expect(requests[before + 2]!.text).toBe(`Tôi tưởng mình giỏi lắm ${tag}. Hóa ra lại quên chìa khóa.`);
+    expect(off.ok && off.notice).toMatch(/Đã tắt thẻ cảm xúc/);
+    expect(off.ok && off.take.key).not.toBe(laugh.ok && laugh.take.key);
+    expect(requests.length - before).toBe(3);
+  }, 120_000);
 
   it("dự án OpenAI cũ không đổi: không có tag / language / chỉ dẫn Mind Voice", async () => {
     const v = await narratedVideo([`Narrator: Dự án cũ ${tag}.`], "vi");

@@ -51,6 +51,8 @@ export interface StudioRequest {
   pause: StudioPause;
   /** Speak only the opening (first sentence or so) to hear the voice quickly. */
   preview: boolean;
+  /** Emotion cues (QĐ-146). Absent = on; only cues the engine performs are sent. */
+  cues?: boolean;
 }
 
 export interface StudioTake {
@@ -114,7 +116,15 @@ function openingOf(text: string): string {
   return (first.length <= PREVIEW_CHARS ? first : `${first.slice(0, PREVIEW_CHARS).replace(/\s+\S*$/, "")}…`).trim();
 }
 
-export type StudioResult = { ok: true; take: StudioTake; reused: boolean } | { ok: false; message: string };
+export type StudioResult = { ok: true; take: StudioTake; reused: boolean; notice?: string } | { ok: false; message: string };
+
+/** Why typed cues were left out, in plain words (QĐ-146). */
+export function cueNotice(dropped: { tag: string; reason: "off" | "unreliable" | "unsupported" }[], engineLabel: string): string | undefined {
+  if (dropped.length === 0) return undefined;
+  const tags = [...new Set(dropped.map((d) => d.tag))].join(", ");
+  if (dropped.every((d) => d.reason === "off")) return `Đã tắt thẻ cảm xúc: bỏ ${tags}.`;
+  return `Không gửi ${tags}: ${engineLabel} chưa thể hiện ổn định thẻ này (ra âm lạ hoặc mất), nên đã bỏ khỏi câu.`;
+}
 
 export async function speakInStudio(req: StudioRequest): Promise<StudioResult> {
   const cleaned = stripRoleLabels(req.text);
@@ -139,19 +149,22 @@ export async function speakInStudio(req: StudioRequest): Promise<StudioResult> {
 
   const words = req.preview ? openingOf(cleaned) : cleaned;
   const emotion = req.emotion === "AUTO" ? null : req.emotion;
-  const directed = mindDirection({ text: prepareSpeechText(words, req.language), engine: voice.engine, style: req.style, role: null, emotion }).text;
+  const cues = req.cues ?? true;
+  const direction = mindDirection({ text: prepareSpeechText(words, req.language), engine: voice.engine, style: req.style, role: null, emotion, cues });
+  const directed = direction.text;
+  const notice = cueNotice(direction.dropped, MIND_ENGINES[voice.engine].label);
   // "Dài hơn": VieNeu's own paragraph pause between sentences (it has no pause tag).
   const spokenText = req.pause === "long" && voice.engine === "vieneu" ? directed.replace(/(?<=[.!?…])[ \t]+(?=\S)/g, "\n") : directed;
   const speed = clampMindSpeed(req.speed);
   const variant = variantOfMindEngine(catalog, voice.engine);
-  const instructions = `${mindDirectionSummary({ engine: voice.engine, variant, language: req.language, style: req.style, role: null, emotion })}${req.pause === "long" ? " pause=long" : ""}`;
+  const instructions = `${mindDirectionSummary({ engine: voice.engine, variant, language: req.language, style: req.style, role: null, emotion, cues })}${req.pause === "long" ? " pause=long" : ""}`;
   const key = voiceReuseKey({ provider: MIND_PROVIDER, model: MIND_MODEL, text: words, voiceId: voice.id, instructions, speed, spokenText });
 
   const release = await acquireAssetCreationLock(`mind-studio:${key}`);
   try {
     const lib = readLibrary();
     const known = lib.takes.find((t) => t.key === key && fs.existsSync(toAbsolute(t.file)));
-    if (known) return { ok: true, take: known, reused: true };
+    if (known) return { ok: true, take: known, reused: true, notice };
 
     const outputPath = toAbsolute(path.join(STUDIO_DIR, `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}.wav`));
     const provider = new MindVoiceProvider({ baseUrl: catalog.baseUrl });
@@ -192,7 +205,7 @@ export async function speakInStudio(req: StudioRequest): Promise<StudioResult> {
     };
     lib.takes.unshift(take);
     writeLibrary(lib);
-    return { ok: true, take, reused: false };
+    return { ok: true, take, reused: false, notice };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
   } finally {

@@ -242,6 +242,11 @@ export const VoiceDirectionSchema = z.object({
   speedMode: z.enum(SPEED_MODES.map((s) => s.id) as [SpeedModeId, ...SpeedModeId[]]).default("AUTO"),
   /** Per-scene emotion, by scene id. A scene left out follows the project. */
   sceneEmotions: z.record(z.string(), z.enum(EMOTION_IDS)).default({}),
+  /**
+   * QĐ-146: emotion cues ([cười], <laugh>...) for a local engine (Mind Voice).
+   * On by default; only cues the engine reliably performs are ever sent.
+   */
+  emotionCues: z.boolean().default(true),
 });
 export type VoiceDirection = z.infer<typeof VoiceDirectionSchema>;
 

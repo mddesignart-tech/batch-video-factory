@@ -69,7 +69,7 @@ export async function mindSpeakAction(req: StudioRequest): Promise<{ ok: boolean
     revalidatePath("/mind-voice");
     return {
       ok: true,
-      message: r.reused ? "Dùng lại bản đã có (cùng nội dung, giọng, cài đặt) - không tạo lại, $0." : `Đã tạo giọng ${r.take.durationSec.toFixed(1)} s - chạy tại máy, $0.`,
+      message: `${r.reused ? "Dùng lại bản đã có (cùng nội dung, giọng, cài đặt) - không tạo lại, $0." : `Đã tạo giọng ${r.take.durationSec.toFixed(1)} s - chạy tại máy, $0.`}${r.notice ? ` ${r.notice}` : ""}`,
       take: r.take,
       reused: r.reused,
     };

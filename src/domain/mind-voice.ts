@@ -21,7 +21,11 @@ export const MIND_DEFAULT_BASE_URL = "http://127.0.0.1:8011";
 /** Voice "Tự động": the engine's default voice for the line's language. */
 export const MIND_AUTO_VOICE = "AUTO";
 export const MIND_LABEL = "Mind Voice Local — $0";
-/** Bump when a rule below changes: it is part of every Mind Voice voice key. */
+/**
+ * Bump when a rule below changes how the SAME words would sound: it is part of
+ * every Mind Voice voice key, so a bump makes every line again (QĐ-146 did not
+ * bump - a changed cue changes the words sent, which are in the key already).
+ */
 export const MIND_ADAPTER_VERSION = "mind-v1";
 export const MIND_MIN_SPEED = 0.75;
 export const MIND_MAX_SPEED = 1.5;
@@ -207,14 +211,102 @@ export interface MindDirectionInput {
   style: VoiceStyleId | null;
   role: SceneVoiceRole | null;
   emotion: VoiceEmotionId | null;
+  /** Emotion cues on (default). Off: no cue is sent - typed ones are taken out too; pacing stays. */
+  cues?: boolean;
 }
 
-/** Inline cues each engine really understands (checked in the SDK, 2026-10-22). */
-export const MIND_TAGS: Record<MindEngineId, { laugh: string; sigh: string; clearThroat?: string; breath?: string }> = {
-  // vieneu_utils.phonemize_text: [cười] [thở dài] [hắng giọng]; any other [..] is READ AS TEXT.
-  vieneu: { laugh: "[cười]", sigh: "[thở dài]", clearThroat: "[hắng giọng]" },
-  supertonic: { laugh: "<laugh>", sigh: "<sigh>", breath: "<breath>" },
+export type MindCueId = "laugh" | "sigh" | "clearThroat" | "breath";
+
+export interface MindCueCapability {
+  /** The engine's own spelling of the cue. */
+  tag: string;
+  /** "reliable": sent. "unreliable": the engine takes it but does not perform it - never sent. */
+  support: "reliable" | "unreliable";
+  /** Why: what the SDK does with it and what listening/measuring found. */
+  evidence: string;
+}
+
+/**
+ * QĐ-146: the emotion cues each engine really PERFORMS, not only accepts.
+ * Checked in the SDK and by ear (user ratings 2026-10-22, data/voice-ab).
+ * A cue missing here is not supported by that engine. In VieNeu any other
+ * [..] is READ AS TEXT (vieneu_utils.phonemize_text).
+ */
+export const MIND_CUES: Record<MindEngineId, Partial<Record<MindCueId, MindCueCapability>>> = {
+  vieneu: {
+    laugh: { tag: "[cười]", support: "reliable", evidence: "SDK: token <|emotion_1|>. Người nghe: mẫu 05 cảm xúc 5/5." },
+    clearThroat: { tag: "[hắng giọng]", support: "reliable", evidence: "SDK: token <|emotion_3|>. Người nghe: mẫu 07 cảm xúc 4/5." },
+    sigh: {
+      tag: "[thở dài]",
+      support: "unreliable",
+      evidence:
+        "SDK nhận đúng (token <|emotion_2|>, không đọc thành chữ) nhưng model không thể hiện được: mẫu 06 chấm 3/5; 8 mẫu thử QĐ-146 (2 giọng, đầu/giữa/cuối câu): 1 mất hẳn, 7 thành âm hữu thanh 0,29–0,38 s thay vì tiếng thở 0,4–1,0 s.",
+    },
+  },
+  supertonic: {
+    laugh: {
+      tag: "<laugh>",
+      support: "reliable",
+      evidence: "Theo công bố của Supertone (SDK chuyển nguyên ký tự cho model). Người nghe: mẫu 11 cảm xúc 4/5, video V3 4/5.",
+    },
+    sigh: { tag: "<sigh>", support: "unreliable", evidence: "Mẫu 12: không đo được tiếng thở dài nào trước câu nói (trên −45 dB)." },
+    breath: { tag: "<breath>", support: "unreliable", evidence: "Chưa có mẫu nghe kiểm chứng." },
+  },
 };
+
+/** Every spelling of a cue a person may type, for either engine (the VieNeu SDK also takes unaccented ones). */
+const CUE_SPELLINGS: Record<string, MindCueId> = {
+  "[cười]": "laugh",
+  "[cuoi]": "laugh",
+  "[chuckle]": "laugh",
+  "<laugh>": "laugh",
+  "[thở dài]": "sigh",
+  "[tho dai]": "sigh",
+  "[sigh]": "sigh",
+  "<sigh>": "sigh",
+  "[hắng giọng]": "clearThroat",
+  "[hang giong]": "clearThroat",
+  "[clear throat]": "clearThroat",
+  "<breath>": "breath",
+};
+const CUE_RE = /\[[^\]\n]{1,20}\]|<(?:laugh|sigh|breath)>/gi;
+
+export interface MindCueDrop {
+  tag: string;
+  cue: MindCueId;
+  reason: "off" | "unreliable" | "unsupported";
+}
+
+/** True when the engine performs the cue and cues are on. */
+export function mindCueUsable(engine: MindEngineId, cue: MindCueId, cues = true): boolean {
+  return cues && MIND_CUES[engine][cue]?.support === "reliable";
+}
+
+/**
+ * The emotion cues in a text, adapted to what `engine` really performs: a
+ * reliable cue is written the engine's way ([cười] ↔ <laugh>), any other is
+ * taken out - never sent as a wrong tag. Other bracketed text is left alone.
+ */
+export function adaptMindCues(text: string, engine: MindEngineId, cues = true): { text: string; dropped: MindCueDrop[] } {
+  const dropped: MindCueDrop[] = [];
+  const out = text.replace(CUE_RE, (tag) => {
+    const cue = CUE_SPELLINGS[tag.normalize("NFC").toLowerCase().replace(/\s+/g, " ")];
+    if (!cue) return tag;
+    const cap = MIND_CUES[engine][cue];
+    if (cues && cap?.support === "reliable") return cap.tag;
+    dropped.push({ tag, cue, reason: !cues ? "off" : cap ? "unreliable" : "unsupported" });
+    return "";
+  });
+  if (dropped.length === 0) return { text: out, dropped };
+  const tidy = out
+    .split("\n")
+    .map((l) => l.replace(/[ \t]{2,}/g, " ").replace(/[ \t]+(?=[.,!?…;:])/g, "").trim())
+    // A cue that stood on its own line leaves no empty one behind (VieNeu reads any run of line breaks as one pause).
+    .filter((l) => l.length > 0)
+    .join("\n")
+    .trim();
+  return { text: tidy, dropped };
+}
 
 function sentences(text: string): string[] {
   return text.split(/(?<=[.!?…])\s+(?=\S)/).filter((x) => x.trim().length > 0);
@@ -235,24 +327,27 @@ const PAUSED_STYLES = new Set<VoiceStyleId>(["DOCUMENTARY", "DRAMATIC", "STORYTE
 /**
  * What the Voice Director's intent becomes for a local engine. OpenAI
  * `instructions` are never sent; at most ONE emotion cue per line, and only a
- * cue the engine documents:
+ * cue the engine reliably performs (MIND_CUES):
  *  - Documentary / Dramatic / Storytelling: a beat between the first sentences;
  *  - a punchline: a beat before its last sentence; Comedy adds one laugh after it;
- *  - a touching moment: one sigh in front.
+ *  - a touching moment: a beat between sentences, plus a sigh in front only on
+ *    an engine that performs one (none does today - QĐ-146).
+ * Cues typed into the text go through adaptMindCues, director on or off.
  */
-export function mindDirection(input: MindDirectionInput): { text: string; tags: string[] } {
+export function mindDirection(input: MindDirectionInput): { text: string; tags: string[]; dropped: MindCueDrop[] } {
+  const cues = input.cues ?? true;
   const text = input.text.trim();
-  if (!input.style || text.length === 0) return { text, tags: [] };
-  const tags = MIND_TAGS[input.engine];
+  if (!input.style || text.length === 0) return { ...adaptMindCues(text, input.engine, cues), tags: [] };
+  const own = MIND_CUES[input.engine];
   const parts = sentences(text);
   const used: string[] = [];
   let out = text;
 
   if (input.emotion === "TOUCHING" || input.role === "EMOTIONAL") {
     out = beat(parts, input.engine, 2);
-    if (input.emotion === "TOUCHING") {
-      out = `${tags.sigh} ${out}`;
-      used.push(tags.sigh);
+    if (input.emotion === "TOUCHING" && mindCueUsable(input.engine, "sigh", cues)) {
+      out = `${own.sigh!.tag} ${out}`;
+      used.push(own.sigh!.tag);
     }
   } else if (input.role === "PUNCHLINE" && parts.length > 1) {
     out = beat([parts.slice(0, -1).join(" "), parts[parts.length - 1]!], input.engine, 1);
@@ -261,18 +356,19 @@ export function mindDirection(input: MindDirectionInput): { text: string; tags: 
   }
 
   const laughs = input.style === "COMEDY" && (input.role === "PUNCHLINE" || input.emotion === "HUMOROUS");
-  if (laughs && !used.includes(tags.sigh)) {
-    out = `${out} ${tags.laugh}`;
-    used.push(tags.laugh);
+  if (laughs && used.length === 0 && mindCueUsable(input.engine, "laugh", cues)) {
+    out = `${out} ${own.laugh!.tag}`;
+    used.push(own.laugh!.tag);
   }
-  return { text: out, tags: used };
+  return { ...adaptMindCues(out, input.engine, cues), tags: used };
 }
 
 /**
  * The Mind Voice direction as stored on the line and folded into its voice key:
  * adapter version, engine, model variant, language and director settings. A
  * change of any of them is a different line; the same settings are the same
- * line, reused.
+ * line, reused. (The words actually sent - spokenText - are in the key too, so
+ * a line whose cue changed is made again while every other line is reused.)
  */
 export function mindDirectionSummary(opts: {
   engine: MindEngineId;
@@ -281,12 +377,15 @@ export function mindDirectionSummary(opts: {
   style: VoiceStyleId | null;
   role: SceneVoiceRole | null;
   emotion: VoiceEmotionId | null;
+  /** Only "off" is written, so every key made before QĐ-146 stays the same. */
+  cues?: boolean;
 }): string {
   return [
     `MIND ${MIND_ADAPTER_VERSION}`,
     `engine=${opts.engine}/${opts.variant ?? "default"}`,
     `lang=${opts.language}`,
     opts.style ? `style=${opts.style} role=${opts.role ?? "-"} emotion=${opts.emotion ?? "-"}` : "director=off",
+    ...(opts.cues === false ? ["cues=off"] : []),
   ].join(" ");
 }
 
