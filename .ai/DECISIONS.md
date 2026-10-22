@@ -4548,3 +4548,28 @@ V2 (dùng lại). B = 3 câu tạo mới tại máy (Max = Vui vẻ, Leo = Ngạ
 Đo: Max câu 1 cuối câu A −2,0 st (xuống) / B +1,1 st (lên); giọng giữ (F0 Max 116/121 Hz, Leo 211/213 Hz); âm lượng
 −15,9…−16,5 LUFS; mỗi câu 1 lần tạo nên có yếu tố ngẫu nhiên. Chưa có UI chọn cảm xúc từng nhân vật — chỉ làm sau
 khi người dùng chấm và duyệt áp dụng.
+
+**Kết quả nghe A/B QĐ-147 (người dùng, 2026-10-22):** A 3/4/3/2 (12/20) · B 3/4/3/3 (13/20) — lưu nguyên trong
+`DIALOGUE_AB_RATINGS` (`src/domain/voice-quality.ts`). Chênh 1 điểm (Phù hợp), Cảm xúc vẫn 3/5 ở cả hai.
+Dialogue Director GIỮ MẶC ĐỊNH TẮT; chưa áp dụng rộng, chờ người dùng quyết định.
+
+## QĐ-148 — THỤC ĐOAN: GIỌNG TIẾNG VIỆT ƯU TIÊN #1, PRESET ĐÚNG MẪU 20/20, BASELINE THAM CHIẾU (2026-10-22, $0)
+
+Người dùng xác nhận Thục Đoan là giọng tiếng Việt hài lòng nhất (mẫu 02: 5/5/5/5 — "diễn đạt cảm xúc tốt, mềm mại,
+tự nhiên, không bị cứng").
+
+- `MIND_PRIORITY_VOICE.vi = "Thục Đoan"`: Studio xếp Thục Đoan đầu danh sách giọng ("#1 … · ưu tiên (20/20)"),
+  nút gợi ý ghi "ưu tiên #1". KHÔNG phải giọng mặc định: "Tự động" (giọng mặc định SDK) và mọi project giữ nguyên;
+  không khoá giọng khác, không tự đổi giọng đã chọn.
+- Gợi ý: Thục Đoan đứng đầu Kể chuyện, Review sản phẩm (Trúc Ly xuống thứ 2) và nhóm mới "Nội dung cần cảm xúc"
+  (chỉ chọn trong Studio; không loại nội dung/phong cách nào tự rơi vào nhóm này → không project nào đổi gợi ý ngầm).
+  Review AI, Comedy, English không đổi.
+- Preset `THUC_DOAN_PRESET` "Thục Đoan – Tự nhiên & Biểu cảm" = đúng request tạo mẫu 02: `POST /tts {engine: vieneu,
+  voice: "Thục Đoan", text}` → VieNeu-TTS v3 Turbo fp32 (SDK vieneu 3.8.3), lang vi, tốc độ 1 (không atempo), Voice
+  Director tắt, không thẻ cảm xúc, không keep_punct, không hậu kỳ khi tạo. Nút trong Studio chỉ đặt các thông số đó,
+  không đổi nội dung chữ và công tắc thẻ cảm xúc. Chỉ gắn với giọng Thục Đoan: không có "áp cho giọng khác" — chất
+  lượng đến từ giọng tham chiếu của Thục Đoan, không phải từ thông số.
+- Baseline `VOICE_BASELINE`: file mẫu 02 (SHA-256 `69ef55d7…562c`, 12,96 s, 48 kHz) + request gốc. Mọi thay đổi
+  Voice Director sau này phải A/B với file này; test hồi quy (`tests/mind-voice.test.ts`) bảo đảm Studio và video
+  (director tắt) vẫn gửi đúng `{engine, voice, text, language: vi, speed: 1}`, summary `director=off`, không `dlg=`.
+- Video pipeline vẫn chuẩn hoá −16 LUFS cho mọi câu thoại như trước (không phải hiệu ứng mới của preset).
