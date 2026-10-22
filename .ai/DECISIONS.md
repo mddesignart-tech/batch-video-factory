@@ -4516,3 +4516,35 @@ audio cũ (test hồi quy). Không đổi normalization hay render.
 0,42–0,45 s (0,28 s timeline + biên im lặng của clip). Nguyên nhân có dữ liệu: (1) Voice Director TẮT trong test V2 →
 không có cảm xúc/nhịp nào; cảm xúc theo cảnh chứ không theo từng người nói; (2) mỗi câu tạo riêng, câu ngắn (1,1–2,9 s)
 ra ngữ điệu phẳng: biến thiên cao độ 14–17 % so với 22–38 % của chính các giọng đó ở câu dài. Không sửa ở QĐ này.
+
+## QĐ-147 — DIALOGUE VOICE DIRECTOR: CẢM XÚC RIÊNG TỪNG NHÂN VẬT, CHỈ BẰNG KHẢ NĂNG THẬT CỦA ENGINE (2026-10-22, $0)
+
+**Vấn đề:** video V2 (Thiện Minh / Ngọc Huyền) người nghe chấm Cảm xúc 3/5; câu ngắn đọc phẳng.
+
+**Audit luồng hội thoại (`src/services/voice-direction.ts`):**
+1. `voice.director` tắt (như V2) → nhánh `local(line, base, null)`: không có chỉ đạo nào cho bất kỳ người nói nào.
+2. Director bật → `emotion = sceneEmotions[scene.id] ?? voice.emotion`: MỘT cảm xúc cho cả cảnh, mọi người nói như
+   nhau; nhân vật chỉ giữ giọng/tốc độ riêng. `mindDirection` với câu thoại ngắn hầu như không đổi gì (nhịp xuống dòng
+   chỉ có tác dụng khi ≥ 2 câu).
+3. **Nguyên nhân cụ thể mới tìm thấy trong SDK VieNeu:** `normalize_to_chunks_v3_with_gaps` → `punc_norm` của sea-g2p
+   ép dấu cuối của mọi chunk dưới 5 từ về ".": "Bạn ăn sáng chưa?" → `bạn ăn sáng chưa.` (cả đường phonemize nhanh
+   `_phonemize_cached(punc_norm=True)`). Câu hỏi ngắn bị đọc như câu kể. Câu ≥ 5 từ giữ ?/!.
+
+**Thiết kế (`src/domain/dialogue-director.ts`):** `voice.dialogueDirector` (mặc định TẮT, độc lập với `director`) +
+`voice.speakerEmotions` (scene id hoặc "*" → tên nhân vật → cảm xúc). Cảm xúc: Tự động, Bình tĩnh, Ngạc nhiên, Vui vẻ,
+Cà khịa, Bực mình. Engine không có điều khiển cảm xúc → mỗi cảm xúc CHỈ thành: giữ ?/! cuối câu (VieNeu `keep_punct`;
+Supertonic vốn giữ), "." → "!" (Ngạc nhiên, Bực mình), nhịp atempo nhỏ 0,96–1,05 (giữ cao độ = giữ giọng), tiếng cười
+`[cười]`/`<laugh>` (Cà khịa, chỉ khi bật thẻ cảm xúc). Mỗi cảm xúc ghi rõ phần engine KHÔNG làm được (`missing`).
+Không bao giờ gửi thở dài; không đổi voiceId; người kể chuyện (Narrator) không bị áp.
+
+**Service:** `POST /tts` nhận `keep_punct` (chỉ khi true). VieNeu: trong lock của engine, tạm bọc `punc_norm` và
+`_phonemize_cached` của `vieneu_utils.phonemize_text` để trả lại đúng dấu ?/! gốc của chunk; không thêm chữ, không đổi
+câu dài (đã kiểm: phoneme câu dài giống hệt), trả lại hàm gốc trong `finally`. Không sửa file SDK.
+App: summary của dòng thêm `dlg=<CẢM XÚC>[ punct=keep]` (nằm trong khoá giọng); provider đọc `punct=keep` từ
+`instructions` để gửi `keep_punct`. Tắt Dialogue Director → request giống hệt trước (test).
+
+**A/B (chưa kết luận, chờ người nghe):** `data/voice-ab/qd147-dialogue-2026-10-22/ab-hoi-thoai.html`. A = 3 câu gốc
+V2 (dùng lại). B = 3 câu tạo mới tại máy (Max = Vui vẻ, Leo = Ngạc nhiên), xử lý như pipeline (`normalizeVoiceClip`).
+Đo: Max câu 1 cuối câu A −2,0 st (xuống) / B +1,1 st (lên); giọng giữ (F0 Max 116/121 Hz, Leo 211/213 Hz); âm lượng
+−15,9…−16,5 LUFS; mỗi câu 1 lần tạo nên có yếu tố ngẫu nhiên. Chưa có UI chọn cảm xúc từng nhân vật — chỉ làm sau
+khi người dùng chấm và duyệt áp dụng.
