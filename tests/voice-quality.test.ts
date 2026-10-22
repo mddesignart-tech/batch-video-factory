@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { adaptMindCues, MIND_CUES, mindCueUsable, mindDirection, mindDirectionSummary } from "@/domain/mind-voice";
-import { MIND_VOICE_SUGGESTIONS, mindUseCaseFor, ratingOf, suggestMindVoices, totalScore, VOICE_RATINGS } from "@/domain/voice-quality";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import {
+  DIALOGUE_AB_RATINGS,
+  isPriorityVoice,
+  MIND_PRIORITY_VOICE,
+  MIND_VOICE_SUGGESTIONS,
+  mindUseCaseFor,
+  ratingOf,
+  suggestMindVoices,
+  THUC_DOAN_PRESET,
+  totalScore,
+  VOICE_BASELINE,
+  VOICE_RATINGS,
+} from "@/domain/voice-quality";
 import { controlsOf } from "@/domain/output-controls";
 
 /** QĐ-146: user ratings, voice suggestions, and the emotion-cue adapter. Pure, $0. */
@@ -34,7 +48,7 @@ describe("QĐ-146 gợi ý giọng theo loại nội dung", () => {
   it("đúng danh sách người dùng chọn, kèm điểm làm căn cứ; Adam bựa là ứng viên cần thử thêm", () => {
     const ids = (u: keyof typeof MIND_VOICE_SUGGESTIONS) => suggestMindVoices(u).map((v) => v.voiceId);
     expect(ids("REVIEW_AI")).toEqual(["Hải Đăng", "Trúc Ly"]);
-    expect(ids("REVIEW_PRODUCT")).toEqual(["Trúc Ly", "Thục Đoan"]);
+    expect(ids("REVIEW_PRODUCT")).toEqual(["Thục Đoan", "Trúc Ly"]);
     expect(ids("STORYTELLING")).toEqual(["Thục Đoan", "Thiện Minh"]);
     expect(ids("COMEDY")).toEqual(["Adam bựa"]);
     expect(suggestMindVoices("COMEDY")[0]!.candidate).toBe(true);
@@ -42,7 +56,7 @@ describe("QĐ-146 gợi ý giọng theo loại nội dung", () => {
     const hd = suggestMindVoices("REVIEW_AI")[0]!;
     expect(hd.bestScore).toBe(19);
     expect(hd.basis).toBe("mẫu 01: 18/20, mẫu V1: 19/20");
-    expect(suggestMindVoices("REVIEW_PRODUCT")[1]).toMatchObject({ voiceId: "Thục Đoan", bestScore: 20 });
+    expect(suggestMindVoices("REVIEW_PRODUCT")[0]).toMatchObject({ voiceId: "Thục Đoan", bestScore: 20 });
   });
 
   it("chọn danh sách theo ngôn ngữ, phong cách giọng, loại nội dung; không có căn cứ → không gợi ý", () => {
@@ -126,5 +140,66 @@ describe("QĐ-146 hồi quy: mẫu tốt không đổi (cùng chữ gửi đi + 
     expect(mindDirection({ text: "I tried it. Turns out, no.", ...base }).text).toBe("I tried it. Turns out, no. <laugh>");
     const old = { outputControlsJson: JSON.stringify({ voice: { provider: "mindvoice", model: "mind-local", voiceId: "Thục Đoan" } }) };
     expect(controlsOf(old as Parameters<typeof controlsOf>[0]).voice).toMatchObject({ voiceId: "Thục Đoan", emotionCues: true });
+  });
+});
+
+describe("QĐ-148 Thục Đoan: giọng ưu tiên #1, preset đúng mẫu 20/20, baseline", () => {
+  it("ưu tiên #1 chỉ là đánh dấu + đứng đầu gợi ý; không đổi điểm, không đổi cách chọn tự động", () => {
+    expect(MIND_PRIORITY_VOICE.vi).toBe("Thục Đoan");
+    expect(isPriorityVoice("Thục Đoan", "vi")).toBe(true);
+    expect(isPriorityVoice("Hải Đăng", "vi")).toBe(false);
+    expect(isPriorityVoice("Thục Đoan", "en")).toBe(false);
+    for (const u of ["STORYTELLING", "REVIEW_PRODUCT", "EMOTIONAL"] as const) {
+      expect(suggestMindVoices(u)[0], u).toMatchObject({ voiceId: "Thục Đoan", priority: true, bestScore: 20 });
+    }
+    expect(MIND_VOICE_SUGGESTIONS.EMOTIONAL.label).toBe("Nội dung cần cảm xúc");
+    expect(suggestMindVoices("REVIEW_AI").map((v) => v.voiceId)).toEqual(["Hải Đăng", "Trúc Ly"]);
+    expect(suggestMindVoices("REVIEW_AI").some((v) => v.priority)).toBe(false);
+    expect(totalScore(ratingOf("02")!.scores)).toBe(20);
+    // No project is moved to a new list: no content type / style maps to EMOTIONAL.
+    for (const styleId of ["DRAMATIC", "STORYTELLING", "NATURAL", "COMEDY"] as const) {
+      expect(mindUseCaseFor({ language: "vi", contentType: null, styleId })).not.toBe("EMOTIONAL");
+    }
+  });
+
+  it("preset 'Thục Đoan – Tự nhiên & Biểu cảm' = đúng cấu hình mẫu 02: VieNeu fp32, tốc độ 1, không director, không thẻ, không hậu kỳ", () => {
+    expect(THUC_DOAN_PRESET).toMatchObject({
+      label: "Thục Đoan – Tự nhiên & Biểu cảm",
+      baseline: "02",
+      engine: "vieneu",
+      variant: "fp32",
+      voiceId: "Thục Đoan",
+      language: "vi",
+      speed: 1,
+      style: null,
+      emotion: null,
+      pause: "natural",
+      dialogueDirector: false,
+      keepPunct: false,
+    });
+    expect(VOICE_BASELINE.request.voice).toBe(THUC_DOAN_PRESET.voiceId);
+    expect(VOICE_BASELINE.request.text).not.toMatch(/\[|<\w+>/);
+    // The words of the baseline still go out unchanged (same voice key as the rated sample).
+    expect(mindDirection({ text: VOICE_BASELINE.request.text, engine: "vieneu", style: null, role: null, emotion: null }).text).toBe(VOICE_BASELINE.request.text);
+    expect(() => {
+      (THUC_DOAN_PRESET as { speed: number }).speed = 1.1;
+    }).toThrow();
+  });
+
+  it("baseline: đúng file đã nghe (SHA-256) khi file có trên máy", () => {
+    expect(VOICE_BASELINE.file).toBe(ratingOf("02")!.file);
+    if (!fs.existsSync(VOICE_BASELINE.file)) return; // data/ is not in git
+    const hash = createHash("sha256").update(fs.readFileSync(VOICE_BASELINE.file)).digest("hex");
+    expect(hash).toBe(VOICE_BASELINE.sha256);
+  });
+
+  it("QĐ-147 điểm A/B hội thoại lưu đúng như người dùng chấm", () => {
+    expect(DIALOGUE_AB_RATINGS.items.map((r) => [r.id, r.scores.natural, r.scores.pronunciation, r.scores.emotion, r.scores.fit, totalScore(r.scores)])).toEqual([
+      ["A", 3, 4, 3, 2, 12],
+      ["B", 3, 4, 3, 3, 13],
+    ]);
+    expect(() => {
+      (DIALOGUE_AB_RATINGS.items[0]!.scores as { fit: number }).fit = 5;
+    }).toThrow();
   });
 });

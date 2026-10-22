@@ -33,6 +33,7 @@ import { generateSceneVoice, voiceSettingsFor } from "@/services/generation";
 import { saveProjectControls } from "@/services/output-controls";
 import { makeSceneVoice } from "@/services/scene-voice";
 import { speakInStudio } from "@/services/mind-voice-studio";
+import { THUC_DOAN_PRESET, VOICE_BASELINE } from "@/domain/voice-quality";
 import { setSpendCap, spendStatus } from "@/services/spend-guard";
 import { materialiseImport, scanImportSource, validateImport } from "@/services/storyboard-import";
 import { approveAndRun } from "@/services/batch-executor";
@@ -48,9 +49,11 @@ import { voiceDirectorFor } from "@/services/voice-direction";
 // ------------------------------------------------------- mock Mind Voice ---
 
 const REGIONS = ["Bắc", "Nam", "Trung", null] as const;
+// The last one carries a real name: the QĐ-148 preset voice.
+const vieneuName = (i: number) => (i === 24 ? "Thục Đoan" : `Giọng ${i + 1}`);
 const VIENEU = Array.from({ length: 25 }, (_, i) => ({
-  id: `Giọng ${i + 1}`,
-  name: `Giọng ${i + 1}`,
+  id: vieneuName(i),
+  name: vieneuName(i),
   engine: "vieneu",
   languages: ["vi"],
   gender: i % 2 ? "female" : "male",
@@ -579,6 +582,34 @@ describe("QĐ-145 Mind Voice - mock server, Mock Mode, $0", () => {
     expect(off.ok && off.take.key).not.toBe(laugh.ok && laugh.take.key);
     expect(requests.length - before).toBe(3);
   }, 120_000);
+
+  it("QĐ-148 hồi quy: preset Thục Đoan gửi ĐÚNG request đã tạo mẫu 02 (20/20) - không thêm thẻ, tốc độ 1, không keep_punct, không co giãn", async () => {
+    const p = THUC_DOAN_PRESET;
+    const before = requests.length;
+    const r = await speakInStudio({
+      text: `${VOICE_BASELINE.request.text} ${tag}`,
+      language: p.language,
+      voiceId: p.voiceId,
+      style: p.style,
+      emotion: "AUTO",
+      speed: p.speed,
+      pause: p.pause,
+      preview: false,
+    });
+    expect(r.ok).toBe(true);
+    const sent = requests.slice(before);
+    expect(sent).toEqual([{ ...VOICE_BASELINE.request, text: `${VOICE_BASELINE.request.text} ${tag}`, language: "vi", speed: 1 }]);
+    // The baseline request itself (no language → the service's "vi", no speed → 1): same engine call.
+    expect(VOICE_BASELINE.request).toEqual({ engine: p.engine, voice: p.voiceId, text: expect.any(String) });
+    // In a video: Thục Đoan with the directors off sends the same words, speed 1, no dlg= / keep_punct.
+    const v = await narratedVideo([VOICE_BASELINE.request.text], "vi");
+    await saveProjectControls(v.projectId, { voice: { provider: "mindvoice", model: "mind-local", voiceId: p.voiceId } });
+    const at = requests.length;
+    await generateSceneVoice(v.sceneIds[0]!);
+    expect(requests.slice(at)).toEqual([{ engine: "vieneu", voice: "Thục Đoan", text: VOICE_BASELINE.request.text, language: "vi", speed: 1 }]);
+    const [line] = await mindLines(v.projectId);
+    expect(line!.instructions).toBe("MIND mind-v1 engine=vieneu/fp32 lang=vi director=off");
+  }, 600_000);
 
   it("dự án OpenAI cũ không đổi: không có tag / language / chỉ dẫn Mind Voice", async () => {
     const v = await narratedVideo([`Narrator: Dự án cũ ${tag}.`], "vi");

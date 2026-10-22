@@ -95,7 +95,7 @@ export function MindVoiceDetails({
                 >
                   {current ? "✓ " : "Dùng "}
                   {s.voiceId}
-                  {s.label ? ` (${s.label})` : ""} · {s.bestScore}/20{s.candidate ? " · cần thử thêm" : ""}
+                  {s.label ? ` (${s.label})` : ""} · {s.bestScore}/20{s.priority ? " · ưu tiên #1" : ""}{s.candidate ? " · cần thử thêm" : ""}
                 </Button>
               );
             })}

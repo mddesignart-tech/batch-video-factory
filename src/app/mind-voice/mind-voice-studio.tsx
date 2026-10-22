@@ -5,7 +5,7 @@ import { Bookmark, BookmarkCheck, Download, HardDrive, Mic, Play, RefreshCw, Shi
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, ProgressBar, Select, Textarea } from "@/components/ui";
 import { mindInstallAction, mindMp3Action, mindSaveTakeAction, mindSpeakAction, mindStatusAction, mindVerifyAction, type MindStatus } from "@/app/actions/mind-voice";
 import { MIND_AUTO_VOICE, MIND_CUES, MIND_ENGINES, MIND_MAX_SPEED, MIND_MIN_SPEED, mindVoiceLabel, type MindEngineId, type MindModelStatus } from "@/domain/mind-voice";
-import { MIND_VOICE_SUGGESTIONS, suggestMindVoices, type MindUseCase } from "@/domain/voice-quality";
+import { isPriorityVoice, MIND_VOICE_SUGGESTIONS, suggestMindVoices, THUC_DOAN_PRESET, VOICE_BASELINE, type MindUseCase } from "@/domain/voice-quality";
 import { VOICE_EMOTIONS, VOICE_STYLES, type VoiceEmotionId, type VoiceStyleId } from "@/domain/voice-director";
 import type { StudioPause, StudioTake } from "@/services/mind-voice-studio";
 
@@ -50,7 +50,31 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
   const [current, setCurrent] = useState<StudioTake | null>(initialTakes[0] ?? null);
 
   const engine: MindEngineId = language === "vi" ? "vieneu" : "supertonic";
-  const voices = useMemo(() => status.voices.filter((v) => v.engine === engine && v.installed), [status.voices, engine]);
+  // QĐ-148: the listener's preferred voice first; the rest in the service's order.
+  const voices = useMemo(
+    () =>
+      status.voices
+        .filter((v) => v.engine === engine && v.installed)
+        .sort((a, b) => Number(isPriorityVoice(b.id, language)) - Number(isPriorityVoice(a.id, language))),
+    [status.voices, engine, language],
+  );
+  const presetReady = status.voices.some((v) => v.id === THUC_DOAN_PRESET.voiceId && v.engine === THUC_DOAN_PRESET.engine && v.installed);
+  const presetOn =
+    language === THUC_DOAN_PRESET.language &&
+    voiceId === THUC_DOAN_PRESET.voiceId &&
+    style === "" &&
+    speed === THUC_DOAN_PRESET.speed &&
+    pause === THUC_DOAN_PRESET.pause;
+  /** Exactly the settings of the rated sample - the text and the cue switch are left as they are. */
+  const usePreset = () => {
+    if (language !== THUC_DOAN_PRESET.language && text === SAMPLE[language]) setText(SAMPLE[THUC_DOAN_PRESET.language]);
+    setLanguage(THUC_DOAN_PRESET.language);
+    setVoiceId(THUC_DOAN_PRESET.voiceId);
+    setStyle("");
+    setEmotion("AUTO");
+    setSpeed(THUC_DOAN_PRESET.speed);
+    setPause(THUC_DOAN_PRESET.pause);
+  };
   const engineModel = status.models.find((m) => m.id === engine);
   const cueTags = (support: "reliable" | "unreliable") =>
     Object.values(MIND_CUES[engine])
@@ -138,6 +162,15 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
             <Field label="Nội dung cần đọc" hint={`${text.length}/3000 ký tự · nhãn như "Narrator:", "Speaker A:", "Host:" ở đầu dòng sẽ không bị đọc`}>
               <Textarea rows={6} value={text} onChange={(e) => setText(e.currentTarget.value)} />
             </Field>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-ink-800 p-3">
+              <Button size="sm" variant={presetOn ? "secondary" : "ghost"} disabled={!presetReady} title={`Đúng cấu hình mẫu ${VOICE_BASELINE.rating} bạn chấm 20/20`} onClick={usePreset}>
+                {presetOn ? "✓ " : "Dùng preset "}
+                {THUC_DOAN_PRESET.label}
+              </Button>
+              <span className="text-xs text-ink-500">
+                Giọng ưu tiên #1 · mẫu {VOICE_BASELINE.rating} 20/20 · tốc độ 1x, không phong cách, không thêm thẻ cảm xúc, không hậu kỳ. Chỉ dành cho giọng Thục Đoan.
+              </span>
+            </div>
             <div className="space-y-2 rounded-lg border border-ink-800 p-3">
               <Field label="Gợi ý giọng theo loại nội dung" hint="Từ các mẫu bạn đã nghe và chấm ngày 22/10 - chỉ là gợi ý, bạn vẫn chọn giọng khác được.">
                 <Select value={useCase} onChange={(e) => setUseCase(e.currentTarget.value as MindUseCase | "")}>
@@ -162,7 +195,7 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
                     >
                       {voiceId === v.voiceId ? "✓ " : ""}
                       {v.voiceId}
-                      {v.label ? ` (${v.label})` : ""} · {v.bestScore}/20{v.candidate ? " · cần thử thêm" : ""}
+                      {v.label ? ` (${v.label})` : ""} · {v.bestScore}/20{v.priority ? " · ưu tiên #1" : ""}{v.candidate ? " · cần thử thêm" : ""}
                     </Button>
                   ))}
                 </div>
@@ -194,8 +227,9 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
                   <option value={MIND_AUTO_VOICE}>Tự động (giọng mặc định)</option>
                   {voices.map((v) => (
                     <option key={v.id} value={v.id}>
-                      {v.featured ? "★ " : ""}
+                      {isPriorityVoice(v.id, language) ? "#1 " : v.featured ? "★ " : ""}
                       {mindVoiceLabel(v)}
+                      {isPriorityVoice(v.id, language) ? " · ưu tiên (20/20)" : ""}
                     </option>
                   ))}
                 </Select>

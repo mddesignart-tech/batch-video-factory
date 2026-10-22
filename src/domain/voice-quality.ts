@@ -12,7 +12,7 @@
  * existing project.
  */
 
-import { engineForLanguage, type MindEngineId } from "./mind-voice";
+import { engineForLanguage, MIND_ENGINES, type MindEngineId } from "./mind-voice";
 import type { VoiceStyleId } from "./voice-director";
 
 export interface VoiceScores {
@@ -115,7 +115,7 @@ export function ratingOf(id: string): VoiceRating | undefined {
 
 // ------------------------------------------------------- recommendations ---
 
-export type MindUseCase = "REVIEW_AI" | "REVIEW_PRODUCT" | "STORYTELLING" | "COMEDY" | "ENGLISH";
+export type MindUseCase = "REVIEW_AI" | "REVIEW_PRODUCT" | "STORYTELLING" | "EMOTIONAL" | "COMEDY" | "ENGLISH";
 
 export interface VoiceSuggestion {
   voiceId: string;
@@ -137,11 +137,12 @@ export const MIND_VOICE_SUGGESTIONS: Record<MindUseCase, { label: string; voices
       { voiceId: "Trúc Ly", engine: "vieneu", evidence: ["08"] },
     ],
   },
+  // QĐ-148: Thục Đoan first - the listener's preferred Vietnamese voice.
   REVIEW_PRODUCT: {
     label: "Review sản phẩm",
     voices: [
-      { voiceId: "Trúc Ly", engine: "vieneu", evidence: ["08"] },
       { voiceId: "Thục Đoan", engine: "vieneu", evidence: ["02"] },
+      { voiceId: "Trúc Ly", engine: "vieneu", evidence: ["08"] },
     ],
   },
   STORYTELLING: {
@@ -150,6 +151,10 @@ export const MIND_VOICE_SUGGESTIONS: Record<MindUseCase, { label: string; voices
       { voiceId: "Thục Đoan", engine: "vieneu", evidence: ["02"] },
       { voiceId: "Thiện Minh", engine: "vieneu", evidence: ["03"] },
     ],
+  },
+  EMOTIONAL: {
+    label: "Nội dung cần cảm xúc",
+    voices: [{ voiceId: "Thục Đoan", engine: "vieneu", evidence: ["02"] }],
   },
   COMEDY: {
     label: "Hài / TikTok Comedy",
@@ -182,11 +187,76 @@ export function mindUseCaseFor(input: { language: string; contentType: string | 
   return null;
 }
 
+// ------------------------------------------------ preferred voice (QĐ-148) ---
+
+/**
+ * The Vietnamese voice the listener is most satisfied with (2026-10-22: sample
+ * 02, 20/20, "diễn đạt cảm xúc tốt, mềm mại, tự nhiên, không bị cứng"). Shown
+ * first and marked in the Studio. NOT a default: "Tự động" and every project
+ * keep their own voice; nothing is changed or locked by this.
+ */
+export const MIND_PRIORITY_VOICE = freeze({ vi: "Thục Đoan" } as const);
+
+export function isPriorityVoice(voiceId: string, language: string): boolean {
+  return language === "vi" && voiceId === MIND_PRIORITY_VOICE.vi;
+}
+
+/**
+ * The preset "Thục Đoan – Tự nhiên & Biểu cảm": EXACTLY the request that made
+ * sample 02, nothing added. `POST /tts {engine, voice, text}` to the local
+ * service: VieNeu-TTS v3 Turbo (fp32, SDK vieneu 3.8.3), language vi (the
+ * service default), speed 1 (no time-stretch), Voice Director off (no style, no
+ * emotion), no emotion tag, no keep_punct, no post-processing.
+ *
+ * It belongs to THIS voice only. The same numbers on another voice are not
+ * expected to sound as good - quality came from Thục Đoan's own reference
+ * voice, not from the settings - so no "apply to another voice" exists.
+ */
+export const THUC_DOAN_PRESET = freeze({
+  id: "THUC_DOAN_NATURAL_EXPRESSIVE",
+  label: "Thục Đoan – Tự nhiên & Biểu cảm",
+  baseline: "02",
+  engine: "vieneu" as MindEngineId,
+  model: "VieNeu-TTS v3 Turbo",
+  variant: "fp32",
+  sdk: "vieneu 3.8.3",
+  voiceId: "Thục Đoan",
+  language: "vi" as const,
+  speed: 1,
+  /** Voice Director off: no style, no emotion, no added tag. */
+  style: null,
+  emotion: null,
+  pause: "natural" as const,
+  dialogueDirector: false,
+  keepPunct: false,
+  postProcessing: "không có khi tạo (WAV của dịch vụ, 48 kHz)",
+});
+
+/**
+ * The reference every later Voice Director change is compared with, by ear
+ * (A/B against this file) and in tests (the preset request must stay the same).
+ */
+export const VOICE_BASELINE = freeze({
+  rating: "02",
+  file: `${W}/02-vi-nam-ke-chuyen-thuc-doan.wav`,
+  sha256: "69ef55d79474eec996389acfc9f2ec798bd68f4b5d97539c920d37ac0e9c562c",
+  durationSec: 12.96,
+  sampleRate: 48000,
+  request: {
+    engine: "vieneu",
+    voice: "Thục Đoan",
+    text: "Bạn có biết, chỉ cần uống một ly nước ngay sau khi thức dậy, cơ thể sẽ tỉnh táo hơn hẳn? Thói quen nhỏ này không tốn tiền, cũng chẳng mất thêm thời gian. Sáng mai thử ngay, rồi kể cho mình nghe cảm giác nhé!",
+  },
+  listener: "Diễn đạt cảm xúc tốt, nghe mềm mại, tự nhiên và không bị cứng.",
+});
+
 export interface ResolvedSuggestion extends VoiceSuggestion {
   /** Best rated sample total, out of 20. */
   bestScore: number;
   /** e.g. "mẫu 02: 20/20". */
   basis: string;
+  /** The listener's preferred voice (QĐ-148). */
+  priority: boolean;
 }
 
 /** The suggestions for a use case, with the scores that back them. */
@@ -194,6 +264,30 @@ export function suggestMindVoices(useCase: MindUseCase): ResolvedSuggestion[] {
   return MIND_VOICE_SUGGESTIONS[useCase].voices.map((v) => {
     const rated = v.evidence.map((id) => ratingOf(id)).filter((r): r is VoiceRating => Boolean(r));
     const best = rated.reduce((m, r) => Math.max(m, totalScore(r.scores)), 0);
-    return { ...v, bestScore: best, basis: rated.map((r) => `mẫu ${r.id}: ${totalScore(r.scores)}/20`).join(", ") };
+    return {
+      ...v,
+      bestScore: best,
+      basis: rated.map((r) => `mẫu ${r.id}: ${totalScore(r.scores)}/20`).join(", "),
+      priority: isPriorityVoice(v.voiceId, MIND_ENGINES[v.engine].language),
+    };
   });
 }
+
+// ------------------------------------------------- dialogue A/B (QĐ-147) ---
+
+const AB = "data/voice-ab/qd147-dialogue-2026-10-22";
+
+/**
+ * The listener's scores for the V2 dialogue A/B (2026-10-22), kept as given.
+ * A small gap (B +1 on "Phù hợp", Cảm xúc 3 in both): the Dialogue Director
+ * stays OFF by default until the person decides to apply it.
+ */
+export const DIALOGUE_AB_RATINGS = freeze({
+  ratedAt: "2026-10-22",
+  ratedBy: "Người dùng - nghe thủ công (không phải điểm AI)",
+  page: `${AB}/ab-hoi-thoai.html`,
+  items: [
+    { id: "A", label: "Hội thoại cũ (audio V2 gốc)", file: `${AB}/A-hoi-thoai-day-du.wav`, scores: s(3, 4, 3, 2) },
+    { id: "B", label: "Dialogue Voice Director (Max Vui vẻ, Leo Ngạc nhiên)", file: `${AB}/B-hoi-thoai-day-du.wav`, scores: s(3, 4, 3, 3) },
+  ],
+});
