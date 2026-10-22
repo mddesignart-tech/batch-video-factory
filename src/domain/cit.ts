@@ -27,7 +27,7 @@ export const CIT_DEFAULT_BASE_URL = "http://127.0.0.1:8001";
 export const CIT_AUTO_VOICE = "AUTO";
 export const CIT_LABEL = "CIT Voice Studio — Local / $0";
 /** Bump when a rule below changes: it is part of every CIT voice key. */
-export const CIT_ADAPTER_VERSION = "cit-v1";
+export const CIT_ADAPTER_VERSION = "cit-v2";
 /** The speed range CIT's own UI offers (0.75x-1.50x); the OpenAPI may narrow it. */
 export const CIT_MIN_SPEED = 0.75;
 export const CIT_MAX_SPEED = 1.5;
@@ -119,7 +119,8 @@ export function parseCitHealth(json: unknown): CitHealth {
   const o = (json && typeof json === "object" ? json : {}) as Record<string, unknown>;
   const caps = (o.capabilities && typeof o.capabilities === "object" ? o.capabilities : {}) as Record<string, unknown>;
   const languages = languageList(o.languages ?? o.supported_languages ?? caps.languages);
-  const rawEngines = o.engines ?? o.models ?? caps.engines ?? caps.models;
+  // The real CIT (2026-10-22) reports ONE active engine as a string: "engine": "VieNeu-TTS-v3-Turbo (int8)".
+  const rawEngines = o.engines ?? o.models ?? caps.engines ?? caps.models ?? (typeof o.engine === "string" ? [o.engine] : undefined);
   const engines: CitEngineState[] = [];
   if (Array.isArray(rawEngines)) {
     for (const e of rawEngines) {
@@ -330,9 +331,15 @@ function sentences(text: string): string[] {
   return text.split(/(?<=[.!?…])\s+(?=\S)/).filter((s) => s.trim().length > 0);
 }
 
-function pauseBetween(parts: string[], pause: string, max: number): string {
-  let used = 0;
-  return parts.reduce((out, s, i) => (i === 0 ? s : `${out} ${used++ < max ? `${pause} ` : ""}${s}`), "");
+/**
+ * A longer beat between the first sentences. CIT speaks with VieNeu, which has
+ * NO pause tag: an unknown "[nghỉ 500ms]" is read aloud as words (checked in
+ * the VieNeu SDK and on the real CIT, 2026-10-22). A line break is VieNeu's
+ * own paragraph pause; other engines get the sentences as they are.
+ */
+function pauseBetween(parts: string[], engine: CitEngineId, max: number): string {
+  if (engine !== "VIENEU") return parts.join(" ");
+  return parts.reduce((out, s, i) => (i === 0 ? s : `${out}${i <= max ? "\n" : " "}${s}`), "");
 }
 
 const PAUSED_STYLES = new Set<VoiceStyleId>(["DOCUMENTARY", "DRAMATIC", "STORYTELLING"]);
@@ -343,11 +350,13 @@ const PAUSED_STYLES = new Set<VoiceStyleId>(["DOCUMENTARY", "DRAMATIC", "STORYTE
  * few inline tags CIT documents, used sparingly:
  *  - Professional / Educational / Natural / Product Review / Cute / Energetic:
  *    the words only;
- *  - Documentary / Dramatic / Storytelling: a 500 ms beat between sentences;
+ *  - Documentary / Dramatic / Storytelling: a beat between the first sentences;
  *  - a punchline: a beat before its last sentence; TikTok Comedy adds ONE laugh
  *    after it (the engine's own tag);
- *  - a touching moment: one sigh in front, a 1 s beat between sentences.
- * At most one emotion tag per line; an engine that is not known gets pauses only.
+ *  - a touching moment: one sigh in front, a beat between sentences.
+ * A beat is a line break for VieNeu and nothing for other engines (no engine
+ * CIT runs has a pause tag). At most one emotion tag per line; an engine that
+ * is not known gets no tag.
  */
 export function citDirection(input: CitDirectionInput): { text: string; tags: string[] } {
   const text = input.text.trim();
@@ -358,18 +367,15 @@ export function citDirection(input: CitDirectionInput): { text: string; tags: st
   let out = text;
 
   if (input.emotion === "TOUCHING" || input.role === "EMOTIONAL") {
-    out = pauseBetween(parts, "[nghỉ 1s]", 2);
-    if (parts.length > 1) used.push("[nghỉ 1s]");
+    out = pauseBetween(parts, input.engine, 2);
     if (input.emotion === "TOUCHING" && tags) {
       out = `${tags.sigh} ${out}`;
       used.push(tags.sigh);
     }
   } else if (input.role === "PUNCHLINE" && parts.length > 1) {
-    out = `${parts.slice(0, -1).join(" ")} [nghỉ 500ms] ${parts[parts.length - 1]}`;
-    used.push("[nghỉ 500ms]");
+    out = pauseBetween([parts.slice(0, -1).join(" "), parts[parts.length - 1]!], input.engine, 1);
   } else if (PAUSED_STYLES.has(input.style) && parts.length > 1) {
-    out = pauseBetween(parts, "[nghỉ 500ms]", 2);
-    used.push("[nghỉ 500ms]");
+    out = pauseBetween(parts, input.engine, 2);
   }
 
   const laughs = input.style === "COMEDY" && (input.role === "PUNCHLINE" || input.emotion === "HUMOROUS");

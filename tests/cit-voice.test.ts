@@ -95,6 +95,9 @@ function toneWav(seconds = 1): Buffer {
 
 const requests: Record<string, unknown>[] = [];
 let supertonicInstalled = true;
+/** Answer like the REAL CIT seen 2026-10-22: one engine string, voices without an engine. */
+let realShape = false;
+const REAL_VOICES = ["Hải Đăng", "Thiện Minh", "Trúc Ly"].map((name, i) => ({ id: name, isCloned: false, featured: true, name, gender: i === 2 ? "female" : "male", region: "North", description: "Phong cách tự nhiên · 48 kHz" }));
 let server: http.Server | null = null;
 let baseUrl = "";
 
@@ -104,6 +107,8 @@ async function startCit(): Promise<void> {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     };
+    if (req.url === "/health" && realShape) return json({ status: "ok", message: "Sẵn sàng", sample_rate: 48000, engine: "VieNeu-TTS-v3-Turbo (int8)", backend: "onnx", languages: [], supports_cloning: true });
+    if (req.url === "/voices" && realShape) return json(REAL_VOICES);
     if (req.url === "/health") return json({ status: "ok", version: "1.0.3", languages: ["vi", "en", "ja", "fr"], models: [{ name: "VieNeu-TTS v3 Turbo", installed: true }, { name: "Supertonic 3", installed: supertonicInstalled }] });
     if (req.url === "/voices") return json({ voices: [...VIENEU, ...SUPERTONIC] });
     if (req.url === "/openapi.json") return json(OPENAPI);
@@ -238,6 +243,10 @@ describe("QĐ-144 CIT - discovery + adapter (thuần)", () => {
     expect(h).toMatchObject({ version: "1.0.3", languages: ["vi", "en"] });
     expect(h.engines[0]).toMatchObject({ engine: "SUPERTONIC", installed: false });
     expect(parseCitHealth({ status: "ok", engines: { "VieNeu-TTS": true } }).engines[0]).toMatchObject({ engine: "VIENEU", installed: true });
+    // The real CIT (2026-10-22): one active engine as a string.
+    expect(parseCitHealth({ status: "ok", engine: "VieNeu-TTS-v3-Turbo (int8)", languages: [], supports_cloning: true }).engines).toEqual([
+      { engine: "VIENEU", name: "VieNeu-TTS-v3-Turbo (int8)", installed: null },
+    ]);
     expect(parseCitVoices(["Minh Đức", "Ngọc Huyền"])).toHaveLength(2);
     expect(parseCitVoices({ voices: [...VIENEU, ...SUPERTONIC] })).toHaveLength(35);
     expect(parseCitVoices({ data: [{ id: "A", engine: "supertonic" }] })[0]).toMatchObject({ id: "A", engine: "SUPERTONIC" });
@@ -272,11 +281,17 @@ describe("QĐ-144 CIT - discovery + adapter (thuần)", () => {
     const two = "Câu một rất hay. Câu hai còn hay hơn!";
     expect(citDirection({ text: two, engine: "VIENEU", style: "PROFESSIONAL", role: "EXPLAIN", emotion: "NEUTRAL" }).text).toBe(two);
     expect(citDirection({ text: two, engine: "VIENEU", style: "PRODUCT_REVIEW", role: "EXPLAIN", emotion: "EXCITED" }).text).toBe(two);
-    expect(citDirection({ text: two, engine: "VIENEU", style: "DOCUMENTARY", role: "EXPLAIN", emotion: "SERIOUS" }).text).toBe("Câu một rất hay. [nghỉ 500ms] Câu hai còn hay hơn!");
+    expect(citDirection({ text: two, engine: "VIENEU", style: "DOCUMENTARY", role: "EXPLAIN", emotion: "SERIOUS" }).text).toBe("Câu một rất hay.\nCâu hai còn hay hơn!");
     const vn = citDirection({ text: two, engine: "VIENEU", style: "COMEDY", role: "PUNCHLINE", emotion: "HUMOROUS" });
-    expect(vn.text).toBe("Câu một rất hay. [nghỉ 500ms] Câu hai còn hay hơn! [cười]");
+    expect(vn.text).toBe("Câu một rất hay.\nCâu hai còn hay hơn! [cười]");
     expect(citDirection({ text: two, engine: "SUPERTONIC", style: "COMEDY", role: "PUNCHLINE", emotion: "HUMOROUS" }).text).toMatch(/<laugh>$/);
-    expect(citDirection({ text: two, engine: "VIENEU", style: "STORYTELLING", role: "EMOTIONAL", emotion: "TOUCHING" }).text).toBe("[thở dài] Câu một rất hay. [nghỉ 1s] Câu hai còn hay hơn!");
+    expect(citDirection({ text: two, engine: "VIENEU", style: "STORYTELLING", role: "EMOTIONAL", emotion: "TOUCHING" }).text).toBe("[thở dài] Câu một rất hay.\nCâu hai còn hay hơn!");
+    // No pause TAG ever: VieNeu reads an unknown [..] aloud (real CIT, 2026-10-22).
+    for (const style of ["DOCUMENTARY", "DRAMATIC", "STORYTELLING", "COMEDY"] as const) {
+      for (const engine of ["VIENEU", "SUPERTONIC", "UNKNOWN"] as const) {
+        expect(citDirection({ text: two, engine, style, role: "PUNCHLINE", emotion: "TOUCHING" }).text).not.toMatch(/\[nghỉ/);
+      }
+    }
     // Unknown engine: pauses only; director off: the words only.
     expect(citDirection({ text: two, engine: "UNKNOWN", style: "COMEDY", role: "PUNCHLINE", emotion: "HUMOROUS" }).text).not.toMatch(/cười|laugh/);
     expect(citDirection({ text: two, engine: "VIENEU", style: null, role: null, emotion: null }).text).toBe(two);
@@ -310,6 +325,18 @@ describe("QĐ-144 CIT - mock CIT server, Mock Mode, $0", () => {
     expect((await refreshCitCatalog()).online).toBe(true);
   });
 
+  it("dạng dữ liệu CIT thật: engine từ /health gán cho mọi giọng → 'Tự động' tiếng Việt chọn được giọng VieNeu", async () => {
+    realShape = true;
+    try {
+      const c = await refreshCitCatalog();
+      expect(c.voices.map((v) => [v.id, v.engine])).toEqual(REAL_VOICES.map((v) => [v.id, "VIENEU"]));
+      expect(pickCitVoice(c.voices, c.health, "vi")).toMatchObject({ ok: true, voice: { id: "Hải Đăng", engine: "VIENEU" } });
+    } finally {
+      realShape = false;
+      await refreshCitCatalog();
+    }
+  });
+
   it("tiếng Việt nhiều cảnh: Narrator không bị đọc, cùng một giọng, language=vi, $0 không ghi sổ; preview → run → render lại = 0 request", async () => {
     const v = await narratedVideo([`Narrator: Xin chào mọi người ${tag}.`, `Hôm nay mình review iPhone 15 Pro ${tag}. Rất đáng tiền!`, `Speaker A: Lưu ý: nhớ lưu video ${tag} nhé.`], "vi");
     await saveProjectControls(v.projectId, { voice: { provider: "cit", model: "cit-local", voiceId: null } });
@@ -341,7 +368,7 @@ describe("QĐ-144 CIT - mock CIT server, Mock Mode, $0", () => {
     expect(new Set(sent.map((b) => b.voice_id))).toEqual(new Set(["VN 1"]));
     const lines = await citLines(v.projectId);
     expect(lines.map((l) => [l.provider, l.model, l.voiceId])).toEqual(lines.map(() => ["cit", "cit-local", "VN 1"]));
-    expect(lines[0]!.instructions).toMatch(/^CIT cit-v1 engine=VIENEU lang=vi/);
+    expect(lines[0]!.instructions).toMatch(/^CIT cit-v2 engine=VIENEU lang=vi/);
     // $0: no ledger line, nothing against the cap.
     expect(await citLedger()).toBe(ledgerBefore);
     expect((await spendStatus()).spent).toBeCloseTo(spentBefore, 9);
@@ -376,7 +403,7 @@ describe("QĐ-144 CIT - mock CIT server, Mock Mode, $0", () => {
     const body = requests[before]!;
     expect(body.language).toBe("en");
     expect(String(body.voice_id)).toMatch(/^ST /);
-    expect(body.text).toBe(`<sigh> Welcome back ${tag}. [nghỉ 1s] Today we test three gadgets.`);
+    expect(body.text).toBe(`<sigh> Welcome back ${tag}. Today we test three gadgets.`);
     expect(body).not.toHaveProperty("instructions");
     const line = (await citLines(v.projectId))[0]!;
     expect(line.text).toBe(`Welcome back ${tag}. Today we test three gadgets.`);

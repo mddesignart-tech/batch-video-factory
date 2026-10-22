@@ -98,7 +98,11 @@ export async function refreshCitCatalog(): Promise<CitCatalog> {
   let catalog: CitCatalog;
   try {
     const health = await citHealth(baseUrl);
-    const [voices, spec] = await Promise.all([citVoices(baseUrl), citApiSpec(baseUrl)]);
+    const [listed, spec] = await Promise.all([citVoices(baseUrl), citApiSpec(baseUrl)]);
+    // The real CIT's /voices names no engine per voice; when /health reports
+    // exactly one known engine, every voice it lists is that engine's.
+    const known = [...new Set(health.engines.map((e) => e.engine).filter((e) => e !== "UNKNOWN"))];
+    const voices = known.length === 1 ? listed.map((v) => (v.engine === "UNKNOWN" ? { ...v, engine: known[0]! } : v)) : listed;
     catalog = { checkedAt: new Date().toISOString(), online: true, baseUrl, error: null, health, voices, spec };
   } catch (err) {
     const offline = err instanceof ProviderError && err.code === "cit_offline";
