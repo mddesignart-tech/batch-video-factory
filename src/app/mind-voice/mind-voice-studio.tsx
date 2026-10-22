@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { Bookmark, BookmarkCheck, Download, HardDrive, Mic, Play, RefreshCw, ShieldCheck } from "lucide-react";
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, ProgressBar, Select, Textarea } from "@/components/ui";
 import { mindInstallAction, mindMp3Action, mindSaveTakeAction, mindSpeakAction, mindStatusAction, mindVerifyAction, type MindStatus } from "@/app/actions/mind-voice";
-import { MIND_AUTO_VOICE, MIND_ENGINES, MIND_MAX_SPEED, MIND_MIN_SPEED, mindVoiceLabel, type MindEngineId, type MindModelStatus } from "@/domain/mind-voice";
+import { MIND_AUTO_VOICE, MIND_CUES, MIND_ENGINES, MIND_MAX_SPEED, MIND_MIN_SPEED, mindVoiceLabel, type MindEngineId, type MindModelStatus } from "@/domain/mind-voice";
+import { MIND_VOICE_SUGGESTIONS, suggestMindVoices, type MindUseCase } from "@/domain/voice-quality";
 import { VOICE_EMOTIONS, VOICE_STYLES, type VoiceEmotionId, type VoiceStyleId } from "@/domain/voice-director";
 import type { StudioPause, StudioTake } from "@/services/mind-voice-studio";
 
@@ -44,16 +45,30 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
   const [emotion, setEmotion] = useState<VoiceEmotionId>("AUTO");
   const [speed, setSpeed] = useState(1);
   const [pause, setPause] = useState<StudioPause>("natural");
+  const [cues, setCues] = useState(true);
+  const [useCase, setUseCase] = useState<MindUseCase | "">("");
   const [current, setCurrent] = useState<StudioTake | null>(initialTakes[0] ?? null);
 
   const engine: MindEngineId = language === "vi" ? "vieneu" : "supertonic";
   const voices = useMemo(() => status.voices.filter((v) => v.engine === engine && v.installed), [status.voices, engine]);
   const engineModel = status.models.find((m) => m.id === engine);
+  const cueTags = (support: "reliable" | "unreliable") =>
+    Object.values(MIND_CUES[engine])
+      .filter((c) => c?.support === support)
+      .map((c) => c!.tag)
+      .join(" ");
+  const suggestions = useCase ? suggestMindVoices(useCase) : [];
+  const pickSuggestion = (id: string, voiceEngine: MindEngineId) => {
+    const next = voiceEngine === "vieneu" ? "vi" : "en";
+    if (next !== language && text === SAMPLE[language]) setText(SAMPLE[next]);
+    setLanguage(next);
+    setVoiceId(id);
+  };
 
   const speak = (preview: boolean) =>
     start(async () => {
       setMessage(null);
-      const r = await mindSpeakAction({ text, language, voiceId, style: style || null, emotion, speed, pause, preview });
+      const r = await mindSpeakAction({ text, language, voiceId, style: style || null, emotion, speed, pause, preview, cues });
       setMessage({ ok: r.ok, text: r.message });
       if (r.take) {
         setCurrent(r.take);
@@ -123,6 +138,36 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
             <Field label="Nội dung cần đọc" hint={`${text.length}/3000 ký tự · nhãn như "Narrator:", "Speaker A:", "Host:" ở đầu dòng sẽ không bị đọc`}>
               <Textarea rows={6} value={text} onChange={(e) => setText(e.currentTarget.value)} />
             </Field>
+            <div className="space-y-2 rounded-lg border border-ink-800 p-3">
+              <Field label="Gợi ý giọng theo loại nội dung" hint="Từ các mẫu bạn đã nghe và chấm ngày 22/10 - chỉ là gợi ý, bạn vẫn chọn giọng khác được.">
+                <Select value={useCase} onChange={(e) => setUseCase(e.currentTarget.value as MindUseCase | "")}>
+                  <option value="">Không dùng gợi ý</option>
+                  {Object.entries(MIND_VOICE_SUGGESTIONS).map(([id, u]) => (
+                    <option key={id} value={id}>
+                      {u.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {suggestions.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {suggestions.map((v) => (
+                    <Button
+                      key={v.voiceId}
+                      size="sm"
+                      variant={voiceId === v.voiceId ? "secondary" : "ghost"}
+                      disabled={!status.voices.some((x) => x.id === v.voiceId && x.installed)}
+                      title={v.basis}
+                      onClick={() => pickSuggestion(v.voiceId, v.engine)}
+                    >
+                      {voiceId === v.voiceId ? "✓ " : ""}
+                      {v.voiceId}
+                      {v.label ? ` (${v.label})` : ""} · {v.bestScore}/20{v.candidate ? " · cần thử thêm" : ""}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Ngôn ngữ">
                 <Select
@@ -186,8 +231,14 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
             <Field label={`Tốc độ: ${speed.toFixed(2)}x`} hint={engine === "vieneu" ? "VieNeu không có tốc độ gốc: khác 1x sẽ được co giãn sau khi tạo, giữ cao độ giọng." : "Supertonic tự đọc theo tốc độ này."}>
               <input type="range" min={MIND_MIN_SPEED} max={MIND_MAX_SPEED} step={0.05} value={speed} onChange={(e) => setSpeed(Number(e.currentTarget.value))} className="w-full accent-brand-500" />
             </Field>
+            <label className="flex items-center gap-2 text-sm text-ink-200">
+              <input type="checkbox" checked={cues} onChange={(e) => setCues(e.currentTarget.checked)} />
+              Thẻ cảm xúc
+            </label>
             <p className="text-xs text-ink-500">
-              Cảm xúc chỉ dùng thẻ engine thật sự hiểu: VieNeu [cười] [thở dài] [hắng giọng]; Supertonic &lt;laugh&gt; &lt;sigh&gt; &lt;breath&gt;. Bạn có thể tự gõ các thẻ này vào nội dung.
+              {MIND_ENGINES[engine].label} thể hiện ổn định: {cueTags("reliable") || "không có"} - bạn có thể tự gõ vào nội dung.
+              {cueTags("unreliable") ? ` Không gửi ${cueTags("unreliable")}: engine nhận thẻ nhưng chưa thể hiện đúng, nên thẻ bị bỏ khỏi câu (Voice Director dùng nhịp câu thay thế).` : ""} Tắt ô trên để
+              không gửi thẻ nào.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" disabled={busy || !status.online || !engineModel?.installed} onClick={() => speak(true)}>

@@ -6,6 +6,7 @@ import { errorMessage } from "@/lib/utils";
 import { isNarrator, sceneCharacters } from "@/domain/scene-characters";
 import { languageOf } from "@/domain/content-options";
 import type { OutputControls } from "@/domain/output-controls";
+import { mindUseCaseFor, type MindUseCase } from "@/domain/voice-quality";
 import { getVoiceProvider } from "@/providers/registry";
 import {
   clearBackgroundMusic,
@@ -116,6 +117,8 @@ export interface NarratorInfo {
   voices: { id: string; label: string }[];
   /** QĐ-142 VOICE DIRECTOR, as it applies to the first narrated scene. */
   director: DirectorInfo;
+  /** QĐ-146: which listened-to Mind Voice suggestions fit this project (null = none yet). */
+  mindUseCase: MindUseCase | null;
 }
 
 export interface DirectorInfo {
@@ -177,6 +180,7 @@ export async function narratorInfoAction(projectId: string): Promise<{ ok: boole
         speed: settings.speed,
         instructions: settings.instructions,
         language: languageOf(project.language).label,
+        mindUseCase: mindUseCaseFor({ language: project.language, contentType: content.legacy ? null : content.contentType, styleId }),
         voices,
         director,
       },

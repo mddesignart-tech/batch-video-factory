@@ -8,6 +8,7 @@ import type { CitStatusView } from "@/services/cit-catalog";
 import { CIT_AUTO_VOICE, CIT_MODEL, CIT_OFFLINE_GUIDE, CIT_PROVIDER } from "@/domain/cit";
 import type { OutputControls } from "@/domain/output-controls";
 import { MIND_LABEL, MIND_MODEL, MIND_PROVIDER } from "@/domain/mind-voice";
+import type { MindUseCase } from "@/domain/voice-quality";
 import { MindVoiceDetails } from "./mind-voice-panel";
 
 /**
@@ -20,11 +21,14 @@ const OPENAI = { provider: "openai", model: "gpt-4o-mini-tts" } as const;
 export function CitVoicePanel({
   voice,
   language,
+  useCase = null,
   onChange,
   disabled,
 }: {
   voice: OutputControls["voice"];
   language: string;
+  /** QĐ-146: the project's kind of video, for Mind Voice suggestions. */
+  useCase?: MindUseCase | null;
   onChange: (patch: Partial<OutputControls["voice"]>) => void;
   disabled: boolean;
 }) {
@@ -70,7 +74,7 @@ export function CitVoicePanel({
           <option value={CIT_PROVIDER}>CIT Local — Legacy ($0)</option>
         </Select>
       </Field>
-      {voice.provider === MIND_PROVIDER ? <MindVoiceDetails voice={voice} language={language} onChange={onChange} disabled={disabled} /> : null}
+      {voice.provider === MIND_PROVIDER ? <MindVoiceDetails voice={voice} language={language} useCase={useCase} onChange={onChange} disabled={disabled} /> : null}
       {usingCit ? (
         <div className="space-y-2 rounded-lg border border-ink-800 bg-ink-850 p-2 text-xs">
           <div className="flex flex-wrap items-center gap-2">

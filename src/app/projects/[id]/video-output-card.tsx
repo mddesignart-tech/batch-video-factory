@@ -198,7 +198,7 @@ export function VideoOutputCard({
               {narrator.provider} · {narrator.model} · {narrator.language}
             </p>
           ) : null}
-          <CitVoicePanel voice={c.voice} language={narrator?.language ?? "-"} onChange={voice} disabled={pending} />
+          <CitVoicePanel voice={c.voice} language={narrator?.language ?? "-"} useCase={narrator?.mindUseCase ?? null} onChange={voice} disabled={pending} />
           {c.voice.director ? (
             <div className="grid gap-2 sm:grid-cols-4">
               <Field label="Giọng">

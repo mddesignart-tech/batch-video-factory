@@ -5,8 +5,9 @@ import { useEffect, useState, useTransition } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button, Field, Select } from "@/components/ui";
 import { mindStatusAction, type MindStatus } from "@/app/actions/mind-voice";
-import { MIND_AUTO_VOICE, MIND_ENGINES, MIND_OFFLINE_GUIDE, mindVoiceLabel, type MindEngineId } from "@/domain/mind-voice";
+import { MIND_AUTO_VOICE, MIND_CUES, MIND_ENGINES, MIND_OFFLINE_GUIDE, mindVoiceLabel, type MindEngineId } from "@/domain/mind-voice";
 import type { OutputControls } from "@/domain/output-controls";
+import { MIND_VOICE_SUGGESTIONS, suggestMindVoices, type MindUseCase } from "@/domain/voice-quality";
 
 /**
  * GIỌNG THUYẾT MINH → Mind Voice Local (QĐ-145): status, voices and the model
@@ -16,11 +17,14 @@ import type { OutputControls } from "@/domain/output-controls";
 export function MindVoiceDetails({
   voice,
   language,
+  useCase = null,
   onChange,
   disabled,
 }: {
   voice: OutputControls["voice"];
   language: string;
+  /** QĐ-146: suggestions for this kind of video, from voices a person listened to. */
+  useCase?: MindUseCase | null;
   onChange: (patch: Partial<OutputControls["voice"]>) => void;
   disabled: boolean;
 }) {
@@ -34,6 +38,10 @@ export function MindVoiceDetails({
 
   const chosen = status?.voices.find((v) => v.id === voice.voiceId) ?? null;
   const engines: MindEngineId[] = ["vieneu", "supertonic"];
+  const installed = new Set((status?.voices ?? []).filter((v) => v.installed).map((v) => v.id));
+  const suggestions = useCase ? suggestMindVoices(useCase) : [];
+  const reliable = engines.flatMap((e) => Object.values(MIND_CUES[e]).filter((c) => c?.support === "reliable").map((c) => c!.tag));
+  const unreliable = engines.flatMap((e) => Object.values(MIND_CUES[e]).filter((c) => c?.support === "unreliable").map((c) => c!.tag));
 
   return (
     <div className="space-y-2 rounded-lg border border-ink-800 bg-ink-850 p-2 text-xs">
@@ -68,6 +76,36 @@ export function MindVoiceDetails({
           ))}
         </Select>
       </Field>
+      {useCase ? (
+        <div className="space-y-1 rounded border border-ink-800 p-2">
+          <p className="text-ink-300">
+            Gợi ý cho {MIND_VOICE_SUGGESTIONS[useCase].label} <span className="text-ink-500">(từ các mẫu bạn đã nghe và chấm - chỉ là gợi ý, bấm mới đổi)</span>
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.map((s) => {
+              const current = voice.voiceId === s.voiceId;
+              return (
+                <Button
+                  key={s.voiceId}
+                  size="sm"
+                  variant={current ? "secondary" : "ghost"}
+                  disabled={disabled || current || (status !== null && !installed.has(s.voiceId))}
+                  title={s.basis}
+                  onClick={() => onChange({ voiceId: s.voiceId })}
+                >
+                  {current ? "✓ " : "Dùng "}
+                  {s.voiceId}
+                  {s.label ? ` (${s.label})` : ""} · {s.bestScore}/20{s.candidate ? " · cần thử thêm" : ""}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+      <label className="flex items-center gap-2 text-ink-300">
+        <input type="checkbox" checked={voice.emotionCues} disabled={disabled} onChange={(e) => onChange({ emotionCues: e.currentTarget.checked })} />
+        Thẻ cảm xúc ({reliable.join(", ")})
+      </label>
       <ul className="space-y-0.5 text-ink-400">
         {(status?.health?.engines ?? []).map((e) => (
           <li key={e.id}>
@@ -77,7 +115,7 @@ export function MindVoiceDetails({
       </ul>
       <p className="text-[10px] text-ink-500">
         Chạy tại máy, $0, không ghi sổ chi. Khi Mind Voice tắt, giọng KHÔNG tự chuyển sang nhà cung cấp trả phí. Voice instruction kiểu OpenAI không được gửi; Voice Director
-        chỉ thêm thẻ engine hiểu ([cười], [thở dài], &lt;laugh&gt;, &lt;sigh&gt;).
+        chỉ thêm thẻ engine thể hiện ổn định ({reliable.join(", ")}). Không gửi {unreliable.join(", ")}: engine chưa thể hiện đúng - thay bằng nhịp câu.
       </p>
     </div>
   );
