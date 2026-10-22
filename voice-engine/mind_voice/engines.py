@@ -7,6 +7,7 @@ into the Hugging Face cache, so its fetch is pointed at our folder below.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import threading
@@ -65,6 +66,47 @@ def vieneu_voices() -> list[dict]:
     return sorted(out, key=lambda x: (x["featured"] is None, x["featured"] or 0))
 
 
+_KEPT_ENDINGS = ("?", "!")
+
+
+def _keeping_ending(fn):
+    """`fn` (a punctuation-normalizing call), except that a final ? or ! it turned into "." comes back."""
+
+    def wrapped(text, *args, **kwargs):
+        out = fn(text, *args, **kwargs)
+        mark = str(text).rstrip()[-1:]
+        if mark in _KEPT_ENDINGS and isinstance(out, str) and out.rstrip().endswith("."):
+            out = out.rstrip()[:-1] + mark
+        return out
+
+    return wrapped
+
+
+@contextlib.contextmanager
+def _keep_short_line_endings():
+    """
+    QĐ-147. The VieNeu SDK ends every chunk under 5 words with "." (sea-g2p
+    punc_norm), so "Bạn ăn sáng chưa?" is read as a statement. Asked for by the
+    app (dialogue lines, `keep_punct`), the line's own ? or ! is kept instead.
+    Only the final mark of a chunk changes; no word, no cue, nothing added.
+    Callers hold the engine lock, so the patch never leaks to another request.
+    """
+    from vieneu_utils import phonemize_text as pt
+
+    saved = (pt.punc_norm, pt._phonemize_cached)
+    cached = pt._phonemize_cached
+    keep = _keeping_ending(saved[0])
+
+    def phonemize(text, punc_norm=True):
+        return keep(cached(text, False)) if punc_norm else cached(text, False)
+
+    pt.punc_norm, pt._phonemize_cached = keep, phonemize
+    try:
+        yield
+    finally:
+        pt.punc_norm, pt._phonemize_cached = saved
+
+
 class VieNeuEngine:
     id = "vieneu"
 
@@ -112,13 +154,14 @@ class VieNeuEngine:
     def voices(self) -> list[dict]:
         return vieneu_voices()
 
-    def synthesize(self, text: str, voice: str, language: str, speed: float) -> tuple[bytes, float, int]:
+    def synthesize(self, text: str, voice: str, language: str, speed: float, keep_punct: bool = False) -> tuple[bytes, float, int]:
         with self._lock:
             tts = self._load()
             if tts.resolve_voice_name(voice) is None:
                 raise VoiceNotFound(f"VieNeu không có giọng \"{voice}\".")
             # No native speed on v3 Turbo: the caller time-stretches when needed.
-            wav = tts.infer(text, voice=voice)
+            with _keep_short_line_endings() if keep_punct else contextlib.nullcontext():
+                wav = tts.infer(text, voice=voice)
             sr = tts.sample_rate
         return wav_bytes(wav, sr), len(wav) / sr, sr
 
@@ -177,7 +220,8 @@ class SupertonicEngine:
             )
         return out
 
-    def synthesize(self, text: str, voice: str, language: str, speed: float) -> tuple[bytes, float, int]:
+    def synthesize(self, text: str, voice: str, language: str, speed: float, keep_punct: bool = False) -> tuple[bytes, float, int]:
+        # keep_punct: Supertonic reads the text as given - its ? and ! are never rewritten.
         with self._lock:
             tts = self._load()
             if voice not in tts.voice_style_names:

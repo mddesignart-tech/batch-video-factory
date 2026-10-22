@@ -16,7 +16,7 @@ os.environ["MIND_VOICE_MODELS_DIR"] = tempfile.mkdtemp(prefix="mind-voice-test-"
 from http.server import ThreadingHTTPServer  # noqa: E402
 
 from mind_voice import server  # noqa: E402
-from mind_voice.engines import vieneu_voices  # noqa: E402
+from mind_voice.engines import _keep_short_line_endings, vieneu_voices  # noqa: E402
 
 
 class ServerTest(unittest.TestCase):
@@ -86,8 +86,34 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(r.status, 415)
         conn.close()
 
+    def test_tts_takes_keep_punct(self):
+        status, body = self.call("POST", "/tts", {"engine": "vieneu", "voice": "x", "text": "Thật á?", "keep_punct": True})
+        self.assertEqual(status, 409)
+        self.assertEqual(body["error"]["code"], "MODEL_MISSING")
+
     def test_binds_localhost_only(self):
         self.assertEqual(server.HOST, "127.0.0.1")
+
+
+class KeepPunctTest(unittest.TestCase):
+    """QĐ-147: keep_punct keeps a short line's own ? / ! and nothing else."""
+
+    def test_short_line_keeps_its_mark_only_while_asked(self):
+        from vieneu_utils import phonemize_text as pt
+
+        def chunks(t):
+            return pt.normalize_to_chunks_v3_with_gaps(t)[0]
+
+        self.assertEqual(chunks("Bạn ăn sáng chưa?"), ["bạn ăn sáng chưa."])  # the SDK's own rule
+        with _keep_short_line_endings():
+            self.assertEqual(chunks("Bạn ăn sáng chưa?"), ["bạn ăn sáng chưa?"])
+            self.assertEqual(chunks("Đi thôi!"), ["đi thôi!"])
+            self.assertTrue(pt.phonemize_text_with_emotions("thật á?").endswith("?"))
+            # Nothing is added: a line without ? / ! is as before; a long line too.
+            self.assertEqual(chunks("Vậy đi"), ["vậy đi."])
+            self.assertEqual(chunks("Mình ăn rồi, cảm ơn nhé. Hôm nay trời đẹp quá!"), ["mình ăn rồi, cảm ơn nhé. hôm nay trời đẹp quá!"])
+        self.assertEqual(chunks("Bạn ăn sáng chưa?"), ["bạn ăn sáng chưa."])  # restored
+        self.assertEqual(pt.punc_norm.__name__, "punc_norm")
 
 
 if __name__ == "__main__":

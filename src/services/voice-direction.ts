@@ -37,6 +37,7 @@ import {
   pickMindVoice,
   type MindEngineId,
 } from "@/domain/mind-voice";
+import { dialogueDirection, speakerEmotionOf, type DialogueEmotionId } from "@/domain/dialogue-director";
 import { OPENAI_VOICES } from "@/providers/openai/openai-voice-client";
 import { cachedCitCatalog, engineOfVoice, type CitCatalog } from "./cit-catalog";
 import { cachedMindCatalog, engineOfMindVoice, variantOfMindEngine, type MindCatalog } from "./mind-voice-catalog";
@@ -96,12 +97,15 @@ export async function voiceDirectorFor(
   // CIT Voice Studio (QĐ-144) gets its own adapter, director on or off.
   const catalog = await cachedCitCatalog();
   const mindCatalog = await cachedMindCatalog();
+  // QĐ-147: a character's own emotion in a Mind Voice dialogue; null = Dialogue Director off, or the narrator.
+  const dialogueEmotion = (speaker: string): DialogueEmotionId | null =>
+    voice.dialogueDirector && !isNarrator(speaker) ? speakerEmotionOf(voice.speakerEmotions, scene.id ?? null, speaker) : null;
   // A local engine (CIT legacy, Mind Voice QĐ-145) gets its own adapter; null = not local.
   const local = <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T, directed: DirectedVoice | null): (T & Directed) | null =>
     base.provider === CIT_PROVIDER
       ? citDirected(line, base, directed, content.language, catalog)
       : base.provider === MIND_PROVIDER
-        ? mindDirected(line, base, directed, content.language, mindCatalog, voice.emotionCues)
+        ? mindDirected(line, base, directed, content.language, mindCatalog, voice.emotionCues, dialogueEmotion(line.speaker))
         : null;
   if (!voice.director) {
     return <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T) => local(line, base, null) ?? (base as T & Directed);
@@ -244,6 +248,7 @@ function mindDirected<T extends LineVoiceSettings>(
   projectLanguage: string,
   catalog: MindCatalog | null,
   cues: boolean,
+  dialogue: DialogueEmotionId | null,
 ): T & Directed {
   const language = speechLanguageOf(projectLanguage, line.text);
   const known = engineOfMindVoice(catalog, base.voiceId);
@@ -265,20 +270,23 @@ function mindDirected<T extends LineVoiceSettings>(
     emotion: directed?.emotion ?? null,
     cues,
   });
+  // QĐ-147: this speaker's own emotion, as far as the engine really goes (dialogue-director.ts).
+  const spoken = dialogue ? dialogueDirection({ text: tagged.text, engine, emotion: dialogue, cues }) : null;
+  const summary = mindDirectionSummary({
+    engine,
+    variant: variantOfMindEngine(catalog, engine),
+    language,
+    style: directed?.styleId ?? null,
+    role: directed?.role ?? null,
+    emotion: directed?.emotion ?? null,
+    cues,
+  });
   return {
     ...base,
     voiceId,
-    speed: clampMindSpeed(base.speed),
-    instructions: mindDirectionSummary({
-      engine,
-      variant: variantOfMindEngine(catalog, engine),
-      language,
-      style: directed?.styleId ?? null,
-      role: directed?.role ?? null,
-      emotion: directed?.emotion ?? null,
-      cues,
-    }),
-    spokenText: tagged.text,
+    speed: clampMindSpeed(base.speed * (spoken?.tempo ?? 1)),
+    instructions: spoken ? `${summary} ${spoken.summary}` : summary,
+    spokenText: spoken?.text ?? tagged.text,
     language,
     ...(directed ? { directed } : {}),
   };

@@ -8,7 +8,7 @@ Endpoints (JSON unless noted):
   POST /models/install            {engine, variant?}  start an install the person asked for
   POST /models/verify             {engine, variant?}  re-hash installed files
   GET  /voices[?engine=...]       voices the installed SDK / model really has
-  POST /tts                       {engine, voice, text, language?, speed?} -> audio/wav
+  POST /tts                       {engine, voice, text, language?, speed?, keep_punct?} -> audio/wav
 
 Guards: binds 127.0.0.1 only; rejects any Host that is not localhost (DNS
 rebinding); every POST must be application/json, which a web page on another
@@ -96,7 +96,7 @@ def _tts(body: dict) -> tuple[bytes, dict]:
     except (TypeError, ValueError):
         speed = 1.0
     try:
-        audio, duration, sr = ENGINE_IMPLS[engine].synthesize(text, voice, language, speed)
+        audio, duration, sr = ENGINE_IMPLS[engine].synthesize(text, voice, language, speed, keep_punct=body.get("keep_punct") is True)
     except ModelMissing as err:
         raise ApiError(409, "MODEL_MISSING", str(err)) from err
     except VoiceNotFound as err:

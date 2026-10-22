@@ -81,6 +81,8 @@ export interface MindTtsRequest {
   text: string;
   language: string;
   speed: number;
+  /** QĐ-147: keep a short line's final ? / ! (VieNeu). Sent only when true. */
+  keep_punct?: true;
 }
 
 export interface MindTtsResult {

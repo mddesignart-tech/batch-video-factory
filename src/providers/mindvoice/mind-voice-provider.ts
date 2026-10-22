@@ -15,6 +15,7 @@ import {
   pickMindVoice,
   type MindEngineId,
 } from "@/domain/mind-voice";
+import { mindKeepsPunct } from "@/domain/dialogue-director";
 import { mindHealth, mindTts, mindVoices, MIND_GENERATE_TIMEOUT_MS } from "./mind-voice-client";
 
 /**
@@ -82,7 +83,15 @@ export class MindVoiceProvider implements VoiceProvider {
     const speed = clampMindSpeed(req.speed);
     const audio = await mindTts(
       this.config.baseUrl,
-      { engine, voice: voiceId, text: req.text, language: req.language ?? MIND_ENGINES[engine].language, speed },
+      {
+        engine,
+        voice: voiceId,
+        text: req.text,
+        language: req.language ?? MIND_ENGINES[engine].language,
+        speed,
+        // The Dialogue Director's request, recorded in the line's direction (and voice key).
+        ...(mindKeepsPunct(req.instructions) ? { keep_punct: true as const } : {}),
+      },
       this.config.timeoutMs ?? MIND_GENERATE_TIMEOUT_MS,
     );
 

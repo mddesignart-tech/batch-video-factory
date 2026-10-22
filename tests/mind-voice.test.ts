@@ -489,6 +489,53 @@ describe("QĐ-145 Mind Voice - mock server, Mock Mode, $0", () => {
     }
   }, 600_000);
 
+  it("QĐ-147 Dialogue Director: mỗi nhân vật cảm xúc riêng, giữ giọng; câu hỏi ngắn giữ dấu ?; tắt → gửi y như cũ", async () => {
+    const original = await prisma.character.findMany({ where: { name: { in: ["Max", "Leo"] } } });
+    try {
+      await prisma.character.update({ where: { name: "Max" }, data: { voiceProvider: "mindvoice", voiceModel: "mind-local", voiceId: "Giọng 2" } });
+      await prisma.character.update({ where: { name: "Leo" }, data: { voiceProvider: "mindvoice", voiceModel: "mind-local", voiceId: "Giọng 7" } });
+      const v = await narratedVideo([""], "vi");
+      const sceneId = v.sceneIds[0]!;
+      await prisma.scene.update({
+        where: { id: sceneId },
+        data: {
+          dialogue: `Max: Ăn sáng chưa ${tag}?\nLeo: Mình ăn rồi, cảm ơn nhé.\nMax: Vậy đi dạo một vòng đi.`,
+          narration: "",
+          speakingCharactersJson: JSON.stringify(["Max", "Leo"]),
+          charactersPresentJson: JSON.stringify(["Max", "Leo"]),
+        },
+      });
+      await saveProjectControls(v.projectId, {
+        voice: { dialogueDirector: true, speakerEmotions: { [sceneId]: { Max: "CALM", Leo: "SURPRISED" } } },
+      });
+      const before = requests.length;
+      await generateSceneVoice(sceneId);
+      const sent = requests.slice(before);
+      expect(sent.map((b) => [b.voice, b.text, b.speed, b.keep_punct ?? null])).toEqual([
+        ["Giọng 2", `Ăn sáng chưa ${tag}?`, 0.96, true],
+        ["Giọng 7", "Mình ăn rồi, cảm ơn nhé!", 1.05, true],
+        ["Giọng 2", "Vậy đi dạo một vòng đi.", 0.96, null],
+      ]);
+      const lines = await mindLines(v.projectId);
+      expect(lines.map((l) => l.voiceId)).toEqual(["Giọng 2", "Giọng 7", "Giọng 2"]);
+      expect(lines.map((l) => l.text)).toEqual([`Ăn sáng chưa ${tag}?`, "Mình ăn rồi, cảm ơn nhé.", "Vậy đi dạo một vòng đi."]);
+      expect(lines.map((l) => / dlg=(\w+)/.exec(l.instructions)?.[1])).toEqual(["CALM", "SURPRISED", "CALM"]);
+      for (const b of sent) expect(String(b.text)).not.toMatch(/Max|Leo|\[thở dài\]|<sigh>|dlg=/);
+
+      // Off again: exactly the request a project without it sends (no keep_punct, speed 1).
+      await saveProjectControls(v.projectId, { voice: { dialogueDirector: false } });
+      const off = requests.length;
+      await generateSceneVoice(sceneId);
+      expect(requests.slice(off).map((b) => [b.text, b.speed, "keep_punct" in b])).toEqual([
+        [`Ăn sáng chưa ${tag}?`, 1, false],
+        ["Mình ăn rồi, cảm ơn nhé.", 1, false],
+        ["Vậy đi dạo một vòng đi.", 1, false],
+      ]);
+    } finally {
+      for (const c of original) await prisma.character.update({ where: { id: c.id }, data: { voiceProvider: c.voiceProvider, voiceModel: c.voiceModel, voiceId: c.voiceId } });
+    }
+  }, 600_000);
+
   it("nghe thử giọng nhân vật ngoài Mock Mode: Mind Voice không qua cổng chi tiêu, không ghi sổ, lần 2 dùng lại", async () => {
     const leo = await prisma.character.findUniqueOrThrow({ where: { name: "Leo" } });
     const prev = process.env.AI_MOCK_MODE;

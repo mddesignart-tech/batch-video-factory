@@ -24,6 +24,7 @@
 import { z } from "zod";
 import type { EffectiveCreativeStyle } from "./creative-style";
 import { wantsPunchline } from "./creative-style";
+import { DIALOGUE_EMOTION_IDS } from "./dialogue-director";
 import type { SpeechLanguage } from "./speech-text";
 
 export const VOICE_DIRECTOR_VERSION = "voice-director-v1";
@@ -247,6 +248,14 @@ export const VoiceDirectionSchema = z.object({
    * On by default; only cues the engine reliably performs are ever sent.
    */
   emotionCues: z.boolean().default(true),
+  /**
+   * QĐ-147: the Dialogue Voice Director - each character's own emotion in a
+   * Mind Voice dialogue (dialogue-director.ts). Off by default, so a project
+   * without it sends exactly what it sent before; independent of `director`.
+   */
+  dialogueDirector: z.boolean().default(false),
+  /** Scene id (or "*" = every scene) → speaker name → emotion. A speaker left out is AUTO. */
+  speakerEmotions: z.record(z.string(), z.record(z.string(), z.enum(DIALOGUE_EMOTION_IDS))).default({}),
 });
 export type VoiceDirection = z.infer<typeof VoiceDirectionSchema>;
 
