@@ -4643,3 +4643,22 @@ Video thử AIVietLab (Thục Đoan, 47,8 s) bị nhạc nền giật ở mỗi 
 - Lưu thiết lập trên video đã xong sẽ chuyển nó về `media_ready`, như mọi thay đổi VIDEO OUTPUT trước đây.
 
 **Chi phí:** chỉnh âm lượng, nghe thử, Remix và Batch Remix đều xử lý tại máy, $0 API. UI ghi rõ: chỉ tạo GIỌNG MỚI mới có thể tốn phí và luôn hỏi trước.
+
+## QĐ-151 — SMART MOTION ENGINE V2: NGHIÊN CỨU + BENCHMARK (2026-10-23, $0) — CHƯA TÍCH HỢP
+
+- **Nguyên nhân giật (đã đo):**
+  - FFmpeg `zoompan` gán `x`, `y`, `w`, `h` vào biến `int` (`vf_zoompan.c`). Vị trí và kích thước bị làm tròn độc lập, nên camera chậm lệch 17–50% tốc độ (trung bình 34,9%, 12 clip).
+  - TILT production có khung đứng yên ở đầu (cặp 2→3) và cuối (cặp 208→209).
+  - Chuỗi V1 (cảnh chưa có plan) giật khoảng 34%, zoom bám góc trên-trái.
+- **Prototype V2** (`scripts/qa/qd151/`):
+  - Filter `perspective` toạ độ thực, cubic, `eval=frame`. Biến `on` **đếm từ 1**, nên dùng `(on-1)/(N-1)`.
+  - Kết quả: giật 6,3% (2×) và 6,6% (1×). Render 1× mất 9,0 s so với 12,3 s của production; 2× mất 27 s.
+  - Kèm easing, 10 đường đi, 4 cường độ cố định, và gợi ý camera ánh xạ từ Camera Director (8/8 tự kiểm).
+- **Chưa chạy:** RIFE (zip 431,5 MB, MIT), DepthFlow (AGPL-3.0, model Depth Anything v2 có bản CC BY-NC), Revideo (cần Chromium). Chờ người dùng đồng ý tải.
+- **Không thay đổi:** `src/`, QĐ-149/150, dữ liệu project thật. Đề xuất triển khai nằm ở `docs/QD151_MOTION_RESEARCH.md` mục 9; chờ người dùng xem video và chọn.
+- **Cập nhật 2026-10-23 (review benchmark):**
+  - Người dùng ưu tiên **V2 1×** (giật 6,2%, 8,8 s / 7 s) nhưng **chưa duyệt chất lượng hình ảnh**.
+  - Đã thêm video 4 khung A | V2 1× | V2 2× | V2 Easing, dải phóng to 2× (chữ, mép ảnh) và `compat.ts`: 27 kiểu camera + speaker lean đều render được qua V2 từ chính biểu thức `zoompan` production (`fromProductionZoompan`).
+  - `perspective` giữ được alpha.
+  - Kế hoạch: Motion Quality LEGACY / SMOOTH_V2 / HQ_V2, fallback, kế hoạch kiểm thử 14 bài (docs mục 8–10).
+  - RIFE/DepthFlow/Revideo: không tải, không cài. Không dùng mã AGPL. Renderer production KHÔNG đổi.
