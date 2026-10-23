@@ -12,6 +12,7 @@ import { isProductionDatabase, resolveDatabaseFile } from "@/lib/db-location";
 import { ffmpegVersion, resolveFfmpeg, resolveFfprobe } from "@/media/ffmpeg";
 import { SettingsForm } from "./settings-form";
 import { AudioMixForm } from "./audio-mix-form";
+import { AudioPresetSettings } from "./audio-preset-settings";
 import { DailySettingsForm } from "./daily-form";
 import { OUTPUT_ROOT } from "@/services/output-layout";
 import { SpendCapForm } from "@/components/spend-gate";
@@ -83,6 +84,7 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <AudioMixForm mix={settings.audioMix} />
+            <AudioPresetSettings />
           </CardContent>
         </Card>
 

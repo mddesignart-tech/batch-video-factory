@@ -16,6 +16,7 @@ import { logger } from "@/lib/logger";
 import fs from "node:fs";
 import { ensureProjectDirs, toAbsolute } from "@/lib/paths";
 import { getSettings } from "@/lib/settings";
+import { newProjectControlsJson } from "./audio-mixer-service";
 import { parseJson, round } from "@/lib/utils";
 import { ScriptSchema, type ScriptDoc } from "@/domain/script";
 import { enqueue } from "@/jobs/queue";
@@ -95,6 +96,8 @@ export async function createProjectForIdiom(
       maxBudget: round(input.maxBudget ?? settings.defaultMaxBudget),
       // QĐ-127: null when left on "Tự động" - the original writer, unchanged.
       creativeStyleJson: storedCreativeJson(input.creativeStyle),
+      // QĐ-150: a new project starts with the Audio Mixer preset from Settings.
+      outputControlsJson: newProjectControlsJson(settings),
     },
   });
 

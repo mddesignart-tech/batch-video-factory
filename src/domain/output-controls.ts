@@ -15,6 +15,7 @@
 
 import { z } from "zod";
 import { VoiceDirectionSchema } from "./voice-director";
+import { AudioMixerSchema } from "./audio-mixer";
 
 export const SUBTITLE_SIZES = ["SMALL", "MEDIUM", "LARGE", "CUSTOM"] as const;
 export const SUBTITLE_POSITIONS = ["BOTTOM", "MIDDLE", "TOP"] as const;
@@ -92,6 +93,12 @@ export const OutputControlsSchema = z.object({
       sfxVolume: z.number().min(0).max(1).default(0.4),
       /** Short fade in / out on the final audio. */
       fades: z.boolean().default(false),
+      /**
+       * QĐ-150 AUDIO MIXER. Null = the old mix (every project made before it).
+       * Set = music at a calibrated %, timeline ducking, music-only fades;
+       * `musicVolume` and `fades` above are then not used.
+       */
+      mixer: AudioMixerSchema.nullable().default(null),
     })
     .default({}),
   /**
@@ -166,13 +173,23 @@ export function controlsOf(project: { contentType?: string | null; outputControl
 export function mergeControls(current: OutputControls, patch: DeepPartial<OutputControls>): OutputControls {
   return OutputControlsSchema.parse({
     subtitles: { ...current.subtitles, ...(patch.subtitles ?? {}), advanced: { ...current.subtitles.advanced, ...(patch.subtitles?.advanced ?? {}) } },
-    audio: { ...current.audio, ...(patch.audio ?? {}) },
+    audio: {
+      ...current.audio,
+      ...(patch.audio ?? {}),
+      // A mixer change merges into the stored one; null turns the mixer off.
+      mixer:
+        patch.audio?.mixer === undefined
+          ? current.audio.mixer
+          : patch.audio.mixer === null
+            ? null
+            : { ...(current.audio.mixer ?? {}), ...patch.audio.mixer },
+    },
     logo: { ...current.logo, ...(patch.logo ?? {}) },
     voice: { ...current.voice, ...(patch.voice ?? {}) },
   });
 }
 
-type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
+type DeepPartial<T> = { [K in keyof T]?: NonNullable<T[K]> extends object ? DeepPartial<NonNullable<T[K]>> | Extract<T[K], null> : T[K] };
 
 // ------------------------------------------------------------- subtitle layout ---
 

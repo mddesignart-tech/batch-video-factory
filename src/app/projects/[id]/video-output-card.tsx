@@ -28,6 +28,7 @@ import { SPEED_MODES, VOICE_EMOTIONS, VOICE_PRESETS, type SpeedModeId, type Voic
 import type { LogoReferenceOption, LogoState } from "@/services/logo-overlay";
 import { LogoOverlaySection } from "./logo-overlay-section";
 import { CitVoicePanel } from "./cit-voice-panel";
+import { AudioMixerSection } from "./audio-mixer-section";
 
 const media = (p: string) => `/api/media/${p.split(/[\\/]/).map(encodeURIComponent).join("/")}`;
 const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -335,8 +336,13 @@ export function VideoOutputCard({
             </>
           ) : null}
           <div className="grid gap-2 sm:grid-cols-3">
-            <Field label={`Âm lượng lời đọc: ${pct(c.audio.narrationVolume)}`}>
+            {/* With the Audio Mixer on, the voice level lives in the mixer (same value). */}
+            <Field label={c.audio.mixer ? "Âm lượng lời đọc: chỉnh trong Audio Mixer (Nhạc nền)" : `Âm lượng lời đọc: ${pct(c.audio.narrationVolume)}`}>
+              {c.audio.mixer ? null : (
+                <>
               {slider(c.audio.narrationVolume, 0, 2, 0.05, (v) => aud({ narrationVolume: v }, false), (v) => aud({ narrationVolume: v }))}
+                </>
+              )}
               <label className="flex items-center gap-2 text-xs text-ink-300">
                 <input type="checkbox" checked={c.audio.normalizeNarration} onChange={(e) => aud({ normalizeNarration: e.currentTarget.checked })} />
                 Chuẩn hoá âm lượng lời đọc
@@ -379,14 +385,18 @@ export function VideoOutputCard({
           </div>
           {music ? (
             <div className="grid gap-2 sm:grid-cols-2">
-              <Field label={`Âm lượng: ${pct(c.audio.musicVolume)}`}>
-                {slider(c.audio.musicVolume, 0, 1, 0.01, (v) => aud({ musicVolume: v }, false), (v) => aud({ musicVolume: v }))}
-              </Field>
+              {c.audio.mixer ? null : (
+                <Field label={`Âm lượng: ${pct(c.audio.musicVolume)}`}>
+                  {slider(c.audio.musicVolume, 0, 1, 0.01, (v) => aud({ musicVolume: v }, false), (v) => aud({ musicVolume: v }))}
+                </Field>
+              )}
               <div className="space-y-1 text-xs text-ink-300">
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={c.audio.duckMusic} onChange={(e) => aud({ duckMusic: e.currentTarget.checked })} />
-                  Tự hạ nhạc khi có lời
-                </label>
+                {c.audio.mixer ? null : (
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={c.audio.duckMusic} onChange={(e) => aud({ duckMusic: e.currentTarget.checked })} />
+                    Tự hạ nhạc khi có lời
+                  </label>
+                )}
                 <p className="text-ink-500">
                   {music.filename}
                   {music.durationSec ? ` · ${Math.round(music.durationSec)}s` : ""}{" "}
@@ -420,6 +430,8 @@ export function VideoOutputCard({
               </span>
             </label>
           )}
+          {/* QĐ-150 AUDIO MIXER: presets, levels, ducking, fades, preview, remix. */}
+          <AudioMixerSection projectId={projectId} audio={c.audio} hasMusic={Boolean(music)} pending={pending} change={aud} />
         </section>
 
         {/* ---------------------------------------------- HIỆU ỨNG ÂM THANH */}
@@ -436,10 +448,12 @@ export function VideoOutputCard({
               {slider(c.audio.sfxVolume, 0, 1, 0.01, (v) => aud({ sfxVolume: v }, false), (v) => aud({ sfxVolume: v }))}
             </Field>
           ) : null}
-          <label className="flex items-center gap-2 text-xs text-ink-300">
-            <input type="checkbox" checked={c.audio.fades} onChange={(e) => aud({ fades: e.currentTarget.checked })} />
-            Mở / kết âm thanh nhẹ nhàng (fade)
-          </label>
+          {c.audio.mixer ? null : (
+            <label className="flex items-center gap-2 text-xs text-ink-300">
+              <input type="checkbox" checked={c.audio.fades} onChange={(e) => aud({ fades: e.currentTarget.checked })} />
+              Mở / kết âm thanh nhẹ nhàng (fade)
+            </label>
+          )}
         </section>
 
         {/* ------------------------------------------------------------ LOGO */}

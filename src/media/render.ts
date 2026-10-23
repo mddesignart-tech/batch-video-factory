@@ -38,14 +38,22 @@ import {
   renderFinalMix,
   renderSceneDialogue,
 } from "./scene-audio";
-import type { LoudnessStats } from "./audio-normalize";
+import { measureLoudness, type LoudnessStats } from "./audio-normalize";
+import {
+  manifestDirFor,
+  measureMusicLufs,
+  renderMixerMix,
+  writeAudioManifest,
+  type AudioSourceManifest,
+} from "./audio-mixer-render";
+import type { SpeechRegion } from "@/domain/audio-mixer";
 import {
   checkMix,
   toMetrics,
   type MixMetrics,
   type MixWarning,
 } from "./audio-metrics";
-import { DATA_ROOT, ensureProjectDirs, projectSubdir } from "@/lib/paths";
+import { DATA_ROOT, ensureProjectDirs, projectSubdir, toRelative } from "@/lib/paths";
 import {
   DEFAULT_TIMING,
   resolveSceneDuration,
@@ -209,6 +217,22 @@ export interface RenderRequest {
   sceneSfx?: { sceneNumber: number; path: string }[];
   /** LOGO OVERLAY: a LOGO Reference laid over the finished frame. Absent = no logo (the final pass as before). */
   logo?: RenderLogo;
+  /**
+   * QĐ-150 AUDIO MIXER: continuous stereo bed ducked from the dialogue
+   * timeline, music at a calibrated %, fades on the music only. Absent = the
+   * old mix, byte for byte. Only used when there is music or an effect.
+   */
+  audioMixer?: RenderAudioMixer;
+}
+
+export interface RenderAudioMixer {
+  musicPct: number;
+  /** 0 = no duck. */
+  duckDb: number;
+  attackMs: number;
+  releaseMs: number;
+  fadeInSec: number;
+  fadeOutSec: number;
 }
 
 /** A logo on the final frame, already placed (domain/logo-overlay.ts). Px on the output frame. */
@@ -246,6 +270,10 @@ export interface RenderResult {
   audioWarnings: MixWarning[];
   /** Per-scene audio tracks, kept so one scene can be re-mixed alone. */
   sceneAudioPaths: string[];
+  /** QĐ-150: the source manifest kept beside this MP4 for REMIX AUDIO (absent when there was nothing to keep). */
+  audioManifestPath?: string;
+  /** QĐ-150: "mixer" when the Audio Mixer produced the sound. */
+  audioEngine?: "mixer" | "legacy";
   /** How long every scene ended up, and why - in scene order. */
   sceneTimings: SceneTiming[];
   /** Scene segments copied from the local segment cache (compute saved, $0 either way). */
@@ -817,6 +845,16 @@ function placedSceneSfx(
   return out;
 }
 
+/** The mixer's full settings: voice level / levelling and effect gain come from the existing knobs. */
+function mixerSettingsOf(req: RenderRequest) {
+  const m = req.audioMixer!;
+  return {
+    ...m,
+    sfxGain: resolveMix(req.mixSettings).sfxGain,
+    voice: { gain: req.voiceMix?.gain ?? 1, normalize: req.voiceMix?.normalize ?? false },
+  };
+}
+
 export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   if (!ffmpegAvailable()) throw new FfmpegError(FFMPEG_MISSING_MESSAGE, "", []);
 
@@ -1088,6 +1126,9 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   const outName = `final_${randomUUID().slice(0, 8)}.mp4`;
   let audioMetrics: MixMetrics | undefined;
   const sceneAudioPaths: string[] = [];
+  let audioEngine: "mixer" | "legacy" = "legacy";
+  // Sources kept beside the MP4 for REMIX AUDIO (QĐ-150), written once the MP4 exists.
+  let pendingManifest: { dialoguePath: string; manifest: AudioSourceManifest } | null = null;
 
   if (usingTimeline) {
     // Join the scene tracks, then mix music and effects under the lot ONCE,
@@ -1134,30 +1175,138 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
 
     const mixPath = path.join(audioDir, "project-final-mix.wav");
     if (fs.existsSync(mixPath)) fs.rmSync(mixPath);
-    const mix = await renderFinalMix(
-      {
-        dialoguePath: joinedDialogue,
-        musicPath: req.musicPath && fs.existsSync(req.musicPath) ? req.musicPath : null,
-        sfx: [...(req.sfx ?? []), ...placedSceneSfx(req, usable, sceneDurations)].filter((s) => fs.existsSync(s.path)),
-        settings: req.mixSettings,
-        ...(req.voiceMix
-          ? { voice: { ...req.voiceMix, totalSec: sceneDurations.reduce((n, d) => n + (d ?? 0), 0) } }
-          : {}),
-      },
-      mixPath,
-    );
+    const musicPath = req.musicPath && fs.existsSync(req.musicPath) ? req.musicPath : null;
+    const sfx = [...(req.sfx ?? []), ...placedSceneSfx(req, usable, sceneDurations)].filter((s) => fs.existsSync(s.path));
+    const totalSec = sceneDurations.reduce<number>((n, d) => n + (d ?? 0), 0);
+    // Where every line sits on the video's clock: scene start + its own timeline.
+    const regions: SpeechRegion[] = [];
+    const sceneStartsSec: number[] = [];
+    let cursor = 0;
+    sceneAudio.forEach((audio, i) => {
+      sceneStartsSec.push(Math.round(cursor * 1000) / 1000);
+      for (const e of audio?.timeline.entries ?? []) {
+        if (e.audioPath.length > 0) {
+          regions.push({ startSec: Math.round((cursor + e.startSec) * 1000) / 1000, endSec: Math.round((cursor + e.endSec) * 1000) / 1000 });
+        }
+      }
+      cursor += sceneDurations[i] ?? 0;
+    });
 
-    audioMetrics = toMetrics(mix.loudness, mix.durationSec);
+    let mixLoudness: LoudnessStats;
+    let mixDuration: number;
+    let mixSettingsUsed: unknown;
+    if (req.audioMixer && (musicPath || sfx.length > 0)) {
+      // QĐ-150 AUDIO MIXER: one continuous stereo bed, ducked from the timeline.
+      const settings = mixerSettingsOf(req);
+      await renderMixerMix(
+        { dialoguePath: joinedDialogue, totalSec, regions, musicPath, musicLufs: musicPath ? await measureMusicLufs(musicPath) : null, sfx, settings },
+        mixPath,
+      );
+      mixLoudness = await measureLoudness(mixPath);
+      mixDuration = await probeDuration(mixPath).catch(() => totalSec);
+      mixSettingsUsed = settings;
+      audioEngine = "mixer";
+    } else {
+      const mix = await renderFinalMix(
+        {
+          dialoguePath: joinedDialogue,
+          musicPath,
+          sfx,
+          settings: req.mixSettings,
+          ...(req.voiceMix ? { voice: { ...req.voiceMix, totalSec } } : {}),
+        },
+        mixPath,
+      );
+      mixLoudness = mix.loudness;
+      mixDuration = mix.durationSec;
+      mixSettingsUsed = { mix: mix.settings, voice: req.voiceMix ?? null };
+    }
+    pendingManifest = {
+      dialoguePath: joinedDialogue,
+      manifest: {
+        version: 1,
+        finalName: outName,
+        createdAt: new Date().toISOString(),
+        totalSec: Math.round(totalSec * 1000) / 1000,
+        dialogue: "",
+        regions,
+        sceneStartsSec,
+        sfx: sfx.map((e) => ({ path: toRelative(e.path), atSec: e.atSec })),
+        music: musicPath ? toRelative(musicPath) : null,
+        engine: audioEngine,
+        settings: mixSettingsUsed,
+      },
+    };
+
+    audioMetrics = toMetrics(mixLoudness, mixDuration);
     audioWarnings.push(
       ...checkMix({
-        mix: mix.loudness,
+        mix: mixLoudness,
         dialogue: dialogue.loudness,
-        durationSec: mix.durationSec,
+        durationSec: mixDuration,
       }),
     );
 
     // Replace the joined video's audio wholesale. The per-scene tracks were
     // only ever there to keep the concat demuxer happy.
+    await ffmpeg(
+      buildFinalWithMixArgs({
+        videoInput: joinedName,
+        audioInput: mixPath,
+        subtitleFile: canBurn ? assTempName : null,
+        target: req.target,
+        output: outName,
+        encode: req.encode,
+        ...(liveLogo ? { logo: liveLogo } : {}),
+      }),
+      { cwd: tempDir, timeoutMs: 20 * 60 * 1000 },
+    );
+  } else if (req.audioMixer && req.musicPath && fs.existsSync(req.musicPath)) {
+    // QĐ-150: no dialogue lines (e.g. a video without voice) but a mixer: the
+    // joined video's own sound (if any) stands in for the voice, nothing is
+    // ducked, and the music gets the mixer's level and fades.
+    const joinedAbs = path.join(tempDir, joinedName);
+    const leadSec = await probeVideoStart(joinedAbs);
+    const totalSec = Math.max(0.01, (await probeDuration(joinedAbs).catch(() => 0)) - leadSec);
+    const baseTrack = path.join(audioDir, "project-dialogue.wav");
+    if (fs.existsSync(baseTrack)) fs.rmSync(baseTrack);
+    try {
+      await ffmpeg(["-y", "-hide_banner", "-loglevel", "error", "-i", joinedAbs, "-map", "0:a:0", "-af", finalAudioRebase(leadSec), "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", baseTrack]);
+    } catch {
+      // No sound in the picture at all: silence of the video's length.
+      await ffmpeg(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `anullsrc=r=24000:cl=mono:d=${totalSec}`, "-c:a", "pcm_s16le", baseTrack]);
+    }
+    const sfx = [...(req.sfx ?? []), ...placedSceneSfx(req, usable, sceneDurations)].filter((s) => fs.existsSync(s.path));
+    const settings = mixerSettingsOf(req);
+    const mixPath = path.join(audioDir, "project-final-mix.wav");
+    if (fs.existsSync(mixPath)) fs.rmSync(mixPath);
+    await renderMixerMix(
+      { dialoguePath: baseTrack, totalSec, regions: [], musicPath: req.musicPath, musicLufs: await measureMusicLufs(req.musicPath), sfx, settings },
+      mixPath,
+    );
+    audioMetrics = toMetrics(await measureLoudness(mixPath), totalSec);
+    audioEngine = "mixer";
+    let at = 0;
+    pendingManifest = {
+      dialoguePath: baseTrack,
+      manifest: {
+        version: 1,
+        finalName: outName,
+        createdAt: new Date().toISOString(),
+        totalSec: Math.round(totalSec * 1000) / 1000,
+        dialogue: "",
+        regions: [],
+        sceneStartsSec: sceneDurations.map((d) => {
+          const start = Math.round(at * 1000) / 1000;
+          at += d ?? 0;
+          return start;
+        }),
+        sfx: sfx.map((e) => ({ path: toRelative(e.path), atSec: e.atSec })),
+        music: toRelative(req.musicPath),
+        engine: "mixer",
+        settings,
+      },
+    };
     await ffmpeg(
       buildFinalWithMixArgs({
         videoInput: joinedName,
@@ -1195,6 +1344,21 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   const finalPath = path.join(finalDir, outName);
   fs.renameSync(path.join(tempDir, outName), finalPath);
 
+  // REMIX AUDIO (QĐ-150) needs the sources, not the summed MP4: keep the
+  // dialogue stem and what was mixed beside this render. Never fails a render.
+  let audioManifestPath: string | undefined;
+  if (pendingManifest) {
+    try {
+      const dir = manifestDirFor(audioDir, outName);
+      fs.mkdirSync(dir, { recursive: true });
+      const stem = path.join(dir, "dialogue.wav");
+      fs.copyFileSync(pendingManifest.dialoguePath, stem);
+      audioManifestPath = writeAudioManifest(dir, { ...pendingManifest.manifest, dialogue: toRelative(stem) });
+    } catch {
+      audioManifestPath = undefined;
+    }
+  }
+
   return {
     videoPath: finalPath,
     subtitlePathAss: assPath,
@@ -1204,6 +1368,8 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     subtitlesBurned: canBurn,
     audioPipeline: usingTimeline ? "dialogue-timeline" : "legacy-scene-audio",
     audioMetrics,
+    audioEngine,
+    ...(audioManifestPath ? { audioManifestPath } : {}),
     audioWarnings,
     sceneAudioPaths,
     sceneTimings,

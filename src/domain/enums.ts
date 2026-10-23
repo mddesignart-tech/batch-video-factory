@@ -348,6 +348,8 @@ export const JOB_TYPES = [
   "evaluate_scene_quality",
   "render_final",
   "batch_expand",
+  /** QĐ-150 REMIX AUDIO: mix a final MP4's sound again from its sources (local, $0). */
+  "remix_audio",
 ] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 

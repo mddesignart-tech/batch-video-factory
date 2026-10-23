@@ -45,6 +45,7 @@ import { buildPrompt } from "@/lib/prompts";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { getSettings } from "@/lib/settings";
+import { newProjectControlsJson } from "./audio-mixer-service";
 import { parseJson, round } from "@/lib/utils";
 import { getTextProvider } from "@/providers/registry";
 import type { ContentScriptRequest, ScriptRequest } from "@/providers/types";
@@ -219,7 +220,8 @@ export async function createContentProject(input: CreateContentProjectInput): Pr
       creativeStyleJson: storedCreativeJson(input.creativeStyle),
       // QĐ-142: a new project's narration is directed by its style and scenes.
       // Projects made before keep their voice exactly as it was bought.
-      outputControlsJson: JSON.stringify({ voice: { director: true } }),
+      // QĐ-150: plus the Audio Mixer preset a new project starts with (Settings).
+      outputControlsJson: newProjectControlsJson(settings, { voice: { director: true } }),
       voiceMode,
       bilingualMode,
       contentBriefJson: JSON.stringify({

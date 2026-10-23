@@ -13,7 +13,7 @@ import {
   type OutputControls,
 } from "@/domain/output-controls";
 import { ffmpeg, probeDuration } from "@/media/ffmpeg";
-import { logoOverlayFilter, type RenderLogo, type RenderRequest } from "@/media/render";
+import { logoOverlayFilter, type RenderAudioMixer, type RenderLogo, type RenderRequest } from "@/media/render";
 import { buildASS } from "@/media/subtitles";
 import { sfxFileFor } from "@/media/sfx-library";
 
@@ -115,7 +115,7 @@ export async function clearBackgroundMusic(projectId: string): Promise<void> {
   await prisma.project.update({ where: { id: projectId }, data: { backgroundMusicAssetId: null } });
 }
 
-async function musicPathOf(project: Pick<Project, "backgroundMusicAssetId">): Promise<string | null> {
+export async function musicPathOf(project: Pick<Project, "backgroundMusicAssetId">): Promise<string | null> {
   if (!project.backgroundMusicAssetId) return null;
   const a = await prisma.asset.findUnique({ where: { id: project.backgroundMusicAssetId } });
   if (!a) return null;
@@ -124,6 +124,19 @@ async function musicPathOf(project: Pick<Project, "backgroundMusicAssetId">): Pr
 }
 
 // ----------------------------------------------------------------- render ---
+
+/** QĐ-150: the render's mixer from the project's audio controls. Null = no mixer (the old mix). */
+export function audioMixerRequestOf(a: OutputControls["audio"]): RenderAudioMixer | null {
+  if (!a.mixer) return null;
+  return {
+    musicPct: a.mixer.musicPct,
+    duckDb: a.duckMusic ? a.mixer.duckDb : 0,
+    attackMs: a.mixer.attackMs,
+    releaseMs: a.mixer.releaseMs,
+    fadeInSec: a.mixer.fadeInSec,
+    fadeOutSec: a.mixer.fadeOutSec,
+  };
+}
 
 /**
  * Put the project's VIDEO OUTPUT controls on a render request. Local only.
@@ -157,7 +170,13 @@ export async function applyOutputControls(
     if (placed.length) request.sceneSfx = placed;
   }
   const a = c.audio;
-  if (a.narrationVolume !== 1 || a.normalizeNarration || a.fades) {
+  if (a.mixer) {
+    // QĐ-150 AUDIO MIXER: fades belong to the music; the voice is never faded.
+    if (a.narrationVolume !== 1 || a.normalizeNarration) {
+      request.voiceMix = { gain: a.narrationVolume, normalize: a.normalizeNarration, fadeSec: 0 };
+    }
+    request.audioMixer = audioMixerRequestOf(a)!;
+  } else if (a.narrationVolume !== 1 || a.normalizeNarration || a.fades) {
     request.voiceMix = { gain: a.narrationVolume, normalize: a.normalizeNarration, fadeSec: a.fades ? 0.3 : 0 };
   }
   // LOGO OVERLAY (local, $0). Off = nothing set, the render as before.

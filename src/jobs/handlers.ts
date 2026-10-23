@@ -59,6 +59,8 @@ export async function runJob(job: Job): Promise<HandlerResult> {
       return handleRenderFinal(job);
     case "batch_expand":
       return handleBatchExpand(job);
+    case "remix_audio":
+      return handleRemixAudio(job);
     case "generate_script":
       // Scripts are generated synchronously from the UI so the operator can read
       // and edit them before anything is queued. Nothing to do here.
@@ -497,6 +499,21 @@ function withFailureCode(error: unknown): string {
   const code = error.code;
   if (!code || code === "provider_error" || code === "generation_failed") return text;
   return text.startsWith(code) ? text : `${code}: ${text}`;
+}
+
+/**
+ * QĐ-150 REMIX AUDIO. Local FFmpeg only, in the same "local-render" slot as a
+ * final render so a batch remix never runs more FFmpeg processes at once than
+ * Settings allows.
+ */
+async function handleRemixAudio(job: Job): Promise<HandlerResult> {
+  if (!job.projectId) throw new Error("remix_audio thiếu projectId");
+  const projectId = job.projectId;
+  const { withSemaphore } = await import("@/lib/semaphore");
+  const { remixProjectAudio } = await import("@/services/audio-mixer-service");
+  const settings = await getSettings();
+  const result = await withSemaphore("local-render", settings.maxConcurrentLocalRenders, () => remixProjectAudio(projectId));
+  return { deferred: false, result };
 }
 
 export async function onJobExhausted(

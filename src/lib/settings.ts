@@ -4,6 +4,7 @@ import { parseJson } from "./utils";
 import { DEFAULT_MIX, resolveMix, type AudioMixSettings } from "@/media/mix-config";
 import { DEFAULT_PRESET_ID, outputPresetSchema, type OutputPreset } from "@/domain/output-preset";
 import { DEFAULT_SOCIAL_TEMPLATES, type SocialTemplates } from "@/domain/social-metadata";
+import { CustomAudioPresetSchema, DEFAULT_AUDIO_PRESET_ID, systemPreset, type CustomAudioPreset } from "@/domain/audio-mixer";
 
 /**
  * App settings live in the DB so they survive restarts and can be edited from
@@ -71,6 +72,14 @@ export interface AppSettings {
   customPresets: OutputPreset[];
   /** Title / description templates for metadata.json and description.txt. */
   socialTemplates: SocialTemplates;
+  /** QĐ-150: Audio presets the person made. System presets are not stored. */
+  audioPresets: CustomAudioPreset[];
+  /**
+   * QĐ-150: the Audio Mixer preset a NEW project starts with (copied into it at
+   * creation). Null = new projects keep the old mix. Never applied to an
+   * existing project.
+   */
+  newProjectAudioPresetId: string | null;
 }
 
 /** Hard bounds: more parallelism than this buys SQLite contention, not speed. */
@@ -98,6 +107,14 @@ function sanitizeDaily(s: AppSettings): AppSettings {
     maxConcurrentLocalRenders: clampInt(s.maxConcurrentLocalRenders, 1, CONCURRENCY_LIMITS.maxConcurrentLocalRenders.max, 1),
     maxConcurrentPaidRequests: clampInt(s.maxConcurrentPaidRequests, 1, CONCURRENCY_LIMITS.maxConcurrentPaidRequests.max, 1),
     customPresets: presets,
+    audioPresets: Array.isArray(s.audioPresets) ? s.audioPresets.filter((p) => CustomAudioPresetSchema.safeParse(p).success) : [],
+    newProjectAudioPresetId:
+      s.newProjectAudioPresetId === null
+        ? null
+        : typeof s.newProjectAudioPresetId === "string" &&
+            (systemPreset(s.newProjectAudioPresetId) || (Array.isArray(s.audioPresets) && s.audioPresets.some((p) => p?.id === s.newProjectAudioPresetId)))
+          ? s.newProjectAudioPresetId
+          : DEFAULT_AUDIO_PRESET_ID,
     defaultOutputPresetId:
       typeof s.defaultOutputPresetId === "string" && s.defaultOutputPresetId ? s.defaultOutputPresetId : DEFAULT_PRESET_ID,
     socialTemplates: {
@@ -140,6 +157,8 @@ export function defaultSettings(): AppSettings {
     maxConcurrentPaidRequests: 1,
     customPresets: [],
     socialTemplates: { ...DEFAULT_SOCIAL_TEMPLATES },
+    audioPresets: [],
+    newProjectAudioPresetId: DEFAULT_AUDIO_PRESET_ID,
   };
 }
 

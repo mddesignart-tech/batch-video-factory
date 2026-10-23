@@ -4573,3 +4573,73 @@ tự nhiên, không bị cứng").
   Voice Director sau này phải A/B với file này; test hồi quy (`tests/mind-voice.test.ts`) bảo đảm Studio và video
   (director tắt) vẫn gửi đúng `{engine, voice, text, language: vi, speed: 1}`, summary `director=off`, không `dlg=`.
 - Video pipeline vẫn chuẩn hoá −16 LUFS cho mọi câu thoại như trước (không phải hiệu ứng mới của preset).
+
+## QĐ-149 — NHẠC NỀN GIẬT Ở CHUYỂN CẢNH: NGUYÊN NHÂN VÀ BẢN SỬA VIDEO THỬ (2026-10-22 → 2026-10-23, $0)
+
+Video thử AIVietLab (Thục Đoan, 47,8 s) bị nhạc nền giật ở mỗi lần chuyển cảnh.
+
+**Nguyên nhân gốc (production, `src/media/scene-audio.ts` + `mix-config.ts`)**
+- Nhạc vốn đã là MỘT track liền: trộn một lần cho cả video, `-stream_loop -1`, không khởi động lại theo cảnh.
+- Lỗi nằm ở ducking: sidechain hạ 12 dB, ratio 8, attack 20 ms, release 350 ms. Đo thực tế nhạc bị hạ khoảng 20 dB dưới giọng này.
+- Mỗi cảnh kết thúc bằng khoảng 0,6 s không lời. Release 350 ms ngắn hơn khoảng đó, nên nhạc bật lên khoảng 20 dB rồi bị dập lại khi câu sau bắt đầu.
+- Ngoài ra: fade áp lên cả bản mix (giọng cũng bị fade), và mix cuối là mono 24 kHz.
+
+**Bản sửa video thử (`scripts/aivietlab-audio-fix.ts`)**
+- Nhạc một track liền, gain tĩnh, duck nhẹ (ratio 2, attack 150 ms, release 1500 ms), fade chỉ ở đầu và cuối, stereo 48 kHz; hình stream copy.
+- Bản đầu (−8,2 dB) được người dùng xác nhận hết giật và giọng đạt, nhưng xin nhạc to thêm.
+- `final_27c46866_qd149_music_plus2db.mp4` (−6,2 dB) được người dùng duyệt ngày 2026-10-23. Số đo:
+  - Nhạc −27,4 → −25,4 LUFS; mix −15,9 LUFS; true peak −2,0 dBFS; 0 mẫu clip.
+  - Hình trùng MD5 với bản gốc; giọng không đổi.
+- Mức nhạc này là mốc 100% của Audio Mixer (QĐ-150).
+
+## QĐ-150 — AUDIO MIXER, AUDIO PRESET, REMIX AUDIO, BATCH AUDIO (2026-10-23, $0)
+
+**Kiến trúc: một timeline âm thanh cho cả video** (`src/domain/audio-mixer.ts`, `src/media/audio-mixer-render.ts`)
+- Track giọng: dialogue đã nối, chỉnh âm lượng (`narrationVolume`), đặt giữa stereo −3 dB mỗi bên (cùng loudness với bản mono). Không bao giờ bị fade.
+- Track nhạc: một file, lặp nếu ngắn hơn video, cắt nếu dài hơn. Nhạc được đo loudness (cache theo path, size, mtime) rồi đưa về `MUSIC_REF_LUFS = −19,3`, sau đó nhân %.
+  - 100% = mức đã nghe duyệt ở QĐ-149 (bài −13,1 LUFS chơi ở −6,2 dB).
+  - % là biên độ: 200% = +6 dB.
+  - Bù tối đa +20 dB cho bài quá nhỏ.
+- Hiệu ứng âm thanh: cộng vào bed, bị duck cùng nhạc như trước.
+- Ducking theo TIMELINE lời thoại, không dùng compressor:
+  - Vùng lời = vị trí từng câu (đầu cảnh + timeline của cảnh).
+  - Nhạc bắt đầu giảm `attackMs` TRƯỚC câu, hồi lại trong `releaseMs` sau câu, giảm đúng `duckDb` dB.
+  - Khoảng nghỉ ngắn hơn attack + release được nối liền, nên nhạc không bật lên ở chỗ chuyển cảnh.
+  - Kỹ thuật: biểu thức `volume=…:eval=frame` trên khung 256 mẫu, mỗi bước ≤0,5 dB. Graph dài thì ghi ra `-filter_complex_script`.
+- Fade chỉ áp cho nhạc, chỉ ở đầu và cuối video.
+- `alimiter` trần −1 dBFS làm lưới an toàn; mix bình thường không chạm tới.
+- Đầu ra 48 kHz stereo.
+- Đã kiểm trên video AIVietLab: Review AI cho nhạc −25,5 LUFS so với −25,4 của bản đã duyệt (chênh trung vị 0,2 dB), mix −15,9 LUFS, peak −1,9 dBFS. Mọi khoảng nghỉ dưới 1 s giữ ở −6,00 dB (`scripts/qd150-mixer-validate.ts`).
+
+**Tương thích**
+- `outputControls.audio.mixer` mặc định `null`: project cũ render đúng như trước, graph cũ giữ nguyên byte, render recipe không đổi.
+- Mixer chỉ chạy khi có nhạc hoặc hiệu ứng; chỉ có giọng thì dùng đường cũ.
+- Project MỚI nhận preset `Settings.newProjectAudioPresetId` (mặc định Review AI; đặt "Không" để giữ bộ trộn cũ). Áp dụng cho project-service, content-service và storyboard-import.
+- Project không lời có mixer: tiếng sẵn có của video (nếu có) thay cho giọng, không duck.
+- Không có migration DB.
+
+**Preset**
+- 5 preset hệ thống, chỉ đọc:
+  - Review AI (đã nghe duyệt).
+  - Video hài hước, Kể chuyện, Review sản phẩm, Video không lời: suy ra từ Review AI với chênh lệch vừa phải, mô tả ghi rõ "chưa nghe duyệt".
+- Preset tự tạo lưu trong `Settings.audioPresets`: tạo, sửa, xoá; không ghi đè hay xoá được preset hệ thống.
+- Áp preset = SAO CHÉP giá trị vào project. Sửa hay xoá preset sau đó không làm đổi video đã dùng.
+
+**Nguồn cho Remix**
+- Mỗi render (cả đường cũ) lưu `audio/renders/<final>/dialogue.wav` + `manifest.json`: thời lượng, vùng lời, điểm đầu cảnh, hiệu ứng, nhạc đã dùng, thông số mix.
+- MP4 đã trộn sẵn KHÔNG được tách lại.
+- Video render trước QĐ-150 không có nguồn: UI báo rõ và đề nghị RENDER LẠI một lần ($0, dùng lại ảnh, giọng, clip).
+
+**Cách dùng REMIX AUDIO**
+1. Mở project → Video output → Nhạc nền → Audio Mixer.
+2. Chỉnh nhạc, giọng, ducking, fade. Có thể nghe thử đoạn có lời, đoạn không lời, đoạn chuyển cảnh (MP3 8 s, chỉ trộn âm thanh).
+3. Bấm REMIX AUDIO. Job `remix_audio` trộn lại từ nguồn với thiết lập hiện tại (nhạc = nhạc hiện tại của project), giữ nguyên hình (stream copy) và xuất file `final_*.mp4` MỚI. File cũ giữ nguyên.
+4. `finalVideoPath` trỏ sang file mới, `renderRecipe = null` để RENDER LẠI sau đó không nhầm bản remix với bản render cũ. Asset `final` model `remix-audio`. Thư mục output được xuất lại.
+- Job chạy trong slot `local-render` (`maxConcurrentLocalRenders`), nên Batch Remix không chạy quá số FFmpeg cho phép.
+
+**Batch Audio** (trang lô → "Âm thanh lô")
+- Áp một preset cho mọi video của lô; mỗi video vẫn chỉnh riêng được.
+- BATCH REMIX xếp một job cho mỗi video có bản xuất và có nguồn; các video còn lại được liệt kê kèm lý do.
+- Lưu thiết lập trên video đã xong sẽ chuyển nó về `media_ready`, như mọi thay đổi VIDEO OUTPUT trước đây.
+
+**Chi phí:** chỉnh âm lượng, nghe thử, Remix và Batch Remix đều xử lý tại máy, $0 API. UI ghi rõ: chỉ tạo GIỌNG MỚI mới có thể tốn phí và luôn hỏi trước.

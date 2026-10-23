@@ -16,6 +16,7 @@ import {
 import { sha256, sha256Bytes } from "@/lib/crypto";
 import { toAbsolute } from "@/lib/paths";
 import { getSettings } from "@/lib/settings";
+import { newProjectControlsJson } from "./audio-mixer-service";
 import { classifyScene, assignSpendPriority } from "./complexity";
 import {
   attachImportedImage,
@@ -797,6 +798,8 @@ export async function materialiseImport(
       batchMode: (await getSettings()).defaultBatchMode,
     },
   });
+  // QĐ-150: every imported video starts with the Audio Mixer preset from Settings.
+  const audioControlsJson = newProjectControlsJson(await getSettings());
 
   const projects: MaterialiseResult["projects"] = [];
   let copiedImages = 0;
@@ -850,6 +853,7 @@ export async function materialiseImport(
         idiomId: idiom.id,
         batchId: batch.id,
         title: video.title,
+        outputControlsJson: audioControlsJson,
         // The script already exists, so the project starts where V1's project
         // arrives AFTER paying a text model. Nothing will ask for one.
         status: "script_ready",

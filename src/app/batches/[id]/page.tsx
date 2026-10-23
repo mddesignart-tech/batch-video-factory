@@ -5,6 +5,9 @@ import { templateOf } from "@/domain/content-templates";
 import { creativeBadges, creativeSummary, resolveCreativeStyle } from "@/domain/creative-style";
 import { BatchCreativeCard } from "./batch-creative-card";
 import { BatchProgressView } from "./batch-progress-view";
+import { BatchAudioCard } from "./batch-audio-card";
+import { prisma } from "@/lib/prisma";
+import { controlsOf } from "@/domain/output-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +39,17 @@ export default async function BatchDetailPage({
   const idiomCreative = templateOf("ENGLISH_IDIOM").creative;
   const style = plan?.creativeStyle ?? null;
   const effective = resolveCreativeStyle(idiomCreative, style);
+  // ÂM THANH LÔ (QĐ-150): each video's own Audio Mixer preset.
+  const audioVideos = (
+    await prisma.project.findMany({
+      where: { batchId: id },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, title: true, contentType: true, outputControlsJson: true, finalVideoPath: true },
+    })
+  ).map((p) => {
+    const mixer = controlsOf(p).audio.mixer;
+    return { projectId: p.id, title: p.title, presetId: mixer ? mixer.presetId : undefined, hasFinal: Boolean(p.finalVideoPath) };
+  });
 
   return (
     <div className="space-y-4">
@@ -56,6 +70,7 @@ export default async function BatchDetailPage({
         />
         ) : null}
       />
+      <BatchAudioCard batchId={progress.batch.id} videos={audioVideos} />
     </div>
   );
 }
