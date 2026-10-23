@@ -16,6 +16,7 @@ import {
   SpendCapChangeError,
 } from "@/services/spend-guard";
 import { isProductionDatabase, resolveDatabaseFile } from "@/lib/db-location";
+import { billedVideoSeconds } from "@/domain/video-duration";
 import type { ActionResult } from "./idioms";
 
 /**
@@ -40,6 +41,13 @@ export interface SpendPreview {
   priceOutput: number;
   /** Upper-bound cost of one script generation run. */
   estimatedPerScript: number;
+  /** text | image | video | voice (QĐ-154: the gate is no longer text-only). */
+  type: string;
+  /** How the registry prices it, in words: "$0.05 / giây". */
+  priceLabel: string;
+  /** What one typical use costs, and what that use is. */
+  estimatedPerUse: number;
+  perUseLabel: string;
   mockMode: boolean;
   spent: number;
   cap: number;
@@ -74,6 +82,27 @@ export async function getSpendPreview(
     (TYPICAL_OUTPUT_TOKENS / 1000) * model.priceOutput;
   const estimatedPerScript = round6(perCall * CALLS_PER_SCRIPT_WORST_CASE);
 
+  // QĐ-154: video / image / voice models are confirmed here too, so the
+  // question "what does one use cost" is asked per type, from the registry.
+  let estimatedPerUse = estimatedPerScript;
+  let perUseLabel = "Ước tính / kịch bản";
+  let priceLabel = `$${model.price} / 1k token vào · $${model.priceOutput} / 1k token ra`;
+  if (model.type === "video") {
+    const [apiModel, size = ""] = modelId.split(":");
+    const seconds = billedVideoSeconds({ provider, size, requestedSeconds: 5, hasKeyframe: true, model: apiModel });
+    estimatedPerUse = round6(model.price * seconds);
+    perUseLabel = `Ước tính / 1 clip ${seconds} giây`;
+    priceLabel = `$${model.price} / giây video`;
+  } else if (model.type === "image") {
+    estimatedPerUse = round6(model.price);
+    perUseLabel = "Ước tính / 1 ảnh";
+    priceLabel = `$${model.price} / ảnh`;
+  } else if (model.type === "voice") {
+    estimatedPerUse = round6(model.price);
+    perUseLabel = "Ước tính / 1.000 ký tự";
+    priceLabel = `$${model.price} / 1.000 ký tự`;
+  }
+
   const isFree = provider === "ollama" || provider === "lmstudio";
   const warnings: string[] = [];
 
@@ -93,10 +122,17 @@ export async function getSpendPreview(
         "để thực sự gọi API thật.",
     );
   }
-  if (!isFree && estimatedPerScript > status.remaining) {
+  if (!isFree && estimatedPerUse > status.remaining) {
     warnings.push(
-      `Một kịch bản ước tính tốn tới $${estimatedPerScript.toFixed(4)} nhưng ` +
+      `${perUseLabel} là $${estimatedPerUse.toFixed(4)} nhưng ` +
         `hạn mức chỉ còn $${status.remaining.toFixed(4)}.`,
+    );
+  }
+  if (model.type === "video") {
+    warnings.push(
+      "Cho phép ở đây là cho phép model này dùng được trong lô và khi tạo lại cảnh. " +
+        "Mỗi clip vẫn qua hạn mức tổng, ngân sách video của dự án và số credit của nhà cung cấp; " +
+        "ở Storyboard, nút TẠO VIDEO vẫn hỏi giá từng clip.",
     );
   }
 
@@ -107,6 +143,10 @@ export async function getSpendPreview(
     priceInput: model.price,
     priceOutput: model.priceOutput,
     estimatedPerScript,
+    type: model.type,
+    priceLabel,
+    estimatedPerUse,
+    perUseLabel,
     mockMode: isMockMode(),
     spent: status.spent,
     cap: status.cap,

@@ -107,9 +107,14 @@ export async function makeSceneVideo(
     const shortfall = await budgetShortfall(scene.projectId, cost, mock);
     if (shortfall) return { status: "NEEDS_BUDGET", message: shortfall.detail, choice, postsMade: 0, budget: shortfall };
     if (!opts.confirmPaid) {
+      const { confirmedProviders } = await import("./spend-guard");
+      // QĐ-154: say what this confirmation covers when the model is not on the long-term list.
+      const once = !mock && !(await confirmedProviders()).includes(pinned!)
+        ? " Model này chưa được cho phép lâu dài: xác nhận này chỉ cho phép đúng 1 clip của cảnh này."
+        : "";
       return {
         status: "NEEDS_CONFIRMATION",
-        message: `Tạo 1 clip bằng ${pinned}, ước tính $${cost.toFixed(4)}${mock ? " (giá giả lập Mock Mode)" : ""}. Cần xác nhận.`,
+        message: `Tạo 1 clip bằng ${pinned}, ước tính $${cost.toFixed(4)}${mock ? " (giá giả lập Mock Mode)" : ""}. Cần xác nhận.${once}`,
         choice,
         postsMade: 0,
       };

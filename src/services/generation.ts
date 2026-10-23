@@ -44,7 +44,7 @@ import {
 } from "./cost-estimator";
 import { recordCost, spentOnProject } from "./cost-tracker";
 import { providerSpendBreakdown } from "./provider-budget";
-import { assertCanSpend } from "./spend-guard";
+import { assertCanSpend, isSpendRefusal } from "./spend-guard";
 import { consumeCreateToken } from "./create-token";
 import {
   assertBatchAuthorized,
@@ -514,10 +514,14 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
     // A FREE local voice (CIT Voice Studio, QĐ-144) spends nothing: no cap, no
     // batch reservation, no create token - none of them has money to guard.
     const free = kind === "audio" && isFreeVoiceProvider(decision.provider);
+    const onPermit = !free && needsCreatePermit(kind, decision.provider, Boolean(ctx.batchId));
     if (!free) await assertCanSpend({
       provider: decision.provider,
       model: decision.modelId,
       estimatedCost: decision.estimatedCost,
+      // The Storyboard's per-clip confirmation (QĐ-154): only when this call
+      // runs on the single-use permit, never inside a batch.
+      consent: onPermit ? { sceneId: ctx.scene.id, kind } : undefined,
     });
 
     // "Can we afford it" and "did anyone authorise THIS purchase" are different
@@ -567,7 +571,7 @@ async function runProviderJob(opts: RunOptions): Promise<GeneratedAsset> {
       });
     }
 
-    if (!free && needsCreatePermit(kind, decision.provider, Boolean(ctx.batchId))) {
+    if (onPermit) {
       await consumeCreateToken({
         provider: decision.provider,
         model: decision.modelId,
@@ -860,7 +864,10 @@ async function withFallback<T>(
       return { result: await attempt(candidate), used: candidate };
     } catch (err) {
       lastError = err;
-      const retryable = !(err instanceof ProviderError) || err.retryable;
+      // A spend gate refusal (not allowed, over the cap, wallet empty, no
+      // permit) is a person's decision to make - never a reason to buy a
+      // different paid model instead (QĐ-154).
+      const retryable = !isSpendRefusal(err) && (!(err instanceof ProviderError) || err.retryable);
       await logger.warn({
         event: "provider.fallback",
         provider: candidate.provider,

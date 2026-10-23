@@ -28,14 +28,15 @@ const STATUS_TONE: Record<ProviderStatus, "ok" | "warn" | "danger" | "neutral"> 
 };
 
 export default async function ProvidersPage() {
-  const [health, configs, textModels, spend] = await Promise.all([
+  const [health, configs, paidModels, spend] = await Promise.all([
     listProviderHealth(),
     prisma.providerConfig.findMany(),
-    // Only text models get a spend gate in this build - text is the only slot
-    // with a real provider behind it.
+    // Every paid model gets a spend gate (QĐ-154). It was text-only, so a
+    // video model refused with "bấm xác nhận ở trang Nhà cung cấp AI" had no
+    // button here to press.
     prisma.modelRegistry.findMany({
-      where: { type: "text", provider: { not: "mock" } },
-      orderBy: [{ provider: "asc" }, { modelId: "asc" }],
+      where: { provider: { not: "mock" }, enabled: true },
+      orderBy: [{ provider: "asc" }, { type: "asc" }, { modelId: "asc" }],
     }),
     spendStatus(),
   ]);
@@ -170,12 +171,14 @@ export default async function ProvidersPage() {
 
                 <SpendGate
                   provider={provider.name}
-                  models={textModels
+                  models={paidModels
                     .filter((m) => m.provider === provider.name)
                     .map((m) => ({
                       modelId: m.modelId,
                       displayName: m.displayName,
                       enabled: m.enabled,
+                      type: m.type,
+                      confirmed: spend.confirmedProviders.includes(`${m.provider}/${m.modelId}`),
                     }))}
                 />
               </CardContent>

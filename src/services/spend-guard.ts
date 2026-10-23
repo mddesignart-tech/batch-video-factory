@@ -3,6 +3,7 @@ import { logger } from "@/lib/logger";
 import { isMockMode } from "@/lib/env";
 import { round } from "@/lib/utils";
 import { assertProviderBudget } from "./provider-budget";
+import { peekCreateToken } from "./create-token";
 
 /**
  * Hard spend cap for real provider calls.
@@ -311,6 +312,36 @@ export function canEnableModel(model: {
   return { allowed: true };
 }
 
+/**
+ * Is there a live single-use permit for exactly this request (QĐ-154)?
+ * Only looked at, never spent here - generation consumes it just before the
+ * POST, and a mismatch there still refuses.
+ */
+async function oneTimeConsent(
+  req: { provider: string; model: string; estimatedCost: number },
+  work: { sceneId: string; kind: string },
+): Promise<boolean> {
+  const token = await peekCreateToken();
+  return (
+    token !== null &&
+    token.provider === req.provider &&
+    token.model === req.model &&
+    token.sceneId === work.sceneId &&
+    token.kind === work.kind &&
+    req.estimatedCost <= token.maxCost + 1e-9
+  );
+}
+
+/** Gate refusals: a person has to act. Never a reason to try another paid model. */
+export function isSpendRefusal(err: unknown): boolean {
+  return (
+    err instanceof ProviderNotConfirmedError ||
+    err instanceof SpendCapExceededError ||
+    (err instanceof Error &&
+      ["ProviderBudgetExceededError", "CreateTokenError", "BatchAuthorizationError"].includes(err.name))
+  );
+}
+
 /** Providers that run on this machine and therefore bill nothing. */
 export const LOCAL_FREE_PROVIDERS = new Set(["ollama", "lmstudio"]);
 
@@ -335,18 +366,40 @@ export async function assertCanSpend(opts: {
   provider: string;
   model: string;
   estimatedCost: number;
+  /**
+   * QĐ-154: the work this call is for, when it runs on a single-use create
+   * permit. A person who confirmed THIS price for THIS scene and model in the
+   * Storyboard has seen the price and agreed - the very consent the list
+   * stands for - so that permit opens the second lock for that one request.
+   * Nothing is added to the list; the cap and the wallet are still asked.
+   */
+  consent?: { sceneId: string; kind: string };
 }): Promise<SpendStatus> {
   const status = await spendStatus();
   if (isMockMode()) return status;
 
   if (opts.provider !== "mock") {
     if (!status.confirmedProviders.includes(`${opts.provider}/${opts.model}`)) {
-      throw new ProviderNotConfirmedError(
-        `Chưa được phép gọi API thật của ${opts.provider}/${opts.model}. ` +
-          `Hãy mở trang "Nhà cung cấp AI", xem chi phí ước tính và bấm xác nhận trước.`,
-        opts.provider,
-        opts.model,
-      );
+      const oneTime = opts.consent ? await oneTimeConsent(opts, opts.consent) : false;
+      if (!oneTime) {
+        throw new ProviderNotConfirmedError(
+          `Chưa được phép gọi API thật của ${opts.provider}/${opts.model}. ` +
+            `Cho phép một lần: ở Storyboard bấm TẠO VIDEO, xem giá rồi bấm "Xác nhận tạo video". ` +
+            `Cho phép lâu dài (để chạy lô): trang "Nhà cung cấp AI" → ${opts.provider} → ` +
+            `"Cho phép gọi API thật" → chọn ${opts.model} → "Tôi xác nhận cho phép". Không có request nào được gửi.`,
+          opts.provider,
+          opts.model,
+        );
+      }
+      await logger.info({
+        event: "spend.one_time_consent",
+        provider: opts.provider,
+        model: opts.model,
+        sceneId: opts.consent?.sceneId,
+        message:
+          `${opts.provider}/${opts.model} chưa nằm trong danh sách cho phép; dùng xác nhận giá ` +
+          `một lần của người dùng (ước tính $${opts.estimatedCost.toFixed(4)}). Danh sách không đổi.`,
+      });
     }
 
     const projected = round(status.spent + Math.max(0, opts.estimatedCost), 6);

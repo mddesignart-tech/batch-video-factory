@@ -27,7 +27,7 @@ export function SpendGate({
   models,
 }: {
   provider: string;
-  models: { modelId: string; displayName: string; enabled: boolean }[];
+  models: { modelId: string; displayName: string; enabled: boolean; type?: string; confirmed?: boolean }[];
 }) {
   const [preview, setPreview] = useState<SpendPreview | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
@@ -58,6 +58,8 @@ export function SpendGate({
             {loading === model.modelId ? (
               <Loader2 className="h-3 w-3 animate-spin" />
             ) : null}
+            {model.confirmed ? <Check className="h-3 w-3 text-ok-500" /> : null}
+            {model.type && model.type !== "text" ? `${model.type} · ` : ""}
             {model.modelId}
           </Button>
         ))}
@@ -79,28 +81,17 @@ export function SpendGate({
             <div className="grid grid-cols-2 gap-2 text-xs">
               <Row label="Nhà cung cấp" value={preview.provider} />
               <Row label="Model" value={preview.model} />
+              <Row label="Loại" value={preview.type} />
               <Row
-                label="Giá input"
-                value={
-                  preview.isFree
-                    ? "Miễn phí (chạy cục bộ)"
-                    : `$${preview.priceInput} / 1k token`
-                }
+                label="Giá"
+                value={preview.isFree ? "Miễn phí (chạy cục bộ)" : preview.priceLabel}
               />
               <Row
-                label="Giá output"
-                value={
-                  preview.isFree
-                    ? "Miễn phí (chạy cục bộ)"
-                    : `$${preview.priceOutput} / 1k token`
-                }
-              />
-              <Row
-                label="Ước tính / kịch bản"
+                label={preview.perUseLabel}
                 value={
                   preview.isFree
                     ? "$0.00"
-                    : `tối đa ${formatUSD(preview.estimatedPerScript)}`
+                    : `${preview.type === "text" ? "tối đa " : ""}${formatUSD(preview.estimatedPerUse)}`
                 }
                 tone="brand"
               />
@@ -157,7 +148,7 @@ export function SpendGate({
                     preview.isFree
                       ? `Cho phép gọi ${preview.provider}/${preview.model}? Model này chạy cục bộ nên không tốn phí.`
                       : `Cho phép gọi API THẬT của ${preview.provider}/${preview.model}? ` +
-                        `Mỗi kịch bản tốn tối đa ${formatUSD(preview.estimatedPerScript)}. ` +
+                        `${preview.perUseLabel}: ${formatUSD(preview.estimatedPerUse)}. ` +
                         `Hạn mức tổng là ${formatUSD(preview.cap)}.`
                   }
                   action={() =>

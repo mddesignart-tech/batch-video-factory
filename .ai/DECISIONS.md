@@ -4765,3 +4765,45 @@ Người dùng chọn V2 1× (Smooth V2) và duyệt tích hợp có kiểm soá
   - Tắt Mind Voice → Kiểm tra lại hiện Offline + nút Khởi động → bấm → Online.
   - Khởi động lại app → vẫn kết nối, không mở thêm.
   - Khối START_TOOL thử đủ 3 trường hợp: đang chạy, đã tắt (mở + chờ 5 s), cổng bị chiếm.
+
+## QĐ-154 — RUNWAY "CHƯA ĐƯỢC PHÉP GỌI API THẬT" DÙ ĐÃ XÁC NHẬN GIÁ (2026-10-23, $0) — CHỜ NGHIỆM THU
+
+**Bằng chứng (DB + log production):**
+- `spend.confirmedProviders` có `runway/gen4_turbo:720x1280`, `runway/gen4.5:720x1280`, `runway/h3_max:768x1280`, nhưng **không có** `runway/h3_max:480x854` hay `runway/wan3:480x854`.
+  - Cả ba model có trong danh sách đều được thêm bằng script (`confirm-price-basis.ts`, QĐ-082), không qua giao diện.
+- 11:12–11:23 UTC, cảnh 1 của dự án `38a6caf7`, người dùng ghim `h3_max:480x854` và bấm "Xác nhận tạo video ($0.25)":
+  - log có `spend.create_token_granted` rồi ngay sau đó `ProviderNotConfirmedError`, 0 request gửi đi;
+  - đổi sang `gen4.5:720x1280` (đã có trong danh sách) thì tạo được clip thật: ProviderJob completed, CostEntry $0,36, khớp ước tính.
+- Trang "Nhà cung cấp AI" chỉ dựng nút "Cho phép gọi API thật" cho model **text** (`type: "text"`).
+  - Thông báo lỗi bảo người dùng tới đó bấm xác nhận, nhưng với model video ở đó không có nút nào.
+- "Đã kết nối" = provider bật + có key trong env + có Internet; không gọi Runway (`lastCheckedAt` trống).
+  - Kiểm tra key bằng `GET /v1/organization` (miễn phí, chỉ đọc) → HTTP 200: 245 credit, tier có `h3_max` (1 lượt cùng lúc, 50/ngày).
+- Tài liệu Runway hiện hành (docs.dev.runwayml.com/assets/inputs): `h3_max` nhận `resolution` 480p/768p, 5–15 s, không có `ratio`, keyframe ≥ 256 px. Khớp `SIZE_STYLE` / `RESOLUTION_TIERS`.
+- Lỗi kèm theo: `withFallback` coi `ProviderNotConfirmedError` / `SpendCapExceededError` / hết ví / thiếu permit là lỗi "thử lại được".
+  - Với cảnh định tuyến tự động, hệ thống có thể mua model trả phí kế tiếp thay vì dừng lại để người dùng quyết định.
+
+**Sửa (không nới khoá nào):**
+- `assertCanSpend({ …, consent })`:
+  - Model chưa có trong danh sách vẫn qua được ổ khoá 2 nếu có **create permit còn hiệu lực đúng provider/model/cảnh/loại và giá ≤ mức đã xác nhận**. Permit này chính là lần bấm "Xác nhận tạo video" ở Storyboard.
+  - Phạm vi đúng 1 request; danh sách không đổi; hạn mức tổng và ví nhà cung cấp vẫn kiểm.
+  - Chỉ dùng khi lần gọi chạy bằng permit (`needsCreatePermit`), không bao giờ trong lô.
+  - Ghi log `spend.one_time_consent`.
+- Thông báo chặn nói rõ hai cách cho phép: một lần ở Storyboard, lâu dài ở trang Nhà cung cấp AI.
+- `NEEDS_CONFIRMATION` ở Storyboard nói rõ khi xác nhận chỉ áp dụng cho 1 clip.
+- Trang Nhà cung cấp AI: nút cho phép cho mọi model trả phí đang bật (text / image / video / voice), có dấu ✓ cho model đã được cho phép.
+  - Giá hiển thị theo loại: video $/giây và một clip 5 giây theo luật tính giây của model; ảnh / 1 ảnh; giọng / 1.000 ký tự.
+- `isSpendRefusal()`: gặp lệnh chặn của cổng chi tiền thì `withFallback` dừng, không chuyển sang model trả phí khác.
+
+**Kiểm thử ($0, không request thật):**
+- `tests/spend-approval-qd154.test.ts` (7), ở chế độ API thật:
+  - chưa xác nhận → chặn; permit đúng → qua, danh sách không đổi, permit chưa bị tiêu;
+  - permit sai model / cảnh / loại / giá → chặn; hạn mức hoặc ví không đủ → chặn;
+  - model đã cho phép lâu dài → qua;
+  - lệnh chặn không kích hoạt dự phòng;
+  - giá preview h3_max 480p = $0,25.
+- `tests/runway-storyboard-confirm.test.ts` (4): Runway giả sau `fetch`, chế độ API thật.
+  - Chưa xác nhận → 0 POST. Xác nhận → đúng 1 POST, clip về, CostEntry $0,25; bấm lại → vẫn 1.
+  - Key sai (401) → FAILED, 0 dòng chi phí, không tự gửi lại.
+  - Hạn mức không đủ → 0 POST. LOCAL MOTION → 0 POST.
+  - Với code cũ test đầu trả `FAILED` thay vì `DONE`, đúng lỗi người dùng gặp.
+- Nhóm liên quan: 26 file, 423/423.
