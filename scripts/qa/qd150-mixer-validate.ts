@@ -11,17 +11,17 @@ import path from "node:path";
  * manifest: the line regions are read off the dialogue track (silencedetect),
  * which for this one check stands in for the timeline the app records.
  *
- *   npx tsx scripts/qd150-mixer-validate.ts [presetId]
+ *   npx tsx scripts/qa/qd150-mixer-validate.ts [presetId]
  *   BED_ONLY=<wav> ... writes the ducked music alone (voice at 0) for level checks.
  */
 
 const ID = "aivietlab-test-2026-10-22";
 
 async function main(): Promise<void> {
-  const { toAbsolute, projectSubdir } = await import("../src/lib/paths");
-  const { ffmpeg, probeDuration } = await import("../src/media/ffmpeg");
-  const { renderMixerMix, measureMusicLufs } = await import("../src/media/audio-mixer-render");
-  const { systemPreset } = await import("../src/domain/audio-mixer");
+  const { toAbsolute, projectSubdir } = await import("../../src/lib/paths");
+  const { ffmpeg, probeDuration } = await import("../../src/media/ffmpeg");
+  const { renderMixerMix, measureMusicLufs } = await import("../../src/media/audio-mixer-render");
+  const { systemPreset } = await import("../../src/domain/audio-mixer");
 
   const preset = systemPreset(process.argv[2] ?? "REVIEW_AI");
   if (!preset) throw new Error("Không có preset này");

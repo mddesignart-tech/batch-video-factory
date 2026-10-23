@@ -4584,7 +4584,7 @@ Video thử AIVietLab (Thục Đoan, 47,8 s) bị nhạc nền giật ở mỗi 
 - Mỗi cảnh kết thúc bằng khoảng 0,6 s không lời. Release 350 ms ngắn hơn khoảng đó, nên nhạc bật lên khoảng 20 dB rồi bị dập lại khi câu sau bắt đầu.
 - Ngoài ra: fade áp lên cả bản mix (giọng cũng bị fade), và mix cuối là mono 24 kHz.
 
-**Bản sửa video thử (`scripts/aivietlab-audio-fix.ts`)**
+**Bản sửa video thử (`scripts/qa/aivietlab-audio-fix.ts`)**
 - Nhạc một track liền, gain tĩnh, duck nhẹ (ratio 2, attack 150 ms, release 1500 ms), fade chỉ ở đầu và cuối, stereo 48 kHz; hình stream copy.
 - Bản đầu (−8,2 dB) được người dùng xác nhận hết giật và giọng đạt, nhưng xin nhạc to thêm.
 - `final_27c46866_qd149_music_plus2db.mp4` (−6,2 dB) được người dùng duyệt ngày 2026-10-23. Số đo:
@@ -4609,7 +4609,7 @@ Video thử AIVietLab (Thục Đoan, 47,8 s) bị nhạc nền giật ở mỗi 
 - Fade chỉ áp cho nhạc, chỉ ở đầu và cuối video.
 - `alimiter` trần −1 dBFS làm lưới an toàn; mix bình thường không chạm tới.
 - Đầu ra 48 kHz stereo.
-- Đã kiểm trên video AIVietLab: Review AI cho nhạc −25,5 LUFS so với −25,4 của bản đã duyệt (chênh trung vị 0,2 dB), mix −15,9 LUFS, peak −1,9 dBFS. Mọi khoảng nghỉ dưới 1 s giữ ở −6,00 dB (`scripts/qd150-mixer-validate.ts`).
+- Đã kiểm trên video AIVietLab: Review AI cho nhạc −25,5 LUFS so với −25,4 của bản đã duyệt (chênh trung vị 0,2 dB), mix −15,9 LUFS, peak −1,9 dBFS. Mọi khoảng nghỉ dưới 1 s giữ ở −6,00 dB (`scripts/qa/qd150-mixer-validate.ts`).
 
 **Tương thích**
 - `outputControls.audio.mixer` mặc định `null`: project cũ render đúng như trước, graph cũ giữ nguyên byte, render recipe không đổi.

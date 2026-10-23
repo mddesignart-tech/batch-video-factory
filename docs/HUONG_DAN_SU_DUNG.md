@@ -12,6 +12,7 @@ là đúng chữ trên màn hình của bản V1.2.
 
 Bắt đầu nhanh trong 10 bước: [QUICK_START.md](QUICK_START.md).
 Ví dụ một ngày làm việc thật: [../examples/DAILY_WORKFLOW_EXAMPLE.md](../examples/DAILY_WORKFLOW_EXAMPLE.md).
+Âm thanh (nhạc nền, giọng, Remix Audio, preset cho cả lô): [AUDIO_MIXER.md](AUDIO_MIXER.md).
 
 ---
 

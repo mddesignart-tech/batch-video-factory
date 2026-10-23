@@ -10,7 +10,7 @@
 ```
 FULL SUITE  133/134 file PASS + 1 skipped (mind-voice-real) · 1980 PASS / 4 skipped (3283 s)
 RELATED     tests/audio-mixer.test.ts 24/24 (pure + FFmpeg thật + render/remix/lô); 11 file liên quan 221/221
-REAL CHECK  AIVietLab Review AI: nhạc -25,5 vs -25,4 LUFS bản đã duyệt, mix -15,9 LUFS, peak -1,9 dBFS (scripts/qd150-mixer-validate.ts)
+REAL CHECK  AIVietLab Review AI: nhạc -25,5 vs -25,4 LUFS bản đã duyệt, mix -15,9 LUFS, peak -1,9 dBFS (scripts/qa/qd150-mixer-validate.ts)
 UI          DB + DATA_DIR riêng (scratchpad): Mixer, nhập 110% → lưu + giữ sau reload, nghe thử, lưu preset, Remix 2,8 s,
             Âm thanh lô: áp Kể chuyện × 2, Batch Remix bỏ qua video không có nguồn; Settings preset video mới; 0 lỗi console
 lint PASS · typecheck PASS · build PASS · PAID API POST = 0 · không migration

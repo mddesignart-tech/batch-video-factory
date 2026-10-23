@@ -7,19 +7,19 @@ import path from "node:path";
  *   A: rendered with the Audio Mixer (Review AI) + music, sources kept;
  *   B: an "old" video with no mixer and no kept sources.
  *
- *   DATA_DIR=<dir> DATABASE_URL=file:<db> npx tsx scripts/qd150-ui-seed.ts
+ *   DATA_DIR=<dir> DATABASE_URL=file:<db> npx tsx scripts/qa/qd150-ui-seed.ts
  */
 
 async function main(): Promise<void> {
   if (!process.env.DATA_DIR || !process.env.DATABASE_URL || /data[\\/]app\.db/.test(process.env.DATABASE_URL)) {
     throw new Error("Chỉ chạy với DATA_DIR và DATABASE_URL riêng cho kiểm thử.");
   }
-  const { prisma } = await import("../src/lib/prisma");
-  const { projectSubdir, toAbsolute, toRelative, ensureProjectDirs } = await import("../src/lib/paths");
-  const { ffmpeg } = await import("../src/media/ffmpeg");
-  const { renderProject, DEFAULT_TARGET } = await import("../src/media/render");
-  const { applyOutputControls, setBackgroundMusic } = await import("../src/services/output-controls");
-  const { applyAudioPresetToProject } = await import("../src/services/audio-mixer-service");
+  const { prisma } = await import("../../src/lib/prisma");
+  const { projectSubdir, toAbsolute, toRelative, ensureProjectDirs } = await import("../../src/lib/paths");
+  const { ffmpeg } = await import("../../src/media/ffmpeg");
+  const { renderProject, DEFAULT_TARGET } = await import("../../src/media/render");
+  const { applyOutputControls, setBackgroundMusic } = await import("../../src/services/output-controls");
+  const { applyAudioPresetToProject } = await import("../../src/services/audio-mixer-service");
 
   const run = (args: string[]) => ffmpeg(["-y", "-hide_banner", "-loglevel", "error", ...args]);
   const idiom = await prisma.idiom.create({

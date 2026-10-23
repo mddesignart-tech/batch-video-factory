@@ -20,7 +20,7 @@ import path from "node:path";
  * centre of a stereo field at -3 dB per side (same loudness). AAC stereo
  * 48 kHz 192 kbps. Local FFmpeg only, $0.
  *
- *   npx tsx scripts/aivietlab-audio-fix.ts <old final mp4>
+ *   npx tsx scripts/qa/aivietlab-audio-fix.ts <old final mp4>
  *
  * MUSIC_DB moves the bed only (the voice chain is untouched); OUT_SUFFIX names
  * the new file so an approved render is never overwritten; STEMS_DIR also
@@ -33,11 +33,12 @@ const OUT_SUFFIX = process.env.OUT_SUFFIX ?? "_qd149-audio-fix";
 const STEMS_DIR = process.env.STEMS_DIR;
 
 async function main(): Promise<void> {
-  const { toAbsolute, projectSubdir } = await import("../src/lib/paths");
-  const { ffmpeg, probeDuration } = await import("../src/media/ffmpeg");
+  const { toAbsolute, projectSubdir } = await import("../../src/lib/paths");
+  const { ffmpeg, probeDuration } = await import("../../src/media/ffmpeg");
 
-  const oldVideo = path.resolve(process.argv[2] ?? "");
-  if (!fs.existsSync(oldVideo)) throw new Error(`Không tìm thấy video cũ: ${oldVideo}`);
+  if (!process.argv[2] || !/\.mp4$/i.test(process.argv[2])) throw new Error("Cần đường dẫn video cũ (.mp4): npx tsx scripts/qa/aivietlab-audio-fix.ts <old final mp4>");
+  const oldVideo = path.resolve(process.argv[2]);
+  if (!fs.statSync(oldVideo, { throwIfNoEntry: false })?.isFile()) throw new Error(`Không tìm thấy video cũ: ${oldVideo}`);
   const dialogue = path.join(toAbsolute(projectSubdir(ID, "audio")), "project-dialogue.wav");
   const music = toAbsolute(path.join("music", "aivietlab-tech-bg.mp3"));
   for (const f of [dialogue, music]) if (!fs.existsSync(f)) throw new Error(`Thiếu tệp: ${f}`);
