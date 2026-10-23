@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { MIND_PROVIDER } from "@/domain/mind-voice";
-import { ensureMindRegistry } from "@/services/mind-voice-catalog";
+import { ensureMindRegistry, MIND_CATALOG_SETTING } from "@/services/mind-voice-catalog";
 import { diagnoseMindVoice, ensureMindVoice, portListening } from "@/services/mind-voice-launcher";
 import { mindStatusAction } from "@/app/actions/mind-voice";
 
@@ -19,6 +19,8 @@ import { mindStatusAction } from "@/app/actions/mind-voice";
 let dir = "";
 let port = 0;
 const prevDir = process.env.MIND_VOICE_DIR;
+/** Whether the Mind Voice rows were there before: what this file creates, it removes. */
+let hadRegistry = false;
 
 async function freePort(): Promise<number> {
   const srv = net.createServer();
@@ -55,13 +57,22 @@ setTimeout(() => process.exit(0), 120000);
   fs.writeFileSync(path.join(dir, "start_voice_engine.bat"), `@echo off\r\ncd /d "%~dp0"\r\nnode fake.js\r\n`);
   process.env.MIND_VOICE_DIR = dir;
   port = await freePort();
+  hadRegistry = (await prisma.providerConfig.count({ where: { name: MIND_PROVIDER } })) > 0;
   await ensureMindRegistry();
   await setBaseUrl(`http://127.0.0.1:${port}`);
 });
 
 afterAll(async () => {
   await quit();
-  await setBaseUrl("http://127.0.0.1:8011");
+  if (hadRegistry) {
+    await setBaseUrl("http://127.0.0.1:8011");
+  } else {
+    // Left behind, an enabled "mindvoice" row changed what later files see as
+    // available providers (production-estimate.test.ts failed after this file).
+    await prisma.modelRegistry.deleteMany({ where: { provider: MIND_PROVIDER } });
+    await prisma.providerConfig.deleteMany({ where: { name: MIND_PROVIDER } });
+    await prisma.setting.deleteMany({ where: { key: MIND_CATALOG_SETTING } });
+  }
   if (prevDir === undefined) delete process.env.MIND_VOICE_DIR;
   else process.env.MIND_VOICE_DIR = prevDir;
   fs.rmSync(dir, { recursive: true, force: true });
