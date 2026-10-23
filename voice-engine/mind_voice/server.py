@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 import sys
 import threading
 import traceback
@@ -200,9 +201,26 @@ class Handler(BaseHTTPRequestHandler):
         self._handle("POST")
 
 
+class ExclusiveServer(ThreadingHTTPServer):
+    """One Mind Voice per port (QĐ-153). On Windows SO_REUSEADDR lets a second
+    server bind the same port silently and split the requests; take the port
+    exclusively so a second start fails instead."""
+
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self) -> None:
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
-    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    try:
+        httpd = ExclusiveServer((HOST, PORT), Handler)
+    except OSError as err:
+        LOG.error("Port %d is already in use (another Mind Voice or another program) - not starting a second one: %s", PORT, err)
+        sys.exit(2)
     LOG.info("Mind Voice %s listening on http://%s:%d (localhost only)", VERSION, HOST, PORT)
     try:
         httpd.serve_forever()

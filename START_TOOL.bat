@@ -97,20 +97,41 @@ if errorlevel 1 (
 
 echo.
 echo [Mind Voice] Kiem tra giong noi tai may ^(QD-145, tuy chon^)...
-if exist "voice-engine\.venv\Scripts\python.exe" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 8011); $c.Close(); exit 1 } catch { exit 0 }"
-    if errorlevel 1 (
-        echo       Mind Voice dang chay ^(127.0.0.1:8011^).
-    ) else (
-        start "Mind Voice" /min cmd /c ""%~dp0voice-engine\start_voice_engine.bat""
-        echo       Da khoi dong Mind Voice ^(cua so thu nho "Mind Voice"^).
-        echo       Model chua cai? Mo Mind Voice Studio -^> Quan ly model. Khong tu tai.
-    )
+REM QD-153: "dang chay" = /health tra loi la Mind Voice (khong chi la cong mo).
+REM Cong mo nhung khong phai Mind Voice = chuong trinh khac: bao loi, khong mo them.
+REM Khoi dong roi CHO toi da 60 giay den khi /health tra loi.
+if not exist "voice-engine\.venv\Scripts\python.exe" goto :mv_not_installed
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8011/health' -UseBasicParsing -TimeoutSec 3; if ($r.Content -match 'mind-voice') { exit 0 } } catch {};" ^
+  "try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 8011); $c.Close(); exit 3 } catch { exit 2 }"
+if errorlevel 3 goto :mv_busy
+if errorlevel 2 goto :mv_start
+echo       Mind Voice dang chay ^(127.0.0.1:8011^).
+goto :mv_done
+
+:mv_start
+start "Mind Voice" /min cmd /c ""%~dp0voice-engine\start_voice_engine.bat""
+echo       Dang khoi dong Mind Voice ^(cua so thu nho "Mind Voice"^), cho toi da 60 giay...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "for($i=0;$i -lt 60;$i++){ try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8011/health' -UseBasicParsing -TimeoutSec 2; if ($r.Content -match 'mind-voice') { exit 0 } } catch {}; Start-Sleep -Seconds 1 }; exit 1"
+if errorlevel 1 (
+    echo [CANH BAO] Mind Voice chua phan hoi sau 60 giay. Xem logs\mind-voice.log.
+    echo       Tool van chay binh thuong. Trong app: Mind Voice -^> "Khoi dong Mind Voice".
 ) else (
-    echo       Chua cai Mind Voice - bo qua. Muon dung giong tai may $0:
-    echo       chay voice-engine\setup_voice_engine.bat ^(mot lan^).
+    echo       Mind Voice san sang. Model chua cai? Mind Voice Studio -^> Quan ly model. Khong tu tai.
 )
+goto :mv_done
+
+:mv_busy
+echo [CANH BAO] Cong 8011 dang bi mot chuong trinh khac chiem ^(khong phai Mind Voice^).
+echo       Khong mo them Mind Voice. Dong chuong trinh do, roi trong app bam "Kiem tra lai".
+goto :mv_done
+
+:mv_not_installed
+echo       Chua cai Mind Voice - bo qua. Muon dung giong tai may $0:
+echo       chay voice-engine\setup_voice_engine.bat ^(mot lan^).
+
+:mv_done
 
 echo.
 echo [3/4] Dang khoi dong Batch Video Factory...

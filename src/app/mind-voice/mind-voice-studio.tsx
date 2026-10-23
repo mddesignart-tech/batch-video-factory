@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Bookmark, BookmarkCheck, Download, HardDrive, Mic, Play, RefreshCw, ShieldCheck } from "lucide-react";
+import { Bookmark, BookmarkCheck, Download, HardDrive, Mic, Play, Power, RefreshCw, ShieldCheck } from "lucide-react";
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, ProgressBar, Select, Textarea } from "@/components/ui";
-import { mindInstallAction, mindMp3Action, mindSaveTakeAction, mindSpeakAction, mindStatusAction, mindVerifyAction, type MindStatus } from "@/app/actions/mind-voice";
+import { mindInstallAction, mindMp3Action, mindSaveTakeAction, mindSpeakAction, mindStartAction, mindStatusAction, mindVerifyAction, type MindStatus } from "@/app/actions/mind-voice";
 import { MIND_AUTO_VOICE, MIND_CUES, MIND_ENGINES, MIND_MAX_SPEED, MIND_MIN_SPEED, mindVoiceLabel, type MindEngineId, type MindModelStatus } from "@/domain/mind-voice";
 import { isPriorityVoice, MIND_VOICE_SUGGESTIONS, suggestMindVoices, THUC_DOAN_PRESET, VOICE_BASELINE, type MindUseCase } from "@/domain/voice-quality";
 import { VOICE_EMOTIONS, VOICE_STYLES, type VoiceEmotionId, type VoiceStyleId } from "@/domain/voice-director";
@@ -27,6 +27,15 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
   const refresh = (remoteSizes = false) =>
     startCheck(async () => {
       setStatus(await mindStatusAction({ remoteSizes }));
+    });
+
+  // QĐ-153: the one launcher, waits until Mind Voice answers.
+  const startMind = () =>
+    startCheck(async () => {
+      setMessage({ ok: true, text: "Đang khởi động Mind Voice… (tối đa 60 giây)" });
+      const r = await mindStartAction();
+      setMessage({ ok: r.ok, text: r.message });
+      setStatus(await mindStatusAction());
     });
 
   // While a model is downloading, ask every 2 s.
@@ -140,11 +149,22 @@ export function MindVoiceStudio({ initialStatus, initialTakes }: { initialStatus
             <Button size="sm" variant="ghost" disabled={checking} onClick={() => refresh()}>
               <RefreshCw className="h-3 w-3" /> Kiểm tra lại
             </Button>
+            {!status.online && status.canStart ? (
+              <Button size="sm" variant="secondary" disabled={checking} onClick={startMind}>
+                <Power className="h-3 w-3" /> Khởi động Mind Voice
+              </Button>
+            ) : null}
           </CardContent>
           {!status.online ? (
             <CardContent className="pt-0">
               <Alert tone="warn" title="Chưa kết nối được Mind Voice">
-                {status.message} Lần đầu dùng: chạy <code>voice-engine\setup_voice_engine.bat</code> (cài môi trường Python riêng, ~0,8 GB, không đụng Python của Windows).
+                {status.message}
+                {status.state === "not_installed" ? (
+                  <>
+                    {" "}
+                    Lần đầu dùng: chạy <code>voice-engine\setup_voice_engine.bat</code> (cài môi trường Python riêng, ~0,8 GB, không đụng Python của Windows).
+                  </>
+                ) : null}
               </Alert>
             </CardContent>
           ) : null}

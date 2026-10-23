@@ -5,6 +5,7 @@ import { errorMessage } from "@/lib/utils";
 import { isMindEngine, parseMindModels, type MindHealth, type MindModelStatus, type MindVoice } from "@/domain/mind-voice";
 import { mindInstall, mindModels, mindVerify } from "@/providers/mindvoice/mind-voice-client";
 import { mindBaseUrl, refreshMindCatalog } from "@/services/mind-voice-catalog";
+import { diagnoseMindVoice, ensureMindVoice, type MindLaunchState } from "@/services/mind-voice-launcher";
 import { setTakeSaved, speakInStudio, studioTakes, takeAsMp3, type StudioRequest, type StudioTake } from "@/services/mind-voice-studio";
 
 /**
@@ -14,6 +15,11 @@ import { setTakeSaved, speakInStudio, studioTakes, takeAsMp3, type StudioRequest
 
 export interface MindStatus {
   online: boolean;
+  /** Online AND at least one engine model installed with a voice: it can actually speak (QĐ-153). */
+  ready: boolean;
+  /** Why it is offline - and whether the app can start it here. */
+  state: MindLaunchState;
+  canStart: boolean;
   baseUrl: string;
   message: string;
   health: MindHealth | null;
@@ -31,14 +37,35 @@ export async function mindStatusAction(opts: { remoteSizes?: boolean } = {}): Pr
       models = [];
     }
   }
+  const installedEngines = new Set((catalog.health?.engines ?? []).filter((e) => e.installed).map((e) => e.id));
+  const speakable = catalog.voices.filter((v) => v.installed && installedEngines.has(v.engine)).length;
+  const ready = catalog.online && speakable > 0;
+  const why = catalog.online ? null : await diagnoseMindVoice(catalog.baseUrl);
   return {
     online: catalog.online,
+    ready,
+    state: why?.state ?? "online",
+    canStart: why ? why.state === "failed" || why.state === "starting" : false,
     baseUrl: catalog.baseUrl,
-    message: catalog.online ? `Đang chạy · ${catalog.voices.length} giọng` : (catalog.error ?? "Mind Voice chưa chạy."),
+    message: catalog.online
+      ? ready
+        ? `Đang chạy · ${speakable} giọng sẵn sàng`
+        : "Đang chạy nhưng chưa có model giọng nào được cài - mở Mind Voice Studio → Quản lý model."
+      : (why?.message ?? catalog.error ?? "Mind Voice chưa chạy."),
     health: catalog.health,
     voices: catalog.voices,
     models,
   };
+}
+
+/** "Khởi động Mind Voice": the one launcher, waits until /health answers (QĐ-153). Local only, $0. */
+export async function mindStartAction(): Promise<{ ok: boolean; message: string }> {
+  try {
+    const r = await ensureMindVoice();
+    return { ok: r.ok, message: r.message };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
 }
 
 /** Starts a model download the person asked for (size and licence shown first). */

@@ -4719,3 +4719,49 @@ Người dùng chọn V2 1× (Smooth V2) và duyệt tích hợp có kiểm soá
   - Đề xuất giai đoạn sau: kiểm tra ảnh bằng mô hình thị giác (ví dụ CLIP chạy local) — cần duyệt tải model.
 - **Kiểm thử:** `tests/trash.test.ts` 13/13 (gồm render thật sau khi xoá cảnh). UI chạy trên DB và thư mục dữ liệu riêng (`scripts/qa/qd152-ui-seed.ts`).
 - **Migration production:** sao lưu `data/backups/app-before-qd152-trash-migration-2026-10-23.db`; số liệu trước/sau không đổi (20 project, 113 cảnh, 251 asset, sổ $11,328378).
+
+## QĐ-153 — MIND VOICE LOCAL "OFFLINE": TỰ KHỞI ĐỘNG AN TOÀN (2026-10-23, $0) — CHỜ NGHIỆM THU
+
+**Root cause:**
+- Cổng 8011 không có tiến trình nào. Phiên Mind Voice trước dừng lúc 2026-10-22 18:43, log không có lỗi (cửa sổ "Mind Voice" bị đóng hoặc máy tắt).
+- App được mở không qua START_TOOL.bat (`next start` / `npm start`), nên khối tự mở Mind Voice trong START_TOOL không chạy. Trong app không có cách khởi động, UI chỉ hiện hướng dẫn.
+- Môi trường Mind Voice vẫn tốt: chạy lại launcher có sẵn thì `/health` OK sau ~1 s, VieNeu fp32 và Supertonic đã cài. Không cài lại, không tải model.
+- Lỗi phụ tìm thấy khi kiểm tra: trên Windows, `HTTPServer.allow_reuse_address` (SO_REUSEADDR) cho phép **hai** Mind Voice cùng bind cổng 8011 mà không báo lỗi (đã thử thực tế), nên request có thể bị chia.
+
+**Sửa (một launcher duy nhất: `voice-engine\start_voice_engine.bat`):**
+- `voice-engine/mind_voice/server.py`: `ExclusiveServer` dùng SO_EXCLUSIVEADDRUSE trên Windows. Lần mở thứ hai thoát mã 2 và ghi "Port 8011 is already in use".
+- `src/services/mind-voice-launcher.ts`, `ensureMindVoice()`:
+  - `/health` OK → không làm gì.
+  - Cổng mở nhưng không phải Mind Voice → báo `port_busy`, không mở thêm.
+  - Chưa cài (.venv) → `not_installed`; baseUrl không phải máy này → `remote`.
+  - Nếu không thì chạy launcher có sẵn trong cửa sổ thu nhỏ "Mind Voice" (detached), chờ `/health` tối đa 60 s.
+  - Chống trùng: promise dùng chung trong tiến trình + lock `logs/mind-voice.starting` giữa các tiến trình.
+- Gọi `ensureMindVoice()` từ:
+  - lúc server khởi động (`instrumentation-node.ts`, không chặn trang; tắt bằng `MIND_VOICE_AUTOSTART=0`);
+  - nút **Khởi động Mind Voice** (`mindStartAction`).
+- `START_TOOL.bat`: sửa khối có sẵn, không thêm cơ chế mới.
+  - "Đang chạy" giờ là `/health` trả lời đúng Mind Voice, không chỉ là cổng mở.
+  - Cổng bị chương trình khác chiếm → cảnh báo, không mở.
+  - Sau khi mở thì chờ `/health` tối đa 60 s, báo rõ đạt hoặc không.
+  - START_TOOL chạy xong khối này trước `npm start`, nên lúc app khởi động thấy Mind Voice đã chạy và bỏ qua.
+- `mindStatusAction`:
+  - `ready` = Online VÀ có ít nhất một giọng thuộc engine đã cài model. Không coi là Online chỉ vì tiến trình còn sống.
+  - Thêm `state`, `canStart` và thông báo nguyên nhân.
+- UI:
+  - Bảng Giọng thuyết minh → Mind Voice: Online / Online - chưa có model / Offline + nguyên nhân; nút **Kiểm tra lại**; nút **Khởi động Mind Voice** khi khởi động được; nút **Nghe thử** (một câu, giọng đang chọn, tại máy, $0) với trình phát.
+  - Mind Voice Studio: thêm nút **Khởi động Mind Voice**.
+- Không đổi nhà cung cấp người dùng chọn. Không có dự phòng trả phí. Không đổi file giọng đã duyệt.
+
+**Kiểm thử:**
+- `tests/mind-voice-launcher.test.ts`:
+  - Launcher giả trong thư mục có dấu cách. Hai lần gọi cùng lúc chỉ mở **1** lần; gọi khi đang chạy thì không mở.
+  - Tắt → Offline (giọng cũ vẫn giữ nhưng không Online).
+  - Cổng bị chiếm → `port_busy`, không mở; chưa cài và máy khác → báo đúng.
+- Nhóm Mind Voice / TTS: 83 PASS, 4 skipped (test thật chỉ chạy khi `MIND_VOICE_REAL=1`).
+- Thực tế:
+  - Mở app khi Mind Voice tắt → app tự bật (~3 s), một dịch vụ.
+  - Chạy thêm bản thứ hai → thoát mã 2.
+  - Thục Đoan đọc câu "Xin chào, đây là bản kiểm tra giọng đọc của AIVietLab." → 3,68 s, 48 kHz, mean −19,8 dB, phát hết trong trình duyệt. 1 POST /tts; bấm lại thì dùng lại bản cũ.
+  - Tắt Mind Voice → Kiểm tra lại hiện Offline + nút Khởi động → bấm → Online.
+  - Khởi động lại app → vẫn kết nối, không mở thêm.
+  - Khối START_TOOL thử đủ 3 trường hợp: đang chạy, đã tắt (mở + chờ 5 s), cổng bị chiếm.

@@ -9,6 +9,7 @@
 import { ensureDataDirs } from "@/lib/paths";
 import { startWorker } from "@/jobs/worker";
 import { reconcileInterruptedRuns } from "@/services/restart-recovery";
+import { ensureMindVoice, mindInstalled } from "@/services/mind-voice-launcher";
 
 export async function registerNode(): Promise<void> {
   ensureDataDirs();
@@ -21,4 +22,11 @@ export async function registerNode(): Promise<void> {
   await startWorker().catch((err: unknown) => {
     console.error("Không khởi động được worker:", err);
   });
+  // Mind Voice (QĐ-153): start the local voice service when it is installed and
+  // not running - however the app was opened. Never awaited: pages answer at once.
+  if (process.env.MIND_VOICE_AUTOSTART !== "0" && mindInstalled()) {
+    void ensureMindVoice()
+      .then((r) => (r.ok ? undefined : console.warn(`[Mind Voice] ${r.message}`)))
+      .catch((err: unknown) => console.error("[Mind Voice] Không khởi động được:", err));
+  }
 }

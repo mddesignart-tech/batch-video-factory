@@ -31,8 +31,8 @@ export const MIND_MIN_SPEED = 0.75;
 export const MIND_MAX_SPEED = 1.5;
 
 export const MIND_OFFLINE_GUIDE =
-  "Mind Voice chưa chạy. Chạy START_TOOL.bat (tự mở Mind Voice khi đã cài), hoặc voice-engine\\start_voice_engine.bat, " +
-  "rồi bấm Kiểm tra lại. Không có giọng nào được tạo bằng nhà cung cấp trả phí thay thế.";
+  "Mind Voice chưa chạy. Bấm Khởi động Mind Voice (app tự mở khi khởi động nếu đã cài), rồi Kiểm tra lại. " +
+  "Không có giọng nào được tạo bằng nhà cung cấp trả phí thay thế.";
 
 export type MindEngineId = "vieneu" | "supertonic";
 
