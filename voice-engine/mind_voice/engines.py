@@ -266,7 +266,7 @@ class SupertonicEngine:
             )
         return out
 
-    def synthesize(self, text: str, voice: str, language: str, speed: float, keep_punct: bool = False) -> tuple[bytes, float, int]:
+    def synthesize(self, text: str, voice: str, language: str, speed: float, keep_punct: bool = False) -> tuple[bytes, float, int, dict]:
         # keep_punct: Supertonic reads the text as given - its ? and ! are never rewritten.
         with self._lock:
             tts = self._load()

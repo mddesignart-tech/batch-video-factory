@@ -4808,7 +4808,7 @@ Người dùng chọn V2 1× (Smooth V2) và duyệt tích hợp có kiểm soá
   - Với code cũ test đầu trả `FAILED` thay vì `DONE`, đúng lỗi người dùng gặp.
 - Nhóm liên quan: 26 file, 423/423.
 
-## QĐ-156 — TTS NGẮT GIỮA CỤM TỪ ("bát nhỏ … ấm áp"), XUỐNG DÒNG, CÂU DÀI (2026-10-23, $0) — CHỜ NGHIỆM THU
+## QĐ-156 — TTS NGẮT GIỮA CỤM TỪ ("bát nhỏ … ấm áp"), XUỐNG DÒNG, CÂU DÀI (2026-10-23, $0) — NGHIỆM THU ĐẠT (2026-10-23)
 
 **Truy vết trên dữ liệu thật** (dự án `38a6caf7`, cảnh 5, Thục Đoan):
 
@@ -4848,3 +4848,19 @@ Người dùng chọn V2 1× (Smooth V2) và duyệt tích hợp có kiểm soá
 - Qua pipeline app với Mind Voice thật: D1/D2/D2b dài nhất 125–290 ms; D5 (dòng trống) giữ nghỉ đoạn ~650 ms. Guard tạo lại 3/9 request.
 - Lời dài hơn cảnh (3 s vs 4,5 s): `scene-timing` nâng cảnh cho đủ lời ở AUTO / MINIMUM / LOCKED, không cắt; tốc độ tối đa 1,15x; NARRATION_TOO_LONG cảnh báo (đã có, thêm test).
 - Trang nghe: `data/qa/qd156/ab/index.html`.
+
+**Nghiệm thu (2026-10-23):** người dùng nghe trang A/B và xác nhận "BẢN ĐÃ SỬA ĐẠT YÊU CẦU". Pause guard, quy tắc xuống dòng và cách chia chunk giữ nguyên như đã kiểm thử; không đổi giọng, tốc độ hay thông số đã duyệt.
+
+- **Pipeline thật dùng cơ chế mới:**
+  - cảnh / lô / Storyboard: `voice-direction.ts` → `prepareSpeechText` → `MindVoiceProvider` → `POST /tts` → `VieNeuEngine.synthesize` → `guarded_chunks`;
+  - Mind Voice Studio: cùng `prepareSpeechText` và cùng `/tts`.
+- **Kiểm thử thật một cảnh** (`tests/scene-voice-real-qd156.test.ts`, chỉ chạy khi `MIND_VOICE_REAL=1`, DB test riêng, Mind Voice thật), PASS:
+  - xuống dòng giữa câu → gửi engine đúng một câu liền, kịch bản giữ `\n`;
+  - bấm lại → dùng lại, 0 request; sửa lời → đúng 1 request;
+  - chỉ `mindvoice`, 0 dòng sổ chi; log Mind Voice +2 `POST /tts`.
+- **Giọng cũ không tự tạo lại.** "Tạo giọng" một cảnh dùng lại file khi khoá giọng (văn bản, giọng, cài đặt, phiên bản adapter) không đổi.
+  - Cảnh 5 dự án `38a6caf7` vẫn trỏ file cũ `5289b26b…` (ngừng 879 ms). Người dùng đã tạo thử 2 bản mới lúc 14:59 UTC rồi trả cài đặt về như cũ, nên khoá trỏ lại file cũ.
+  - Muốn bản mới cho đúng cài đặt cũ cần một lối "tạo bản mới" — chưa làm, là tính năng mới.
+- **Lỗi có sẵn, không do QĐ-156:** `voice-engine/tests/test_server.py::test_post_must_be_json` chập chờn trên Windows (`ConnectionResetError` 10054: server đóng kết nối trước khi client đọc 415).
+  - Đo: 9/15 lần lỗi ở `86e2c95` (trước QĐ-156), 7/15 ở HEAD. Chưa sửa.
+- Chú thích kiểu `SupertonicEngine.synthesize` sửa cho đúng 4 giá trị trả về (không đổi hành vi).
