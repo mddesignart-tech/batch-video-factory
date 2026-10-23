@@ -80,7 +80,7 @@ beforeAll(async () => {
     update: { enabled: true, status: "connected" },
   });
   const seed = SEED_MODELS.find((m) => m.provider === "runway" && m.modelId === MODEL)!;
-  await prisma.modelRegistry.upsert({ where: { provider_modelId: { provider: "runway", modelId: MODEL } }, create: { ...(seed as never), enabled: true }, update: { enabled: true } });
+  await prisma.modelRegistry.upsert({ where: { provider_modelId: { provider: "runway", modelId: MODEL } }, create: { ...seed, enabled: true }, update: { enabled: true } });
   process.env.AI_MOCK_MODE = "false";
   process.env.RUNWAY_API_KEY = "test-key-not-real";
   delete process.env.RUNWAYML_API_SECRET;

@@ -45,7 +45,7 @@ beforeAll(async () => {
   const seed = SEED_MODELS.find((m) => m.provider === "runway" && m.modelId === MODEL)!;
   await prisma.modelRegistry.upsert({
     where: { provider_modelId: { provider: "runway", modelId: MODEL } },
-    create: { ...(seed as never), enabled: true },
+    create: { ...seed, enabled: true },
     update: {},
   });
   process.env.AI_MOCK_MODE = "false";
