@@ -4807,3 +4807,44 @@ Người dùng chọn V2 1× (Smooth V2) và duyệt tích hợp có kiểm soá
   - Hạn mức không đủ → 0 POST. LOCAL MOTION → 0 POST.
   - Với code cũ test đầu trả `FAILED` thay vì `DONE`, đúng lỗi người dùng gặp.
 - Nhóm liên quan: 26 file, 423/423.
+
+## QĐ-156 — TTS NGẮT GIỮA CỤM TỪ ("bát nhỏ … ấm áp"), XUỐNG DÒNG, CÂU DÀI (2026-10-23, $0) — CHỜ NGHIỆM THU
+
+**Truy vết trên dữ liệu thật** (dự án `38a6caf7`, cảnh 5, Thục Đoan):
+
+| Bước | Đo được |
+|---|---|
+| request 13:50 UTC | văn bản đúng, không xuống dòng |
+| file giọng | lặng 874–885 ms ở 2,08–2,95 s, ngay sau "nhỏ" |
+| track lời thoại khi render | 879 ms |
+| video cuối có nhạc | 887 ms |
+
+- Render, Audio Mixer và FFmpeg truyền nguyên khoảng ngừng, không thêm, không cắt. Chuẩn hoá chỉ cắt lặng ở đầu/cuối.
+- Request 13:57 có `\n` giữa câu ("…một\nchiếc…") → lặng 654 ms đúng chỗ xuống dòng. Không có code nào chèn `\n`; DB hiện không còn dòng nào chứa `\n`.
+
+**Nguyên nhân:**
+1. **Engine**: VieNeu v3 Turbo lấy mẫu ngữ điệu (`temperature` 0,8).
+   - Cùng câu, 1 chunk, gọi thẳng SDK: 4/20 lần ngừng 500–1000 ms giữa "bát nhỏ | ấm áp"; các lần khác 120–470 ms ở chỗ tự nhiên (sau chủ ngữ).
+   - Hạ temperature không khử được (0,6: 2/20; 0,4: 2/20 kèm một bản 5,4 s).
+   - App nhận bản đầu tiên, không kiểm tra.
+2. **Pipeline / xuống dòng**: `prepareSpeechText` giữ `\n`. SDK (`normalize_to_chunks_v3_with_gaps` + `punc_norm`) biến mỗi `\n` thành dấu chấm ("bát nhỏ. ấm áp."), nên lần nào cũng ngừng ~640 ms; khi tách thành 2 chunk thì nghỉ "para" ≥ 0,70 s.
+3. **Chia chunk của SDK**: theo đoạn rồi gom câu, tối đa 256 ký tự, chia trong câu chỉ khi câu > 256 ký tự (T3 262 ký tự → 2 chunk). Nối bằng `join_audio_chunks` với khoảng nghỉ tối thiểu theo loại ranh giới (đoạn 0,70 / câu 0,50 / trong câu 0,30 s), không cắt mép, không crossfade.
+   - Không phải nguyên nhân của câu "bát nhỏ" (1 chunk). App không tự chia hay nối audio TTS.
+
+**Sửa:**
+- `src/domain/speech-text.ts`: xuống dòng đơn thành khoảng trắng nếu dòng trước kết thúc bằng dấu câu hoặc dòng sau bắt đầu bằng chữ thường / chữ số. Dòng trống = ngắt đoạn (giữ). "Xin chào\nTạm biệt" (không dấu, dòng sau viết hoa) vẫn ngắt. Không thêm hay xoá dấu nào.
+  - Chỉ đổi văn bản gửi TTS (phụ đề, kịch bản giữ nguyên). Key giọng chỉ đổi với câu có `\n`; DB thật có 0 câu như vậy, nên không tạo lại giọng hàng loạt. Không bump `SPEECH_TEXT_VERSION` / `MIND_ADAPTER_VERSION`.
+- `voice-engine/mind_voice/pause_guard.py` + `engines.guarded_chunks`:
+  - Dùng đúng cách chia, khoảng nghỉ ranh giới và hàm nối của SDK; mỗi chunk được đo khoảng ngừng trong lời.
+  - Mỗi dấu câu bên trong chunk cho phép một khoảng ngừng tới 900 ms; còn lại tối đa 500 ms.
+  - Vượt mức thì tạo lại chunk đó (tối đa 3 lần) và giữ bản ít vượt nhất. Âm thanh giữ nguyên như model tạo: không cắt, không kéo giãn, không crossfade.
+  - Header `X-Chunks` / `X-Takes` / `X-Pause-Excess-Ms`; log `pause guard: …`.
+
+**Kết quả** ($0, tại máy; A = như trước, B = sau sửa):
+- D1 × 20, Thục Đoan: A 4/20 có ngừng ≥ 500 ms (dài nhất 1000 ms), B 0/20 (dài nhất 490 ms).
+- Bộ A/B 30 cặp, 2 giọng (D1–D6, T1–T5): A 2 bản có ngừng bất thường (D4 980 ms; T4 920 và 1360 ms); B 0. Có chunk phải tạo lại ở D1, D4, T4, T5.
+  - Không mất / lặp chữ theo số chunk và văn bản engine đọc.
+  - T5 288 từ: 7 chunk, 78,5 s, tạo mất 66 s (A: 55 s).
+- Qua pipeline app với Mind Voice thật: D1/D2/D2b dài nhất 125–290 ms; D5 (dòng trống) giữ nghỉ đoạn ~650 ms. Guard tạo lại 3/9 request.
+- Lời dài hơn cảnh (3 s vs 4,5 s): `scene-timing` nâng cảnh cho đủ lời ở AUTO / MINIMUM / LOCKED, không cắt; tốc độ tối đa 1,15x; NARRATION_TOO_LONG cảnh báo (đã có, thêm test).
+- Trang nghe: `data/qa/qd156/ab/index.html`.

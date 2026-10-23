@@ -18,6 +18,7 @@ import numpy as np
 import soundfile as sf
 
 from .catalog import ENGINES, MOSS_CODEC_REPO
+from . import pause_guard
 from .models import installed_variant, model_dir
 
 
@@ -154,16 +155,61 @@ class VieNeuEngine:
     def voices(self) -> list[dict]:
         return vieneu_voices()
 
-    def synthesize(self, text: str, voice: str, language: str, speed: float, keep_punct: bool = False) -> tuple[bytes, float, int]:
+    def synthesize(self, text: str, voice: str, language: str, speed: float, keep_punct: bool = False) -> tuple[bytes, float, int, dict]:
         with self._lock:
             tts = self._load()
             if tts.resolve_voice_name(voice) is None:
                 raise VoiceNotFound(f"VieNeu không có giọng \"{voice}\".")
             # No native speed on v3 Turbo: the caller time-stretches when needed.
             with _keep_short_line_endings() if keep_punct else contextlib.nullcontext():
-                wav = tts.infer(text, voice=voice)
+                wav, report = self._guarded(tts, text, voice)
             sr = tts.sample_rate
-        return wav_bytes(wav, sr), len(wav) / sr, sr
+        return wav_bytes(wav, sr), len(wav) / sr, sr, report
+
+    @staticmethod
+    def _guarded(tts, text: str, voice: str) -> tuple[np.ndarray, dict]:
+        """QĐ-156: the SDK's own chunks, each checked by the pause guard."""
+        from vieneu_utils.core_utils import gaps_to_silence, join_audio_chunks
+
+        kept, gaps, per_chunk = guarded_chunks(tts, text, voice)
+        if not kept:
+            return np.array([], dtype=np.float32), {"chunks": [], "gaps": [], "takes": 0}
+        wav = join_audio_chunks(kept, tts.sample_rate, silence_ps=gaps_to_silence(gaps))
+        return wav, {"chunks": per_chunk, "gaps": gaps, "takes": sum(c["takes"] for c in per_chunk)}
+
+
+def guarded_chunks(tts, text: str, voice: str, max_takes: int = pause_guard.MAX_TAKES) -> tuple[list[np.ndarray], list[str], list[dict]]:
+    """Each chunk's kept take, the boundary kinds, and what the guard saw.
+
+    Same split, boundary pauses and join as ``tts.infer(text)`` - which is
+    normalize_to_chunks_v3_with_gaps -> one take per chunk -> join_audio_chunks
+    - except that a chunk whose take pauses where its text allows no pause is
+    generated again, up to ``max_takes``, and the best take is kept. Nothing is
+    cut, stretched or crossfaded. ``max_takes=1`` is the SDK's behaviour.
+    """
+    from vieneu_utils.phonemize_text import normalize_to_chunks_v3_with_gaps
+
+    chunks, gaps = normalize_to_chunks_v3_with_gaps(text, max_chars=256)
+    sr = tts.sample_rate
+    kept: list[np.ndarray] = []
+    per_chunk: list[dict] = []
+    for chunk in chunks:
+        takes = []
+        for _ in range(max(1, max_takes)):
+            take = np.asarray(tts.infer(chunk, voice=voice), dtype=np.float32).reshape(-1)
+            takes.append((take, pause_guard.assess(take, sr, chunk)))
+            if takes[-1][1]["excessMs"] == 0:
+                break
+        best = pause_guard.best_take(takes)
+        kept.append(takes[best][0])
+        per_chunk.append({
+            "text": chunk,
+            "takes": len(takes),
+            "kept": best + 1,
+            **takes[best][1],
+            "rejected": [t[1]["excessMs"] for i, t in enumerate(takes) if i != best],
+        })
+    return kept, gaps, per_chunk
 
 
 # -------------------------------------------------------------- Supertonic ---
@@ -230,7 +276,7 @@ class SupertonicEngine:
             wav, _ = tts.synthesize(text, voice_style=style, speed=float(speed), lang=language or "en")
             sr = int(tts.sample_rate)
         samples = np.asarray(wav).reshape(-1)
-        return wav_bytes(samples, sr), len(samples) / sr, sr
+        return wav_bytes(samples, sr), len(samples) / sr, sr, {}
 
 
 ENGINE_IMPLS = {"vieneu": VieNeuEngine(), "supertonic": SupertonicEngine()}

@@ -80,6 +80,22 @@ const EMOJI = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}]/gu
 export function prepareSpeechText(text: string, language: SpeechLanguage): string {
   const units = UNITS[language];
   let s = text.replace(/\r\n?/g, "\n");
+  // Line breaks (QĐ-156). Sent as-is, VieNeu made every "\n" a full stop:
+  // "chiếc bát nhỏ\nấm áp." became "chiếc bát nhỏ. ấm áp." - a 650 ms stop
+  // inside the phrase. So a break is read for what it is:
+  //   blank line                          a paragraph: kept;
+  //   after . , ! ? : ; …                 layout: a space, the mark sets the pause;
+  //   before a lower-case word or digit   a sentence carried on: a space;
+  //   otherwise ("Xin chào\nTạm biệt")    two utterances with no mark: kept.
+  // No mark is added or removed.
+  s = s
+    .replace(/[ \t]*\n(?:[ \t]*\n)+[ \t]*/g, "\u2029")
+    .replace(/[ \t]*\n[ \t]*/g, (_m: string, at: number, all: string) => {
+      const before = all.slice(0, at).trimEnd();
+      const after = all.slice(at + _m.length);
+      return /[.,!?:;…"”»)]$/.test(before) || /^[\p{Ll}\p{N}]/u.test(after) ? " " : "\n";
+    })
+    .replace(/\u2029/g, "\n");
 
   // Symbols a voice either reads aloud or stumbles on.
   s = s.replace(EMOJI, "");

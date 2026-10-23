@@ -97,7 +97,7 @@ def _tts(body: dict) -> tuple[bytes, dict]:
     except (TypeError, ValueError):
         speed = 1.0
     try:
-        audio, duration, sr = ENGINE_IMPLS[engine].synthesize(text, voice, language, speed, keep_punct=body.get("keep_punct") is True)
+        audio, duration, sr, report = ENGINE_IMPLS[engine].synthesize(text, voice, language, speed, keep_punct=body.get("keep_punct") is True)
     except ModelMissing as err:
         raise ApiError(409, "MODEL_MISSING", str(err)) from err
     except VoiceNotFound as err:
@@ -110,6 +110,14 @@ def _tts(body: dict) -> tuple[bytes, dict]:
         "X-Speed-Applied": "1" if ENGINES[engine].native_speed else "0",
         "X-Mind-Voice-Version": VERSION,
     }
+    if report:
+        # QĐ-156: how many chunks, how many takes the pause guard needed.
+        chunks = report.get("chunks", [])
+        headers["X-Chunks"] = str(len(chunks))
+        headers["X-Takes"] = str(report.get("takes", 0))
+        headers["X-Pause-Excess-Ms"] = str(sum(int(c.get("excessMs", 0)) for c in chunks))
+        if any(c.get("takes", 1) > 1 for c in chunks):
+            LOG.info("pause guard: %s", "; ".join(f"chunk {i + 1}: {c['takes']} takes, kept {c['kept']}, excess {c['excessMs']} ms" for i, c in enumerate(chunks) if c.get("takes", 1) > 1))
     return audio, headers
 
 
