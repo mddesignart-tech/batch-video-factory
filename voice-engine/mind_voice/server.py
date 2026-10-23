@@ -36,6 +36,7 @@ from .models import engine_status, install, install_job, installed_variant, veri
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MIND_VOICE_PORT", "8011"))
 MAX_TEXT = 3000
+MAX_BODY = 1_000_000
 LOG = logging.getLogger("mind_voice")
 
 HARDWARE = detect()
@@ -149,17 +150,38 @@ class Handler(BaseHTTPRequestHandler):
         if "application/json" not in (self.headers.get("Content-Type") or ""):
             raise ApiError(415, "JSON_ONLY", "Chỉ nhận application/json.")
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 1_000_000:
+        if length > MAX_BODY:
             raise ApiError(413, "TOO_LARGE", "Yêu cầu quá lớn.")
+        raw = self.rfile.read(length)
+        self._body_read = True
         try:
-            data = json.loads(self.rfile.read(length) or b"{}")
+            data = json.loads(raw or b"{}")
         except ValueError as err:
             raise ApiError(400, "BAD_JSON", "JSON không hợp lệ.") from err
         if not isinstance(data, dict):
             raise ApiError(400, "BAD_JSON", "Cần một object JSON.")
         return data
 
+    def _discard_unread_body(self) -> None:
+        """Read the request body nobody read before an error is sent (QĐ-157).
+
+        Refused before its body was read (415, 403, 404...), the request left
+        bytes in the socket; closing it like that makes Windows send a TCP
+        reset, and the client - racing it - sometimes got WinError 10054
+        instead of the answer. Bodies over MAX_BODY are not read (413).
+        """
+        if getattr(self, "_body_read", True):
+            return
+        self._body_read = True
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return
+        if 0 < length <= MAX_BODY:
+            self.rfile.read(length)
+
     def _handle(self, method: str) -> None:
+        self._body_read = method != "POST"
         try:
             self._guard()
             url = urlparse(self.path)
@@ -197,9 +219,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, audio, "audio/wav", headers)
             raise ApiError(404, "NOT_FOUND", f"Không có {method} {url.path}.")
         except ApiError as err:
+            self._discard_unread_body()
             self._json(err.status, {"error": {"code": err.code, "message": err.message}})
         except Exception as err:  # noqa: BLE001
             LOG.error("engine error: %s\n%s", err, traceback.format_exc())
+            self._discard_unread_body()
             self._json(500, {"error": {"code": "ENGINE_ERROR", "message": f"Lỗi engine giọng nói: {err}"}})
 
     def do_GET(self) -> None:  # noqa: N802

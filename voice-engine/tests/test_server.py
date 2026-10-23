@@ -86,6 +86,17 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(r.status, 415)
         conn.close()
 
+    def test_refused_posts_always_get_their_answer(self):
+        # QĐ-157: a refused POST used to be closed with its body unread, and on
+        # Windows the client then raced a TCP reset (WinError 10054). Repeated so
+        # the race would show: every one must read its status.
+        for _ in range(25):
+            for path, ctype, want in (("/models/install", "application/x-www-form-urlencoded", 415), ("/nope", "application/json", 404)):
+                conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+                conn.request("POST", path, body=b"engine=vieneu&x=" + b"y" * 2048, headers={"Content-Type": ctype})
+                self.assertEqual(conn.getresponse().status, want)
+                conn.close()
+
     def test_tts_takes_keep_punct(self):
         status, body = self.call("POST", "/tts", {"engine": "vieneu", "voice": "x", "text": "Thật á?", "keep_punct": True})
         self.assertEqual(status, 409)
