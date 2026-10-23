@@ -29,6 +29,7 @@ import type { LogoReferenceOption, LogoState } from "@/services/logo-overlay";
 import { LogoOverlaySection } from "./logo-overlay-section";
 import { CitVoicePanel } from "./cit-voice-panel";
 import { AudioMixerSection } from "./audio-mixer-section";
+import { MOTION_QUALITIES, MOTION_QUALITY_INFO, type MotionQuality } from "@/domain/motion-quality";
 
 const media = (p: string) => `/api/media/${p.split(/[\\/]/).map(encodeURIComponent).join("/")}`;
 const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -464,6 +465,41 @@ export function VideoOutputCard({
           frame={frame}
           change={logo}
         />
+
+        {/* ------------------------------------------- CHUYỂN ĐỘNG CAMERA (QĐ-151) */}
+        <section className="space-y-2">
+          <p className="text-[11px] font-semibold tracking-wide text-ink-400 uppercase">Chuyển động camera</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Field label="Chất lượng chuyển động (Motion Quality)">
+              <Select
+                value={c.motion.quality}
+                className="w-56"
+                disabled={pending}
+                onChange={(e) => {
+                  const quality = e.currentTarget.value as MotionQuality;
+                  setC((x) => ({ ...x, motion: { ...x.motion, quality } }));
+                  save({ motion: { quality } });
+                }}
+              >
+                {MOTION_QUALITIES.map((q) => (
+                  <option key={q} value={q}>
+                    {MOTION_QUALITY_INFO[q].label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <p className="max-w-md text-xs text-ink-400">
+              Đang chọn: <b>{MOTION_QUALITY_INFO[c.motion.quality].label}</b> — {MOTION_QUALITY_INFO[c.motion.quality].hint}
+            </p>
+          </div>
+          {c.motion.quality === "HQ_V2" ? (
+            <p className="text-[11px] text-warn-500">High Quality V2 render lâu hơn đáng kể (~3 lần Smooth V2, ~2,2 lần Legacy). Chỉ nên dùng cho video cần độ nét cao nhất.</p>
+          ) : null}
+          <p className="text-[11px] text-ink-500">
+            Áp cho các cảnh ảnh tĩnh có camera plan; giữ nguyên kiểu camera đã chọn cho từng cảnh. Cảnh nhiều lớp và cảnh chưa có camera plan vẫn dùng Legacy.
+            Đổi lựa chọn chỉ cần RENDER LẠI tại máy ($0); quay lại Legacy bất cứ lúc nào.
+          </p>
+        </section>
 
         <details className="rounded-lg border border-ink-800 px-3 py-2">
           <summary className="cursor-pointer text-xs text-ink-400">Nâng cao (không bắt buộc)</summary>

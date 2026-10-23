@@ -52,6 +52,8 @@ export function renderRecipeFields(req: Omit<RenderRequest, "projectId">): Recor
     voiceMix: req.voiceMix ?? undefined,
     // QĐ-150 AUDIO MIXER: absent on every project without one, so its recipe is unchanged.
     audioMixer: req.audioMixer ?? undefined,
+    // QĐ-151 MOTION QUALITY: only when not LEGACY, so an old project keeps its recipe.
+    motionQuality: req.motionQuality && req.motionQuality !== "LEGACY" ? req.motionQuality : undefined,
     // LOGO OVERLAY: the logo BY CONTENT and where it sits. Absent when off, so
     // a video without a logo keeps its recipe.
     logo: req.logo

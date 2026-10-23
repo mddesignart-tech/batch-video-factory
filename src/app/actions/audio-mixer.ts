@@ -18,6 +18,8 @@ import {
   type RemixAvailability,
 } from "@/services/audio-mixer-service";
 import type { ActionResult } from "./idioms";
+import { getSettings, saveSettings } from "@/lib/settings";
+import { NEW_PROJECT_MOTION_QUALITIES, type NewProjectMotionQuality } from "@/domain/motion-quality";
 
 /**
  * AUDIO MIXER (QĐ-150). Every action here is local: presets are settings,
@@ -53,6 +55,21 @@ export async function deleteAudioPresetAction(id: string): Promise<ActionResult>
   try {
     await deleteCustomAudioPreset(id);
     return { ok: true, message: "Đã xoá preset. Các video đã dùng preset này giữ nguyên thiết lập của chúng." };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+export async function newProjectMotionQualityAction(): Promise<NewProjectMotionQuality> {
+  return (await getSettings()).newProjectMotionQuality;
+}
+
+/** QĐ-151: Motion Quality a NEW project starts with. Existing projects never change. */
+export async function setNewProjectMotionQualityAction(quality: NewProjectMotionQuality): Promise<ActionResult> {
+  try {
+    if (!(NEW_PROJECT_MOTION_QUALITIES as readonly string[]).includes(quality)) throw new Error("Lựa chọn không hợp lệ.");
+    await saveSettings({ newProjectMotionQuality: quality });
+    return { ok: true, message: `Video MỚI dùng ${quality === "SMOOTH_V2" ? "Smooth V2" : "Legacy"}. Video cũ không đổi.` };
   } catch (err) {
     return { ok: false, message: errorMessage(err) };
   }

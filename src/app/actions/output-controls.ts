@@ -47,6 +47,7 @@ type Patch = {
   audio?: Partial<OutputControls["audio"]>;
   logo?: Partial<OutputControls["logo"]>;
   voice?: Partial<OutputControls["voice"]>;
+  motion?: Partial<OutputControls["motion"]>;
 };
 
 export async function saveOutputControlsAction(projectId: string, patch: Patch): Promise<ActionResult & { voiceChanged?: boolean }> {

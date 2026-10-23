@@ -94,14 +94,20 @@ export function newProjectAudio(settings: Pick<AppSettings, "audioPresets" | "ne
   return preset ? presetToAudioPatch(preset) : null;
 }
 
-/** Stored controls JSON for a new project: `base` plus the default Audio Mixer preset. */
+/**
+ * Stored controls JSON for a new project: `base` plus the default Audio Mixer
+ * preset and (QĐ-151) the default Motion Quality from Settings.
+ */
 export function newProjectControlsJson(
-  settings: Pick<AppSettings, "audioPresets" | "newProjectAudioPresetId">,
+  settings: Pick<AppSettings, "audioPresets" | "newProjectAudioPresetId"> & Partial<Pick<AppSettings, "newProjectMotionQuality">>,
   base: Record<string, unknown> = {},
 ): string | null {
   const audio = newProjectAudio(settings);
-  if (!audio) return Object.keys(base).length > 0 ? JSON.stringify(base) : null;
-  return JSON.stringify({ ...base, audio: { ...((base.audio as object) ?? {}), ...audio } });
+  const motion = settings.newProjectMotionQuality && settings.newProjectMotionQuality !== "LEGACY" ? { quality: settings.newProjectMotionQuality } : null;
+  const out: Record<string, unknown> = { ...base };
+  if (audio) out.audio = { ...((base.audio as object) ?? {}), ...audio };
+  if (motion) out.motion = motion;
+  return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
 }
 
 /** Copy a preset's values into one project (never linked: editing the preset later changes nothing here). */

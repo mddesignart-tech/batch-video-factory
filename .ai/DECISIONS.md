@@ -4662,3 +4662,30 @@ Video thử AIVietLab (Thục Đoan, 47,8 s) bị nhạc nền giật ở mỗi 
   - `perspective` giữ được alpha.
   - Kế hoạch: Motion Quality LEGACY / SMOOTH_V2 / HQ_V2, fallback, kế hoạch kiểm thử 14 bài (docs mục 8–10).
   - RIFE/DepthFlow/Revideo: không tải, không cài. Không dùng mã AGPL. Renderer production KHÔNG đổi.
+
+## QĐ-151 — LOCAL_MOTION V2: TÍCH HỢP PRODUCTION CÓ KIỂM SOÁT (2026-10-23, $0) — CHỜ NGƯỜI DÙNG NGHIỆM THU
+
+Người dùng chọn V2 1× (Smooth V2) và duyệt tích hợp có kiểm soát.
+
+- **Một nguồn đường camera.** `cameraExpressions()` sinh biểu thức `z`/`x`/`y` cho mọi kiểu camera; cả hai renderer dùng chung.
+  - `cameraZoompan()` (LEGACY) cho ra chuỗi y hệt trước, có test so từng byte.
+  - `cameraPerspective()` (V2) chuẩn hoá biểu thức (`iw`, `ih` → 1, `zoom` → `ld(2)`, `on` → `on-1`) và kẹp khung trong ảnh như zoompan. Filter: `perspective` cubic `eval=frame`. HQ_V2 render ở 2× rồi thu nhỏ Lanczos.
+  - V2 nhận ảnh dạng luồng khung `-loop 1 -framerate fps -t dur+0,5`.
+- **Motion Quality** (`src/domain/motion-quality.ts`, lưu ở `outputControls.motion.quality`, không migration):
+  - LEGACY: mặc định của mọi project cũ.
+  - SMOOTH_V2: mặc định project mới theo `Settings.newProjectMotionQuality`, chỉ cho chọn LEGACY hoặc SMOOTH_V2.
+  - HQ_V2: chỉ chọn cho từng project, có cảnh báo render lâu.
+  - Render recipe chỉ thêm `motionQuality` khi khác LEGACY, nên project cũ không bị render lại ngầm. Segment cache tự phân biệt vì args khác.
+- **Phạm vi V2:** ảnh tĩnh có camera plan. Cảnh nhiều lớp và cảnh chưa có plan (chuỗi V1) dùng Legacy, ghi `motion.legacyScenes` kèm lý do. Clip video không đổi.
+- **Fallback:** V2 lỗi → render lại cảnh đó bằng Legacy; `motion.fallbacks` + log `render.motion_fallback`; không âm thầm.
+- **Log** `render.motion`: engine thực tế và số cảnh V2.
+- **UI:** thẻ Video output, mục "Chuyển động camera" (Legacy / Smooth V2 / High Quality V2 kèm mô tả). Cài đặt: Motion Quality mặc định cho video mới.
+- **Không đổi:** QĐ-149/150 (Audio Mixer, preset, Remix), TTS, phụ đề, Import Storyboard, queue/worker, chuyển cảnh, xuất video.
+- **Nghiệm thu thật** (lô "QĐ-151 NGHIỆM THU", 7 cảnh, A Legacy / B Smooth V2 / C 16:9 V2):
+  - Âm thanh A/B/C trùng MD5. 1667 khung CFR. Không có khung trùng tuyệt đối, không viền đen.
+  - Camera từng cảnh (không phụ đề): giật 42,5% → 10,4% (HQ 11,3%).
+  - Thời gian camera 7 cảnh: 92,2 s → 68,8 s (HQ 245,3 s).
+- **Hạn chế:**
+  - Lợi ích đo rõ ở 1080p. Ở đầu ra nhỏ (540p), Legacy phóng ảnh ×6 nên lợi thế của V2 chưa đo chắc.
+  - GIMBAL rất chậm trên nền phẳng cho vài cặp khung gần đứng yên (không phải khung trùng).
+  - Nút "TIẾP TỤC TẤT CẢ" của lô cần quyền chi (BATCH_SPEND_AUTHORIZATION); nghiệm thu dùng RENDER LẠI.

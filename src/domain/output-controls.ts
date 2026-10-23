@@ -16,6 +16,7 @@
 import { z } from "zod";
 import { VoiceDirectionSchema } from "./voice-director";
 import { AudioMixerSchema } from "./audio-mixer";
+import { MOTION_QUALITIES } from "./motion-quality";
 
 export const SUBTITLE_SIZES = ["SMALL", "MEDIUM", "LARGE", "CUSTOM"] as const;
 export const SUBTITLE_POSITIONS = ["BOTTOM", "MIDDLE", "TOP"] as const;
@@ -102,6 +103,15 @@ export const OutputControlsSchema = z.object({
     })
     .default({}),
   /**
+   * QĐ-151 MOTION QUALITY of the local camera on stills. Absent = LEGACY: a
+   * project made before it moves exactly as it always did.
+   */
+  motion: z
+    .object({
+      quality: z.enum(MOTION_QUALITIES).default("LEGACY"),
+    })
+    .default({}),
+  /**
    * LOGO OVERLAY: a LOGO Reference laid over the finished video by the local
    * render ($0). Off unless a person turns it on and picks a LOGO Reference -
    * never another reference picked on their behalf.
@@ -163,6 +173,7 @@ export function controlsOf(project: { contentType?: string | null; outputControl
       audio: { ...defaults.audio, ...(raw.audio ?? {}) },
       logo: { ...defaults.logo, ...(raw.logo ?? {}) },
       voice: { ...defaults.voice, ...(raw.voice ?? {}) },
+      motion: { ...defaults.motion, ...(raw.motion ?? {}) },
     });
   } catch {
     return defaults;
@@ -186,6 +197,7 @@ export function mergeControls(current: OutputControls, patch: DeepPartial<Output
     },
     logo: { ...current.logo, ...(patch.logo ?? {}) },
     voice: { ...current.voice, ...(patch.voice ?? {}) },
+    motion: { ...current.motion, ...(patch.motion ?? {}) },
   });
 }
 

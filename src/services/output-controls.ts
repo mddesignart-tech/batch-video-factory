@@ -179,6 +179,8 @@ export async function applyOutputControls(
   } else if (a.narrationVolume !== 1 || a.normalizeNarration || a.fades) {
     request.voiceMix = { gain: a.narrationVolume, normalize: a.normalizeNarration, fadeSec: a.fades ? 0.3 : 0 };
   }
+  // QĐ-151 Motion Quality. LEGACY = nothing set: the render (and its recipe) as before.
+  if (c.motion.quality !== "LEGACY") request.motionQuality = c.motion.quality;
   // LOGO OVERLAY (local, $0). Off = nothing set, the render as before.
   if (c.logo.enabled) {
     const { renderLogoFor } = await import("./logo-overlay");

@@ -1,6 +1,6 @@
 # QĐ-151 — Smart Motion Engine V2: nghiên cứu, benchmark và kế hoạch LOCAL_MOTION V2
 
-**Trạng thái: NGHIÊN CỨU / BENCHMARK** (2026-10-23). **Chưa tích hợp vào production.**
+**Trạng thái: V2 1× (Smooth V2) ĐÃ TÍCH HỢP vào production dưới dạng tuỳ chọn Motion Quality, chờ người dùng nghiệm thu** (2026-10-23). Hướng dẫn: `docs/MOTION_QUALITY.md`; quyết định: `.ai/DECISIONS.md` QĐ-151. Phần dưới đây là nghiên cứu/benchmark gốc.
 - Không đổi `src/`, renderer production, dữ liệu project thật, QĐ-149/150.
 - Không gọi API, $0.
 - Người dùng ưu tiên **V2 1×** để phát triển tiếp, nhưng chưa duyệt chất lượng hình ảnh.

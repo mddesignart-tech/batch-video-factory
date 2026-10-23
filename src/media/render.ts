@@ -17,7 +17,7 @@ import { buildASS, buildCues, buildSRT, cuesFromTimelines } from "./subtitles";
 import type { SubtitleLayout } from "@/domain/output-controls";
 import { renderSegmentCached } from "./segment-cache";
 import { pngHasAlpha } from "./cutout";
-import { buildLayeredSceneArgs, cameraZoompan, layerFiles, type LayerInputs, type LocalCameraSpec } from "./camera-motion";
+import { buildLayeredSceneArgs, cameraPerspective, cameraZoompan, layerFiles, type LayerInputs, type LocalCameraSpec, type MotionQuality } from "./camera-motion";
 import { blendTails, buildTransitionJoinArgs, hasBlend, planJoins } from "./transitions";
 import type { Transition } from "@/domain/camera-grammar";
 import { speakerBiasKeys, type ScreenSide } from "@/domain/speaker-focus";
@@ -223,6 +223,13 @@ export interface RenderRequest {
    * old mix, byte for byte. Only used when there is music or an effect.
    */
   audioMixer?: RenderAudioMixer;
+  /**
+   * QĐ-151 Motion Quality for stills with a camera plan. Absent / LEGACY =
+   * zoompan as before (and left out of the render recipe). A V2 scene that
+   * FFmpeg cannot render is rendered with LEGACY instead - reported in
+   * `motion.fallbacks`, never silently.
+   */
+  motionQuality?: MotionQuality;
 }
 
 export interface RenderAudioMixer {
@@ -247,6 +254,16 @@ export interface RenderLogo {
   /** Null = from the start / to the end. */
   startSec?: number | null;
   endSec?: number | null;
+}
+
+export interface MotionReport {
+  requested: MotionQuality;
+  /** Scenes rendered with the V2 sampler. */
+  v2Scenes: number[];
+  /** Stills that moved with the legacy zoompan (LEGACY chosen, or no V2 path for them). */
+  legacyScenes: { sceneNumber: number; reason: string }[];
+  /** V2 was asked for and failed: rendered with LEGACY. */
+  fallbacks: { sceneNumber: number; reason: string }[];
 }
 
 export interface FinalEncode {
@@ -274,6 +291,8 @@ export interface RenderResult {
   audioManifestPath?: string;
   /** QĐ-150: "mixer" when the Audio Mixer produced the sound. */
   audioEngine?: "mixer" | "legacy";
+  /** QĐ-151: which camera renderer each still actually used, and why a V2 scene fell back. */
+  motion?: MotionReport;
   /** How long every scene ended up, and why - in scene order. */
   sceneTimings: SceneTiming[];
   /** Scene segments copied from the local segment cache (compute saved, $0 either way). */
@@ -335,6 +354,12 @@ export function buildSceneNormalizeArgs(opts: {
    * Absent = V1's chain, argument for argument.
    */
   clip?: { startSec: number; lengthSec: number; loop?: boolean; speed?: number };
+  /**
+   * QĐ-151 Motion Quality for a still WITH a camera plan. Absent / LEGACY =
+   * zoompan, argument for argument. SMOOTH_V2 / HQ_V2 = the same camera path
+   * rendered sub-pixel (camera-motion.ts cameraPerspective).
+   */
+  motionQuality?: MotionQuality;
 }): string[] {
   const { videoInput, audioInput, duration, target, output, clip } = opts;
   const { width, height, fps } = target;
@@ -344,11 +369,15 @@ export function buildSceneNormalizeArgs(opts: {
 
   // A still image becomes a slow push-in so the scene is never frozen.
   const isStill = /\.(png|jpe?g|webp)$/i.test(videoInput);
+  const v2 = isStill && opts.camera && opts.motionQuality && opts.motionQuality !== "LEGACY" ? opts.motionQuality : null;
   // QĐ-128: with a camera plan the still goes in as ONE frame - zoompan then
   // makes exactly the scene's frames (a looped input would make d frames per
   // input frame: thousands, which is slow and can crash FFmpeg). V1's chain
   // (no plan) is unchanged.
   if (isStill && !opts.camera) args.push("-loop", "1", "-t", String(dur));
+  // QĐ-151 V2: perspective re-samples every frame, so the still goes in as a
+  // frame stream at the output rate (a little longer than the scene; -t cuts).
+  if (v2) args.push("-loop", "1", "-framerate", String(fps), "-t", String(Math.round((dur + 0.5) * 1000) / 1000));
   if (clip?.loop) args.push("-stream_loop", "-1");
   else if (clip) args.push("-ss", String(clip.startSec), "-t", String(clip.lengthSec));
   args.push("-i", videoInput);
@@ -362,7 +391,9 @@ export function buildSceneNormalizeArgs(opts: {
   const step = Math.min(0.0012, 0.1 / frames).toFixed(6);
   const zoom = !isStill
     ? ""
-    : opts.camera
+    : v2 && opts.camera
+      ? cameraPerspective(opts.camera, { durationSec: dur, target: opts.target, quality: v2 })
+      : opts.camera
       ? cameraZoompan(opts.camera, { durationSec: dur, target: opts.target })
       : `,zoompan=z='min(zoom+${step},1.10)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
@@ -964,6 +995,8 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
   // ---- Pass 1 - normalise every scene to identical codec parameters -------
   const normalised: string[] = [];
   let segmentsReused = 0;
+  const motionQuality: MotionQuality = req.motionQuality ?? "LEGACY";
+  const motion: MotionReport = { requested: motionQuality, v2Scenes: [], legacyScenes: [], fallbacks: [] };
   for (let i = 0; i < usable.length; i += 1) {
     const scene = usable[i];
     if (!scene) continue;
@@ -1004,8 +1037,8 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
         : [];
     const camera = (base: LocalCameraSpec | undefined): LocalCameraSpec | undefined =>
       lean.length && base ? { ...base, speakerBias: lean, speakerAmp: scene.speakerFocus!.amplitude } : base;
-    const segment = await renderSegmentCached({
-      args: layered
+    const sceneArgs = (quality: MotionQuality) =>
+      layered
         ? buildLayeredSceneArgs({
             layers: layered,
             audioInput,
@@ -1023,12 +1056,31 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
             fit,
             ...(isStillSource && scene.localCamera ? { camera: camera(scene.localCamera) } : {}),
             ...(clipSpec ? { clip: clipSpec } : {}),
-          }),
-      inputs: layered
-        ? [...layerFiles(layered), ...(audioInput ? [audioInput] : [])]
-        : [clipInput, ...(audioInput ? [audioInput] : [])],
-      output,
-    });
+            ...(quality !== "LEGACY" ? { motionQuality: quality } : {}),
+          });
+    const inputs = layered ? [...layerFiles(layered), ...(audioInput ? [audioInput] : [])] : [clipInput, ...(audioInput ? [audioInput] : [])];
+    // QĐ-151: V2 applies to a still with its own camera plan. Layered scenes
+    // and stills without a plan (V1's chain) keep the legacy renderer for now.
+    const v2Eligible = motionQuality !== "LEGACY" && isStillSource && !layered && Boolean(scene.localCamera);
+    if (motionQuality !== "LEGACY" && isStillSource && !v2Eligible) {
+      motion.legacyScenes.push({ sceneNumber: scene.sceneNumber, reason: layered ? "cảnh nhiều lớp (chưa hỗ trợ V2)" : "cảnh chưa có camera plan (chuỗi V1)" });
+    }
+    let segment: Awaited<ReturnType<typeof renderSegmentCached>>;
+    if (v2Eligible) {
+      try {
+        segment = await renderSegmentCached({ args: sceneArgs(motionQuality), inputs, output });
+        motion.v2Scenes.push(scene.sceneNumber);
+      } catch (err) {
+        // Never a broken video: the scene is rendered with the legacy camera, and said so.
+        const reason = err instanceof Error ? err.message.split("\n")[0]!.slice(0, 200) : String(err);
+        motion.fallbacks.push({ sceneNumber: scene.sceneNumber, reason });
+        if (fs.existsSync(output)) fs.rmSync(output, { force: true });
+        segment = await renderSegmentCached({ args: sceneArgs("LEGACY"), inputs, output });
+      }
+    } else {
+      segment = await renderSegmentCached({ args: sceneArgs("LEGACY"), inputs, output });
+      if (motionQuality === "LEGACY" && isStillSource && scene.localCamera) motion.legacyScenes.push({ sceneNumber: scene.sceneNumber, reason: "Legacy được chọn" });
+    }
     if (segment.reused) segmentsReused += 1;
     normalised.push(name);
   }
@@ -1370,6 +1422,7 @@ export async function renderProject(req: RenderRequest): Promise<RenderResult> {
     audioMetrics,
     audioEngine,
     ...(audioManifestPath ? { audioManifestPath } : {}),
+    motion,
     audioWarnings,
     sceneAudioPaths,
     sceneTimings,

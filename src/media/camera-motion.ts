@@ -29,6 +29,7 @@ import { frameShape, subjectBoxes, subtitleTopLine, TOP_SAFE, type SubjectSlot }
 import type { SubjectKind } from "@/domain/subject-grounding";
 import type { AmbientBand } from "@/domain/scene-layers";
 import { SPEAKER_FOCUS, type BiasKey } from "@/domain/speaker-focus";
+import type { MotionQuality } from "@/domain/motion-quality";
 
 export interface LocalCameraSpec {
   move: CameraMove;
@@ -107,15 +108,20 @@ export function zoompanUpscale(target: RenderTarget): number {
 }
 
 /**
- * The `zoompan` part of the chain for one still: `,scale=...,zoompan=...`.
- * Empty string for STATIC (the picture simply holds).
+ * The camera path of one still as `zoompan`-style expressions of the output
+ * frame `on` (0-based), in source pixels (`iw`, `ih`) and the current `zoom`.
+ * The ONE definition of every move: the legacy `zoompan` renderer and the
+ * LOCAL_MOTION V2 renderer (QĐ-151) both read it. Null for STATIC.
  */
-export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number; target: RenderTarget; amplitudeScale?: number; alpha?: boolean }): string {
+export function cameraExpressions(
+  spec: LocalCameraSpec,
+  opts: { durationSec: number; target: RenderTarget; amplitudeScale?: number },
+): { z: string; x: string; y: string; frames: number } | null {
   const lean = spec.speakerBias?.length ? speakerBiasExpr(spec.speakerBias, opts.target.fps) : "";
   const move0 = renderableMove(spec.move);
-  if (move0 === "STATIC" && !lean) return "";
+  if (move0 === "STATIC" && !lean) return null;
   const move = move0;
-  const { width, height, fps } = opts.target;
+  const { fps } = opts.target;
   const frames = Math.max(1, Math.round(opts.durationSec * fps));
   // A short scene gets a smaller move (it has less time to travel); 3 s and up is full size.
   const scale = (opts.amplitudeScale ?? 1) * Math.min(1, Math.max(0.6, opts.durationSec / 3));
@@ -217,12 +223,82 @@ export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number
     z = `(${z})+${n(amp * 2.2)}`;
     x = `(${x})+${n(amp)}*iw*${lean}`;
   }
+  return { z, x, y, frames };
+}
+
+/**
+ * The `zoompan` part of the chain for one still: `,scale=...,zoompan=...`.
+ * Empty string for STATIC (the picture simply holds).
+ */
+export function cameraZoompan(spec: LocalCameraSpec, opts: { durationSec: number; target: RenderTarget; amplitudeScale?: number; alpha?: boolean }): string {
+  const e = cameraExpressions(spec, opts);
+  if (!e) return "";
+  const { z, x, y, frames } = e;
+  const { width, height, fps } = opts.target;
   const up = zoompanUpscale(opts.target);
   // d = frames + 1: the fps filter after zoompan drops its last frame, and the
   // pad would then repeat the one before it - a one-frame freeze at the end.
   const even = (v: number) => Math.round((v * up) / 2) * 2;
   // A transparent layer plate keeps its alpha through the move (gbrap).
   return `,scale=${even(width)}:${even(height)}:flags=lanczos,format=${opts.alpha ? "gbrap" : "gbrp"},zoompan=z='${z}':x='${x}':y='${y}':d=${frames + 1}:s=${width}x${height}:fps=${fps}`;
+}
+
+// ------------------------------------------------------- LOCAL_MOTION V2 ---
+
+/**
+ * Motion Quality (QĐ-151). LEGACY = `zoompan` (above). SMOOTH_V2 / HQ_V2 =
+ * the same camera path rendered with sub-pixel precision.
+ *
+ * Why: zoompan stores the crop's x / y / width / height as integers
+ * (libavfilter/vf_zoompan.c) and rounds them independently, so a slow move
+ * wobbles by up to a source pixel - measured at ~35 % of the camera's own
+ * speed, plus a frozen first/last frame on some tilts and pans. `perspective`
+ * takes real-valued corners per frame and samples them with cubic
+ * interpolation: no rounding. Measured 6.2 % (1x) and faster than zoompan
+ * (docs/QD151_MOTION_RESEARCH.md).
+ */
+export { MOTION_QUALITIES, type MotionQuality } from "@/domain/motion-quality";
+
+/** Render scale of the V2 sampler: 1 = output size, 2 = supersampled then Lanczos down. */
+export function motionSupersample(q: MotionQuality): number {
+  return q === "HQ_V2" ? 2 : 1;
+}
+
+/**
+ * The camera expressions re-expressed for `perspective`: source pixels ->
+ * normalised units (iw, ih -> 1), `zoom` -> the stored zoom ld(2), and
+ * `on` -> (on-1) because perspective counts frames from 1 (measured). The
+ * window is kept inside the picture exactly as zoompan clamps it.
+ */
+export function perspectiveCorners(e: { z: string; x: string; y: string }): string {
+  const norm = (s: string) => s.replace(/\bon\b/g, "(on-1)").replace(/\biw\b/g, "1").replace(/\bih\b/g, "1").replace(/\bzoom\b/g, "ld(2)");
+  const pre = `st(2,max(1,${norm(e.z)}))`;
+  const left = `max(0,min(1-1/ld(2),${norm(e.x)}))`;
+  const top = `max(0,min(1-1/ld(2),${norm(e.y)}))`;
+  const c = (axis: "W" | "H", start: string, far: boolean) => `'${pre};${axis}*(${start}${far ? "+1/ld(2)" : ""})'`;
+  return [
+    `x0=${c("W", left, false)}`, `y0=${c("H", top, false)}`,
+    `x1=${c("W", left, true)}`, `y1=${c("H", top, false)}`,
+    `x2=${c("W", left, false)}`, `y2=${c("H", top, true)}`,
+    `x3=${c("W", left, true)}`, `y3=${c("H", top, true)}`,
+  ].join(":");
+}
+
+/**
+ * The V2 part of the chain for one still (the frame is already cover-cropped
+ * to the output size): `,format=gbrp,perspective=...` - or, for HQ_V2, the
+ * same at 2x with a Lanczos down-scale. Empty string for STATIC. The input
+ * must be a frame STREAM (-loop 1 -framerate fps), not a single frame.
+ */
+export function cameraPerspective(spec: LocalCameraSpec, opts: { durationSec: number; target: RenderTarget; quality: Exclude<MotionQuality, "LEGACY"> }): string {
+  const e = cameraExpressions(spec, opts);
+  if (!e) return "";
+  const k = motionSupersample(opts.quality);
+  const { width, height } = opts.target;
+  const even = (v: number) => Math.round(v / 2) * 2;
+  const up = k > 1 ? `,scale=${even(width * k)}:${even(height * k)}:flags=lanczos` : "";
+  const down = k > 1 ? `,scale=${width}:${height}:flags=lanczos` : "";
+  return `${up},format=gbrp,perspective=${perspectiveCorners(e)}:interpolation=cubic:eval=frame${down}`;
 }
 
 // --------------------------------------------------------------- layered ---

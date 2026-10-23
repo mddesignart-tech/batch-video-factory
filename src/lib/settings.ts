@@ -5,6 +5,7 @@ import { DEFAULT_MIX, resolveMix, type AudioMixSettings } from "@/media/mix-conf
 import { DEFAULT_PRESET_ID, outputPresetSchema, type OutputPreset } from "@/domain/output-preset";
 import { DEFAULT_SOCIAL_TEMPLATES, type SocialTemplates } from "@/domain/social-metadata";
 import { CustomAudioPresetSchema, DEFAULT_AUDIO_PRESET_ID, systemPreset, type CustomAudioPreset } from "@/domain/audio-mixer";
+import { DEFAULT_NEW_PROJECT_MOTION_QUALITY, NEW_PROJECT_MOTION_QUALITIES, type NewProjectMotionQuality } from "@/domain/motion-quality";
 
 /**
  * App settings live in the DB so they survive restarts and can be edited from
@@ -80,6 +81,8 @@ export interface AppSettings {
    * existing project.
    */
   newProjectAudioPresetId: string | null;
+  /** QĐ-151: Motion Quality a NEW project starts with (copied at creation). Never HQ_V2. */
+  newProjectMotionQuality: NewProjectMotionQuality;
 }
 
 /** Hard bounds: more parallelism than this buys SQLite contention, not speed. */
@@ -115,6 +118,9 @@ function sanitizeDaily(s: AppSettings): AppSettings {
             (systemPreset(s.newProjectAudioPresetId) || (Array.isArray(s.audioPresets) && s.audioPresets.some((p) => p?.id === s.newProjectAudioPresetId)))
           ? s.newProjectAudioPresetId
           : DEFAULT_AUDIO_PRESET_ID,
+    newProjectMotionQuality: (NEW_PROJECT_MOTION_QUALITIES as readonly string[]).includes(s.newProjectMotionQuality)
+      ? s.newProjectMotionQuality
+      : DEFAULT_NEW_PROJECT_MOTION_QUALITY,
     defaultOutputPresetId:
       typeof s.defaultOutputPresetId === "string" && s.defaultOutputPresetId ? s.defaultOutputPresetId : DEFAULT_PRESET_ID,
     socialTemplates: {
@@ -159,6 +165,7 @@ export function defaultSettings(): AppSettings {
     socialTemplates: { ...DEFAULT_SOCIAL_TEMPLATES },
     audioPresets: [],
     newProjectAudioPresetId: DEFAULT_AUDIO_PRESET_ID,
+    newProjectMotionQuality: DEFAULT_NEW_PROJECT_MOTION_QUALITY,
   };
 }
 

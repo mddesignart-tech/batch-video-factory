@@ -3,7 +3,14 @@
 import { useEffect, useState, useTransition } from "react";
 import { Trash2 } from "lucide-react";
 import { Alert, Button, Select } from "@/components/ui";
-import { audioPresetsAction, deleteAudioPresetAction, setNewProjectAudioPresetAction } from "@/app/actions/audio-mixer";
+import {
+  audioPresetsAction,
+  deleteAudioPresetAction,
+  newProjectMotionQualityAction,
+  setNewProjectAudioPresetAction,
+  setNewProjectMotionQualityAction,
+} from "@/app/actions/audio-mixer";
+import { MOTION_QUALITY_INFO, NEW_PROJECT_MOTION_QUALITIES, type NewProjectMotionQuality } from "@/domain/motion-quality";
 import type { AudioPreset } from "@/domain/audio-mixer";
 
 /**
@@ -16,11 +23,13 @@ export function AudioPresetSettings() {
   const [presets, setPresets] = useState<AudioPreset[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [motion, setMotion] = useState<NewProjectMotionQuality | null>(null);
   const reload = () =>
     void audioPresetsAction().then((r) => {
       setPresets(r.presets);
       setCurrent(r.newProjectPresetId);
     });
+  useEffect(() => void newProjectMotionQualityAction().then(setMotion), []);
   useEffect(reload, []);
 
   return (
@@ -78,6 +87,30 @@ export function AudioPresetSettings() {
       ) : (
         <p className="text-ink-500">Chưa có preset tự tạo - lưu từ Audio Mixer trong trang video.</p>
       )}
+      <p className="pt-2 font-semibold text-ink-300">Chuyển động camera (QĐ-151)</p>
+      <label className="flex flex-wrap items-center gap-2 text-ink-400">
+        Video MỚI dùng Motion Quality:
+        <Select
+          value={motion ?? ""}
+          className="w-56"
+          disabled={pending || motion === null}
+          onChange={(e) => {
+            const q = e.currentTarget.value as NewProjectMotionQuality;
+            setMotion(q);
+            start(async () => {
+              const r = await setNewProjectMotionQualityAction(q);
+              setMsg({ ok: r.ok, text: r.message });
+            });
+          }}
+        >
+          {NEW_PROJECT_MOTION_QUALITIES.map((q) => (
+            <option key={q} value={q}>
+              {MOTION_QUALITY_INFO[q].label} — {MOTION_QUALITY_INFO[q].hint}
+            </option>
+          ))}
+        </Select>
+      </label>
+      <p className="text-ink-500">High Quality V2 không bao giờ là mặc định — chỉ chọn riêng cho từng video. Video đã có không bị đổi.</p>
       {msg ? <Alert tone={msg.ok ? "ok" : "danger"} title={msg.text} /> : null}
     </div>
   );

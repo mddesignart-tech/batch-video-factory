@@ -345,6 +345,25 @@ async function handleRenderFinal(job: Job): Promise<HandlerResult> {
         ? `, ${result.audioWarnings.length} cảnh báo`
         : ""),
   });
+  // QĐ-151: which camera renderer each still really used - never a silent switch.
+  if (result.motion && (result.motion.requested !== "LEGACY" || result.motion.fallbacks.length > 0)) {
+    const m = result.motion;
+    await logger.info({
+      event: "render.motion",
+      projectId,
+      message:
+        `Chuyển động: ${m.requested} — V2 ${m.v2Scenes.length} cảnh` +
+        (m.legacyScenes.length ? `, Legacy ${m.legacyScenes.length} cảnh (${m.legacyScenes.map((x) => `cảnh ${x.sceneNumber}: ${x.reason}`).join("; ")})` : "") +
+        `. Render tại máy, $0.`,
+    });
+    for (const f of m.fallbacks) {
+      await logger.warn({
+        event: "render.motion_fallback",
+        projectId,
+        message: `Cảnh ${f.sceneNumber}: V2 không render được (${f.reason}) — đã dùng Legacy cho cảnh này.`,
+      });
+    }
+  }
   for (const warning of result.audioWarnings) {
     await logger.warn({
       event: `audio.${warning.kind}`,
