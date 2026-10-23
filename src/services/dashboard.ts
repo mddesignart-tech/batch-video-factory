@@ -120,7 +120,7 @@ export async function recentBatches(limit = 8): Promise<RecentBatchRow[]> {
   const batches = await prisma.batch.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
-    include: { projects: { select: { id: true, status: true } } },
+    include: { projects: { where: { deletedAt: null }, select: { id: true, status: true } } },
   });
   const rows: RecentBatchRow[] = [];
   for (const b of batches) {

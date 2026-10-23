@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  Badge,
   Button,
   Card,
   CardContent,
@@ -8,9 +7,6 @@ import {
   CardTitle,
   EmptyState,
   PageHeader,
-  Table,
-  Td,
-  Th,
 } from "@/components/ui";
 import { prisma } from "@/lib/prisma";
 import { formatDateVi, formatUSD } from "@/lib/utils";
@@ -21,6 +17,8 @@ import {
   type QualityMode,
 } from "@/domain/enums";
 import { NewProjectForm } from "./new-project-form";
+import { ProjectList } from "./project-list";
+import { folderBytes } from "@/services/trash-service";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +50,7 @@ export default async function ProjectsPage({
       where: params.status ? { status: params.status } : {},
       orderBy: { createdAt: "desc" },
       take: 100,
-      include: { idiom: true, _count: { select: { scenes: true } } },
+      include: { idiom: true, _count: { select: { scenes: { where: { deletedAt: null } }, assets: { where: { kind: "final", deletedAt: null } } } } },
     }),
     prisma.idiom.findMany({
       where: { status: { in: ["unused", "planned"] } },
@@ -98,62 +96,25 @@ export default async function ProjectsPage({
               />
             </div>
           ) : (
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Thành ngữ</Th>
-                  <Th>Tiêu đề</Th>
-                  <Th>Trạng thái</Th>
-                  <Th>Chế độ</Th>
-                  <Th className="text-right">Cảnh</Th>
-                  <Th className="text-right">Ước tính</Th>
-                  <Th className="text-right">Thực tế</Th>
-                  <Th className="text-right">Ngân sách</Th>
-                  <Th>Tạo lúc</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {projects.map((project) => (
-                  <tr key={project.id} className="hover:bg-ink-850">
-                    <Td className="font-medium">
-                      <Link
-                        href={`/projects/${project.id}`}
-                        className="text-ink-100 hover:text-brand-400"
-                      >
-                        {project.idiom.phrase}
-                      </Link>
-                    </Td>
-                    <Td className="max-w-64 text-xs text-ink-400">
-                      {project.title}
-                    </Td>
-                    <Td>
-                      <Badge tone={STATUS_TONE[project.status as ProjectStatus]}>
-                        {VI_PROJECT_STATUS[project.status as ProjectStatus] ??
-                          project.status}
-                      </Badge>
-                    </Td>
-                    <Td className="text-xs text-ink-400">
-                      {VI_QUALITY_MODE[project.qualityMode as QualityMode]}
-                    </Td>
-                    <Td className="text-right tabular-nums text-ink-300">
-                      {project._count.scenes}
-                    </Td>
-                    <Td className="text-right tabular-nums text-ink-300">
-                      {formatUSD(project.estimatedCost)}
-                    </Td>
-                    <Td className="text-right tabular-nums text-ink-100">
-                      {formatUSD(project.actualCost)}
-                    </Td>
-                    <Td className="text-right tabular-nums text-ink-500">
-                      {formatUSD(project.maxBudget)}
-                    </Td>
-                    <Td className="text-xs text-ink-500">
-                      {formatDateVi(project.createdAt)}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+            <ProjectList
+              rows={projects.map((project) => ({
+                id: project.id,
+                phrase: project.idiom.phrase,
+                title: project.title,
+                status: project.status,
+                statusLabel: VI_PROJECT_STATUS[project.status as ProjectStatus] ?? project.status,
+                statusTone: STATUS_TONE[project.status as ProjectStatus] ?? "neutral",
+                mode: VI_QUALITY_MODE[project.qualityMode as QualityMode] ?? project.qualityMode,
+                scenes: project._count.scenes,
+                videos: project._count.assets,
+                bytes: folderBytes(project.id),
+                estimated: formatUSD(project.estimatedCost),
+                actual: formatUSD(project.actualCost),
+                budget: formatUSD(project.maxBudget),
+                createdAt: formatDateVi(project.createdAt),
+                updatedAt: formatDateVi(project.updatedAt),
+              }))}
+            />
           )}
         </CardContent>
       </Card>

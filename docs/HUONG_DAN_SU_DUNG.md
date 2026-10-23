@@ -14,6 +14,7 @@ Bắt đầu nhanh trong 10 bước: [QUICK_START.md](QUICK_START.md).
 Ví dụ một ngày làm việc thật: [../examples/DAILY_WORKFLOW_EXAMPLE.md](../examples/DAILY_WORKFLOW_EXAMPLE.md).
 Âm thanh (nhạc nền, giọng, Remix Audio, preset cho cả lô): [AUDIO_MIXER.md](AUDIO_MIXER.md).
 Chuyển động camera mượt hơn (Legacy / Smooth V2 / High Quality V2): [MOTION_QUALITY.md](MOTION_QUALITY.md).
+Xoá / khôi phục / nhân bản cảnh, video, dự án và Thùng rác: [PROJECT_SCENE_MANAGEMENT.md](PROJECT_SCENE_MANAGEMENT.md).
 
 ---
 

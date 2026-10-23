@@ -8,6 +8,7 @@ import { SceneClipPanel, type ClipView, type SceneClipView } from "./scene-clip-
 import { SceneVoicePanel } from "./scene-voice-panel";
 import { SceneCameraPanel, type SceneCameraView } from "./scene-camera-panel";
 import { VideoSelectionPanel } from "./video-selection-panel";
+import { SceneManageButtons, StoryboardCheck, UndoDeleteBar } from "./scene-manage";
 import { isNeedsSelection, needsSelectionMessage } from "@/domain/video-selection";
 import { aspectOf, effectiveFit, type FitMode } from "@/domain/platform-profile";
 import { parseDialogueLines } from "@/domain/dialogue-lines";
@@ -172,6 +173,8 @@ export function Storyboard({
   clipLibrary?: ClipView[];
 }) {
   const [selectedId, setSelectedId] = useState(scenes[0]?.id ?? "");
+  // QĐ-152: the scene just moved to the trash (for "Hoàn tác").
+  const [lastDeleted, setLastDeleted] = useState<{ sceneId: string; sceneNumber: number } | null>(null);
   // Tagged with the scene the action started from, so switching scenes never shows another scene's message.
   const [sceneResult, setSceneResult] = useState<SceneResult | null>(null);
 
@@ -222,6 +225,8 @@ export function Storyboard({
         </span>
       </CardHeader>
       <CardContent className="p-0">
+        <UndoDeleteBar last={lastDeleted} onClose={() => setLastDeleted(null)} />
+        <StoryboardCheck projectId={projectId} onSelect={setSelectedId} />
         <div className="grid lg:grid-cols-[220px_1fr_320px]">
           {/* LEFT: scene list */}
           <div className="border-ink-800 lg:border-r">
@@ -504,6 +509,14 @@ export function Storyboard({
                 <Ban className="h-3 w-3" />
                 {selected.skipped ? "Khôi phục" : "Bỏ qua cảnh"}
               </ActionButton>
+              <SceneManageButtons
+                key={`manage-${selected.id}`}
+                sceneId={selected.id}
+                sceneNumber={selected.sceneNumber}
+                onDeleted={setLastDeleted}
+                onDone={setResult}
+                onSelect={setSelectedId}
+              />
             </div>
 
             {result ? (

@@ -626,6 +626,7 @@ export async function preflightImportedBatch(
     where: { id: batchId },
     include: {
       projects: {
+        where: { deletedAt: null },
         orderBy: { createdAt: "asc" },
         include: {
           idiom: { select: { id: true, phrase: true } },

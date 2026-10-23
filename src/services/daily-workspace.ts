@@ -177,6 +177,7 @@ export async function buildWorkspace(batchId: string): Promise<Workspace | null>
     include: {
       authorization: true,
       projects: {
+        where: { deletedAt: null },
         orderBy: { createdAt: "asc" },
         select: {
           id: true,

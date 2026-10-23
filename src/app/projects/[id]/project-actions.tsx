@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Film, RefreshCw, Sparkles, Trash2, XCircle } from "lucide-react";
+import { Copy, Download, Film, RefreshCw, Sparkles, Trash2, XCircle } from "lucide-react";
+import { duplicateProjectAction, trashProjectsAction } from "@/app/actions/trash";
 import {
   Button,
   Card,
@@ -22,7 +23,6 @@ import {
 } from "@/components/action-ui";
 import {
   cancelProject,
-  deleteProject,
   regenerateScript,
   renderFinal,
   startMedia,
@@ -219,12 +219,26 @@ export function ProjectActions({
             </div>
           </ActionForm>
 
-          <div className="mt-4 border-t border-ink-800 pt-4">
+          <div className="mt-4 flex flex-wrap gap-2 border-t border-ink-800 pt-4">
+            {/* QĐ-152: a copy to try another version - nothing generated, nothing rendered. */}
+            <ActionButton
+              variant="outline"
+              size="sm"
+              action={() => duplicateProjectAction(projectId)}
+              onDone={(res) => {
+                const id = (res as { id?: string }).id;
+                if (res.ok && id) window.location.href = `/projects/${id}`;
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Nhân bản dự án
+            </ActionButton>
+            {/* QĐ-152: to the trash (restorable) - never a hard delete from here. */}
             <ActionButton
               variant="danger"
               size="sm"
-              action={() => deleteProject(projectId)}
-              confirm="Xoá dự án này? Hành động này không thể hoàn tác."
+              action={() => trashProjectsAction([projectId])}
+              confirm="Chuyển dự án này vào Thùng rác? Dự án bị ẩn khỏi danh sách, việc đang chờ bị huỷ, file chưa bị xoá. Có thể khôi phục trong Thùng rác."
               onDone={(res) => {
                 if (res.ok) window.location.href = "/projects";
               }}

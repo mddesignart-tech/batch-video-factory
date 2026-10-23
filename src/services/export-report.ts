@@ -73,6 +73,7 @@ export async function buildBatchSummary(batchId: string): Promise<BatchSummary> 
       id: true,
       name: true,
       projects: {
+        where: { deletedAt: null },
         orderBy: { createdAt: "asc" },
         select: {
           id: true,

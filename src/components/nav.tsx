@@ -22,6 +22,7 @@ import {
   Mic,
   Rocket,
   WandSparkles,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +45,7 @@ const NAV_ITEMS = [
   { href: "/providers", label: "Nhà cung cấp AI", icon: Bot },
   { href: "/models", label: "Mô hình AI", icon: Cpu },
   { href: "/settings", label: "Cài đặt", icon: Settings },
+  { href: "/trash", label: "Thùng rác", icon: Trash2 },
   { href: "/logs", label: "Nhật ký", icon: FileText },
 ] as const;
 

@@ -45,7 +45,7 @@ export default async function BatchesPage() {
       orderBy: { createdAt: "desc" },
       take: 50,
       include: {
-        _count: { select: { projects: true } },
+        _count: { select: { projects: { where: { deletedAt: null } } } },
         authorization: true,
       },
     }),

@@ -505,6 +505,8 @@ model Project {
   finalVideoPath  String?
   subtitlePath    String?
   errorMessage    String?
+  /// QĐ-152 TRASH: set = in the trash (hidden from lists, restorable). NULL = live.
+  deletedAt       DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -519,6 +521,7 @@ model Project {
   @@index([status])
   @@index([createdAt])
   @@index([batchId])
+  @@index([deletedAt])
 }
 
 model Scene {
@@ -696,12 +699,22 @@ model Scene {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  /// QĐ-152 TRASH: a deleted scene is ALSO `skipped` (so every path that already
+  /// ignores skipped scenes ignores it) and moved to a negative sceneNumber, out of
+  /// the live 1..N order. NULL = live.
+  deletedAt         DateTime?
+  /// The 1-based position it had when deleted (restore puts it back there).
+  deletedFromNumber Int?
+  /// It was already "skipped" before the delete: restore keeps it skipped.
+  deletedWasSkipped Boolean @default(false)
+
   project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   assets        Asset[]
   dialogueLines DialogueLine[]
 
   @@unique([projectId, sceneNumber])
   @@index([status])
+  @@index([deletedAt])
 }
 
 model Asset {
@@ -763,6 +776,9 @@ model Asset {
   /// Measured facts of a video/audio file (ffprobe): fps, codec, pixel format,
   /// audio stream, rotation, poster frame... "{}" when not measured.
   mediaInfoJson     String    @default("{}")
+  /// QĐ-152 TRASH: an exported video (kind "final") moved to the trash. The file
+  /// stays on disk until a permanent delete. NULL = live.
+  deletedAt         DateTime?
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   scene   Scene?  @relation(fields: [sceneId], references: [id], onDelete: Cascade)
@@ -771,6 +787,7 @@ model Asset {
   @@index([reuseKey])
   @@index([sha256])
   @@index([referenceAssetId])
+  @@index([deletedAt])
 }
 
 // ------------------------------------------------------------------- jobs ---

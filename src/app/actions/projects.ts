@@ -162,11 +162,16 @@ export async function cancelProject(projectId: string): Promise<ActionResult> {
   return { ok: true, message: `Đã huỷ ${count} job đang chờ.` };
 }
 
+/**
+ * QĐ-152: "Xoá dự án" moves the project to the trash (restorable). The old hard
+ * delete removed every row at once and left its files behind; a permanent
+ * delete now happens only from the trash, with its own checks.
+ */
 export async function deleteProject(projectId: string): Promise<ActionResult> {
-  await cancelProjectJobs(projectId);
-  await prisma.project.delete({ where: { id: projectId } });
+  const { trashProjects } = await import("@/services/trash-service");
+  const [r] = await trashProjects([projectId]);
   revalidatePath("/projects");
-  return { ok: true, message: "Đã xoá dự án." };
+  return { ok: Boolean(r?.ok), message: r?.ok ? "Đã chuyển dự án vào Thùng rác." : (r?.message ?? "Không xoá được.") };
 }
 
 export async function updateProjectSettings(

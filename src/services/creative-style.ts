@@ -90,7 +90,7 @@ export async function applyBatchCreativeStyle(batchId: string, input: Partial<St
   const { storedPlan } = await import("./batch-runner");
   const batch = await prisma.batch.findUniqueOrThrow({
     where: { id: batchId },
-    include: { authorization: true, projects: { select: { id: true, idiomId: true } } },
+    include: { authorization: true, projects: { where: { deletedAt: null }, select: { id: true, idiomId: true } } },
   });
   let changed = 0;
   let withMedia = 0;

@@ -62,6 +62,7 @@ export async function buildBatchReport(batchId: string): Promise<BatchReport> {
     include: {
       authorization: true,
       projects: {
+        where: { deletedAt: null },
         orderBy: { createdAt: "asc" },
         include: { scenes: { where: { skipped: false }, orderBy: { sceneNumber: "asc" } } },
       },

@@ -186,7 +186,7 @@ export async function batchHistory(query: HistoryQuery = {}): Promise<HistoryRow
       status: true,
       createdAt: true,
       slug: true,
-      projects: { select: { id: true, title: true, status: true, exportReadyJson: true, outputDir: true } },
+      projects: { where: { deletedAt: null }, select: { id: true, title: true, status: true, exportReadyJson: true, outputDir: true } },
     },
   });
   const needle = query.q ? fold(query.q.trim()) : "";

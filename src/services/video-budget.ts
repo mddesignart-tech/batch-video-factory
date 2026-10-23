@@ -51,7 +51,7 @@ export async function videoBudget(projectId: string): Promise<VideoBudget> {
     spentOnProject(projectId),
     spendStatus(),
     project.batchId ? prisma.batchAuthorization.findUnique({ where: { batchId: project.batchId } }) : null,
-    project.batchId ? prisma.batch.findUnique({ where: { id: project.batchId }, select: { maxCostPerVideo: true, _count: { select: { projects: true } } } }) : null,
+    project.batchId ? prisma.batch.findUnique({ where: { id: project.batchId }, select: { maxCostPerVideo: true, _count: { select: { projects: { where: { deletedAt: null } } } } } }) : null,
   ]);
   const videoLimit = project.maxBudget > 0 ? project.maxBudget : null;
 

@@ -4689,3 +4689,33 @@ Người dùng chọn V2 1× (Smooth V2) và duyệt tích hợp có kiểm soá
   - Lợi ích đo rõ ở 1080p. Ở đầu ra nhỏ (540p), Legacy phóng ảnh ×6 nên lợi thế của V2 chưa đo chắc.
   - GIMBAL rất chậm trên nền phẳng cho vài cặp khung gần đứng yên (không phải khung trùng).
   - Nút "TIẾP TỤC TẤT CẢ" của lô cần quyền chi (BATCH_SPEND_AUTHORIZATION); nghiệm thu dùng RENDER LẠI.
+
+## QĐ-152 — QUẢN LÝ DỰ ÁN, CẢNH, VIDEO OUTPUT, THÙNG RÁC, NHÂN BẢN (2026-10-23, $0) — CHỜ NGHIỆM THU
+
+**Root cause "cảnh LOCK&LOCK trong video AI":**
+- Cảnh 7 của 3 project lô "QĐ-151 NGHIỆM THU" (A `355ea809`, B `ee4d34da`, C `5a679f70`) là dữ liệu QA do `scripts/qa/qd151-uat-real.ts` cố ý thêm để thử ảnh PNG nền trong suốt và chữ trên sản phẩm.
+- Ảnh được CHÉP từ project thật "Review Bình giữ nhiệt Lock&Lock" (`236b0f85`, không bị đổi). Không có lẫn dữ liệu, cache hay ánh xạ asset sai.
+- Cả 3 video đã render đều có cảnh này ở giây ~48–55.6 (kiểm bằng khung hình; file trong `output/` cùng MD5 với file render). Người dùng xác nhận thấy bình ở cuối video.
+- Sau khi render (14:54–14:57), cảnh 7 của A và C được đặt "Bỏ qua cảnh" trên giao diện, và A đổi giọng nên chuyển `media_ready`.
+- Trang project ẩn video khi trạng thái khác `completed`. Thẻ "Các bản video đã xuất" giờ luôn hiện video kèm thông báo "Storyboard đã thay đổi".
+
+**Thiết kế:**
+- **Migration** `20261023000000_trash_soft_delete` chỉ thêm cột: `Project.deletedAt`, `Scene.deletedAt/deletedFromNumber/deletedWasSkipped`, `Asset.deletedAt` + index. NULL = như trước.
+- **Cảnh xoá mềm:** `deletedAt` + `skipped=true` (mọi luồng vốn bỏ cảnh skipped sẽ bỏ luôn) + `sceneNumber` âm (ngoài dãy 1..N). Đánh số lại hai pha trong transaction, vì `@@unique([projectId, sceneNumber])`.
+  - Khôi phục về `deletedFromNumber` hoặc vị trí người chọn (kẹp trong 1..N+1); trả lại trạng thái skipped cũ.
+  - Project đang `completed` → `media_ready` (storyboard đổi). Không ghi đè, không tự render.
+- **Nhân bản cảnh:** id mới, chèn ngay sau cảnh gốc, chép dialogue lines (id mới, cùng file). File dùng chung an toàn vì mọi lần tạo lại đều ghi file uuid mới.
+- **Video output:** `Asset(kind final).deletedAt`. Nếu bản bị xoá đang dùng thì bản mới nhất còn lại thay thế, hoặc null + `media_ready`. `renderRecipe=null` (để RENDER LẠI không bỏ qua). Bị chặn khi có `remix_audio` / `render_final` đang chạy hoặc chờ.
+- **Dự án:** `deletedAt`. Prisma client extension ẩn dự án đã xoá ở mọi truy vấn danh sách top-level (`findMany/findFirst/count/aggregate/groupBy`) trừ khi truy vấn tự hỏi `deletedAt`. `findUnique` không đổi. Các include lồng trong Batch đã thêm `where: { deletedAt: null }`.
+  - Khi xoá: huỷ job đang chờ; dự án có job đang chạy hoặc đang render thì không xoá.
+  - `deleteProject` cũ (xoá cứng, để lại file) đã đổi thành đưa vào Thùng rác.
+- **Nhân bản dự án:** chép file trong thư mục dự án sang thư mục mới (tương đương copy-on-write), remap đường dẫn và id (asset, reference, nhạc nền). Không chép render/job/chi phí/cảnh đã xoá. Bản sao không thuộc lô nào. File dùng chung bên ngoài vẫn dùng chung.
+- **Xoá vĩnh viễn** (chỉ từ Thùng rác, phải gõ "XOA"):
+  1. Xoá bản ghi trong transaction trước.
+  2. Rồi xoá file **chỉ khi**: nằm trong thư mục của chính mục đó; là file thường (không theo symlink, `realpath` vẫn ở trong thư mục); và không còn được nhắc ở **mọi cột chữ của mọi bảng** (trừ bảng lịch sử LogEntry/ProviderJob/CostEntry/CostReservation) lẫn manifest Remix của video khác.
+  3. Thử lại 3 lần; file lỗi được báo và ghi nhật ký, không bao giờ xoá theo đường dẫn do client gửi.
+- **Dọn file tạm:** `temp/` + `*.tmp/*.part` của dự án, cùng kiểm tra tham chiếu. Không chạy khi dự án có việc.
+- **KIỂM TRA KỊCH BẢN** (`storyboard-check.ts`): ERROR / WARNING / INFO. Nội dung chỉ so chữ (bỏ nhãn người nói), chỉ gắn cờ cảnh không có từ nội dung nào chung với chủ đề và các cảnh khác. Không bao giờ tự xoá.
+  - Đề xuất giai đoạn sau: kiểm tra ảnh bằng mô hình thị giác (ví dụ CLIP chạy local) — cần duyệt tải model.
+- **Kiểm thử:** `tests/trash.test.ts` 13/13 (gồm render thật sau khi xoá cảnh). UI chạy trên DB và thư mục dữ liệu riêng (`scripts/qa/qd152-ui-seed.ts`).
+- **Migration production:** sao lưu `data/backups/app-before-qd152-trash-migration-2026-10-23.db`; số liệu trước/sau không đổi (20 project, 113 cảnh, 251 asset, sổ $11,328378).

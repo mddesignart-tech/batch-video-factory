@@ -48,7 +48,7 @@ export async function batchSource(batchId: string): Promise<BatchSource> {
 export async function pricedFromRows(batchId: string): Promise<boolean> {
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
-    select: { idiomIdsJson: true, projects: { select: { idiomId: true, importFingerprint: true, scriptJson: true } } },
+    select: { idiomIdsJson: true, projects: { where: { deletedAt: null }, select: { idiomId: true, importFingerprint: true, scriptJson: true } } },
   });
   if (!batch || batch.projects.length === 0) return false;
   let listed: unknown;

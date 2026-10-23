@@ -40,6 +40,8 @@ import { VideoFormatCard } from "./video-format-card";
 import { ScriptReviewCard } from "./script-review-card";
 import { ReferencePanel } from "./reference-panel";
 import { VideoOutputCard } from "./video-output-card";
+import { ProjectFilesCard } from "./project-files-card";
+import { ProjectTrashBanner } from "./project-trash-banner";
 import { controlsOf, subtitleLayout } from "@/domain/output-controls";
 import { logoState, projectLogoReferences } from "@/services/logo-overlay";
 import { shownSceneEstimate } from "@/domain/user-clip";
@@ -86,7 +88,8 @@ export default async function ProjectDetailPage({
     include: {
       idiom: true,
       stylePreset: true,
-      scenes: { orderBy: { sceneNumber: "asc" } },
+      // QĐ-152: scenes in the trash are not part of the storyboard.
+      scenes: { where: { deletedAt: null }, orderBy: { sceneNumber: "asc" } },
     },
   });
   if (!project) notFound();
@@ -205,6 +208,7 @@ export default async function ProjectDetailPage({
         <ArrowLeft className="h-3.5 w-3.5" />
         Quay lại danh sách dự án
       </Link>
+      {project.deletedAt ? <ProjectTrashBanner projectId={project.id} deletedAt={project.deletedAt.toISOString()} /> : null}
 
       <PageHeader
         title={project.idiom.phrase}
@@ -362,6 +366,9 @@ export default async function ProjectDetailPage({
               );
             })()
           ) : null}
+
+          {/* QĐ-152: every exported version, disk use, temp cleanup. */}
+          <ProjectFilesCard projectId={project.id} storyboardChanged={Boolean(project.finalVideoPath) && project.status !== "completed"} />
 
           {project.scenes.length > 0 ? (
             <VideoOutputCard
