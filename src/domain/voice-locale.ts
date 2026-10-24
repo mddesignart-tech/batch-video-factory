@@ -12,7 +12,12 @@
 
 import { speechLanguageOf, type SpeechLanguage } from "./speech-text";
 
-export type VoiceLocaleId = "vi-VN" | "en-US" | "en-GB";
+/**
+ * "en" is English without a stated accent: what an engine that only says
+ * "English" (Supertonic) really offers. en-US / en-GB list only voices whose
+ * accent a source states - never one guessed from a name or a gender.
+ */
+export type VoiceLocaleId = "vi-VN" | "en" | "en-US" | "en-GB";
 
 export interface VoiceLocale {
   id: VoiceLocaleId;
@@ -27,8 +32,9 @@ export interface VoiceLocale {
 
 export const VOICE_LOCALES: readonly VoiceLocale[] = [
   { id: "vi-VN", family: "vi", label: "Tiếng Việt (vi-VN)", accent: null, sample: "Xin chào, rất vui được gặp bạn tại cửa hàng của chúng tôi." },
-  { id: "en-US", family: "en", label: "English — United States (en-US)", accent: "US", sample: "Hello! Welcome to our store. Let me show you today's products." },
-  { id: "en-GB", family: "en", label: "English — United Kingdom (en-GB)", accent: "UK", sample: "Good morning! Welcome to our shop. How may I help you today?" },
+  { id: "en", family: "en", label: "English — General (giọng vùng chưa xác minh)", accent: null, sample: "Hello! Welcome to our store. Let me show you today's products." },
+  { id: "en-US", family: "en", label: "English — United States (en-US, chỉ giọng đã xác minh)", accent: "US", sample: "Hello! Welcome to our store. Let me show you today's products." },
+  { id: "en-GB", family: "en", label: "English — United Kingdom (en-GB, chỉ giọng đã xác minh)", accent: "UK", sample: "Good morning! Welcome to our shop. How may I help you today?" },
 ];
 
 export const isVoiceLocale = (v: unknown): v is VoiceLocaleId => VOICE_LOCALES.some((l) => l.id === v);

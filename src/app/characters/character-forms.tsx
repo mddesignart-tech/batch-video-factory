@@ -3,6 +3,7 @@
 import { Card, CardContent, Field, Input, Textarea } from "@/components/ui";
 import {
   ActionButton,
+  ActionButtonWithFeedback,
   ActionForm,
   Disclosure,
 } from "@/components/action-ui";
@@ -94,14 +95,15 @@ export function CharacterEditor({ character }: { character: CharacterData }) {
         >
           {character.enabled ? "Tắt nhân vật" : "Bật nhân vật"}
         </ActionButton>
-        <ActionButton
+        {/* With feedback: a delete refused because the character is in use says why (QĐ-158). */}
+        <ActionButtonWithFeedback
           size="sm"
           variant="danger"
           action={() => deleteCharacter(character.id)}
           confirm={`Xoá nhân vật "${character.name}"?`}
         >
           Xoá
-        </ActionButton>
+        </ActionButtonWithFeedback>
       </div>
 
       <Disclosure label="Chỉnh sửa">

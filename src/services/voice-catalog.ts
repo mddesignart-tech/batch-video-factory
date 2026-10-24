@@ -91,12 +91,13 @@ export function voiceOptionLabel(v: CatalogVoice): string {
 }
 
 function mindModel(catalog: MindCatalog | null, locale: VoiceLocaleId): CatalogModel {
-  const family = voiceLocaleOf(locale).family;
+  const { family, accent } = voiceLocaleOf(locale);
   const engines = catalog?.health?.engines ?? [];
   const forLanguage = (Object.keys(MIND_ENGINES) as (keyof typeof MIND_ENGINES)[]).filter((e) => MIND_ENGINES[e].language === family);
   const installed = forLanguage.some((e) => engines.find((x) => x.id === e)?.installed);
   const voices: CatalogVoice[] = (catalog?.voices ?? [])
-    .filter((v) => v.installed && v.languages.includes(family))
+    // The engines say "en", never which English: no Mind Voice voice is a verified en-US / en-GB voice.
+    .filter((v) => v.installed && v.languages.includes(family) && !accent)
     .map((v) => ({
       id: v.id,
       label: v.name,
@@ -107,7 +108,7 @@ function mindModel(catalog: MindCatalog | null, locale: VoiceLocaleId): CatalogM
       languageVerified: true,
       // The engine says "en", never which English.
       accentVerified: family !== "en",
-      note: `${MIND_ENGINES[v.engine].label}${family === "en" ? " · giọng vùng US/UK chưa xác minh" : ""}`,
+      note: `${MIND_ENGINES[v.engine].label}${family === "en" ? " · giọng vùng chưa xác minh" : ""}`,
     }));
   let status: CatalogStatus;
   let statusMessage: string;
@@ -118,6 +119,9 @@ function mindModel(catalog: MindCatalog | null, locale: VoiceLocaleId): CatalogM
     status = "NOT_INSTALLED";
     const names = forLanguage.map((e) => MIND_ENGINES[e].label).join(", ");
     statusMessage = `Chưa cài model ${names} cho ngôn ngữ này. Mở Mind Voice Studio → Quản lý model để cài (app không tự tải model lớn).`;
+  } else if (accent) {
+    status = catalog.online ? "ONLINE" : "OFFLINE";
+    statusMessage = `Không có giọng Mind Voice nào được xác minh là giọng ${accent === "US" ? "Mỹ" : "Anh"}: Supertonic 3 chỉ ghi "English". Chọn ngôn ngữ "English — General" để dùng 10 giọng Supertonic.`;
   } else if (!catalog.online) {
     status = "OFFLINE";
     statusMessage = `Mind Voice đang Offline - danh sách giọng là của lần kiểm tra ${new Date(catalog.checkedAt).toLocaleString("vi-VN")}. Lưu được, nhưng nghe thử và tạo giọng cần Mind Voice chạy. ${MIND_OFFLINE_GUIDE}`;
@@ -149,7 +153,9 @@ async function openaiModels(locale: VoiceLocaleId): Promise<CatalogModel[]> {
   const family = voiceLocaleOf(locale).family;
   return rows.map((m) => {
     const classic = /^tts-1/.test(m.modelId);
-    const voices: CatalogVoice[] = OPENAI_VOICES.filter((v) => !classic || !["verse", "marin", "cedar"].includes(v.id)).map((v) => ({
+    const accent = voiceLocaleOf(locale).accent;
+    // OpenAI states no accent per voice: none is a verified en-US / en-GB voice.
+    const voices: CatalogVoice[] = (accent ? [] : OPENAI_VOICES.filter((v) => !classic || !["verse", "marin", "cedar"].includes(v.id))).map((v) => ({
       id: v.id,
       label: v.label.split(" - ")[0]!,
       // OpenAI publishes no gender per voice: this is how the voice is usually heard.
@@ -163,8 +169,8 @@ async function openaiModels(locale: VoiceLocaleId): Promise<CatalogModel[]> {
       note:
         family === "en"
           ? m.supportsVoiceInstructions
-            ? "Giọng vùng US/UK chưa xác minh - có thể yêu cầu qua Hướng dẫn diễn"
-            : "Giọng vùng US/UK chưa xác minh"
+            ? "Giọng vùng chưa xác minh - có thể yêu cầu qua Hướng dẫn diễn"
+            : "Giọng vùng chưa xác minh"
           : "Tiếng Việt chưa xác minh trong app (giọng tối ưu cho tiếng Anh)",
     }));
     let status: CatalogStatus = "ONLINE";

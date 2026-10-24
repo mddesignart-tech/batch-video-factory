@@ -45,17 +45,11 @@ export async function saveCharacter(
       // every one of those lines off from this character's voice (QĐ-158).
       const current = await prisma.character.findUnique({ where: { id }, select: { name: true } });
       if (current && current.name !== parsed.data.name) {
-        const quoted = JSON.stringify(current.name);
-        const used = await prisma.scene.count({
-          where: {
-            deletedAt: null,
-            OR: [{ speakingCharactersJson: { contains: quoted } }, { charactersPresentJson: { contains: quoted } }],
-          },
-        });
+        const used = await scenesNaming(current.name);
         if (used > 0) {
           return {
             ok: false,
-            message: `Không đổi tên: "${current.name}" đang có trong ${used} cảnh. Đổi tên sẽ làm các câu thoại đó mất liên kết với giọng của nhân vật.`,
+            message: `Không đổi tên: "${current.name}" đang có trong ${used} cảnh (kể cả Thùng rác). Đổi tên sẽ làm các câu thoại đó mất liên kết với giọng của nhân vật.`,
           };
         }
       }
@@ -81,7 +75,29 @@ export async function toggleCharacter(
   return { ok: true, message: enabled ? "Đã bật nhân vật." : "Đã tắt nhân vật." };
 }
 
+/**
+ * Scenes - in the trash too, since a restore brings them back - whose
+ * storyboard names this character. A storyboard links a speaker by name, so
+ * renaming or deleting a named character would leave those lines with no voice
+ * (QĐ-158). Names are unique, so the name is a stable key while it cannot change.
+ */
+async function scenesNaming(name: string): Promise<number> {
+  const quoted = JSON.stringify(name);
+  return prisma.scene.count({
+    where: { OR: [{ speakingCharactersJson: { contains: quoted } }, { charactersPresentJson: { contains: quoted } }] },
+  });
+}
+
 export async function deleteCharacter(id: string): Promise<ActionResult> {
+  const character = await prisma.character.findUnique({ where: { id }, select: { name: true } });
+  if (!character) return { ok: false, message: "Không tìm thấy nhân vật." };
+  const used = await scenesNaming(character.name);
+  if (used > 0) {
+    return {
+      ok: false,
+      message: `Không xoá: "${character.name}" đang có trong ${used} cảnh (kể cả Thùng rác). Xoá sẽ làm các câu thoại đó mất giọng. Có thể Tắt nhân vật thay vì xoá.`,
+    };
+  }
   await prisma.character.delete({ where: { id } });
   revalidatePath("/characters");
   return { ok: true, message: "Đã xoá nhân vật." };

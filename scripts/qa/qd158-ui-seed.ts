@@ -7,8 +7,8 @@ import path from "node:path";
  * the Mind Voice running on this machine ($0).
  *
  *   Characters  Chị Hoa (người bán, vi-VN, Thục Đoan)
- *               John    (khách Mỹ, en-US, Supertonic M2 - giọng vùng chưa xác minh)
- *               Emma    (khách Anh, en-GB, Supertonic F1 - giọng vùng chưa xác minh)
+ *               John    (khách Mỹ, English — General, Supertonic M2 - giọng vùng chưa xác minh)
+ *               Emma    (khách Anh, English — General, Supertonic F1 - giọng vùng chưa xác minh)
  *               Dẫn Chuyện (người dẫn chuyện, vi-VN, Quang Sơn)
  *               Narrator kept as the real one is: mindvoice + "sage" (shows the warning)
  *   Project     "QĐ-158 NGHIỆM THU · Cửa hàng gốm" - 3 scenes, voiced and rendered
@@ -43,8 +43,9 @@ const SCENES: { color: string; lines: [string, string][] }[] = [
 
 const CAST = [
   { name: "Chị Hoa", description: "Người bán hàng Việt Nam (QA QĐ-158)", locale: "vi-VN", voiceId: "Thục Đoan" },
-  { name: "John", description: "Khách hàng người Mỹ (QA QĐ-158)", locale: "en-US", voiceId: "M2" },
-  { name: "Emma", description: "Khách hàng người Anh (QA QĐ-158)", locale: "en-GB", voiceId: "F1" },
+  // English — General: Supertonic states no accent, so neither is labelled US or UK.
+  { name: "John", description: "Khách hàng người Mỹ (QA QĐ-158)", locale: "en", voiceId: "M2" },
+  { name: "Emma", description: "Khách hàng người Anh (QA QĐ-158)", locale: "en", voiceId: "F1" },
   { name: "Dẫn Chuyện", description: "Người dẫn chuyện tiếng Việt (QA QĐ-158)", locale: "vi-VN", voiceId: "Quang Sơn" },
 ] as const;
 

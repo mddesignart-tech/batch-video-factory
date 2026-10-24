@@ -125,14 +125,18 @@ export async function voiceDirectorFor(
 
   return <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T): T & Directed => {
     const narrated = isNarrator(line.speaker);
-    // The narrator here speaks with the project's preset, not the character's own
-    // voice (QĐ-142): that voice's language and problem do not apply (QĐ-158).
-    if (narrated) base = { ...base, speechLanguage: null, voiceProblem: null };
+    // Who picks the narrator's voice (QĐ-158), first match wins:
+    //   1. a voice this project chose (VIDEO OUTPUT)          - the person asked
+    //   2. the narrator's LOCKED voice (a language was chosen) - kept, never swapped
+    //   3. the director's preset                               - only when nothing is locked
+    // `speechLanguage` is set only for a locked voice that no project choice replaced.
+    const locked = narrated && !voice.voiceId && base.speechLanguage != null;
+    if (narrated && !locked) base = { ...base, speechLanguage: null, voiceProblem: null };
     const language = base.speechLanguage ?? speechLanguageOf(content.language, line.text);
     const spokenText = prepareSpeechText(line.text, language);
     const identity: VoiceIdentity = narrated
       ? {
-          voiceId: voice.voiceId ?? preset.voiceId,
+          voiceId: voice.voiceId ?? (locked ? base.voiceId : preset.voiceId),
           base: preset.base,
           speed: voice.speed,
           presetSpeed: preset.defaultSpeed,

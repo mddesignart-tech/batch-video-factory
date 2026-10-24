@@ -254,7 +254,7 @@ export async function saveCharacterSheet(
  * comes from the catalog when the source states it.
  */
 const VoiceInput = z.object({
-  locale: z.enum(["vi-VN", "en-US", "en-GB"], { message: "Chọn ngôn ngữ." }),
+  locale: z.enum(["vi-VN", "en", "en-US", "en-GB"], { message: "Chọn ngôn ngữ." }),
   voiceProvider: z.string().trim().min(1, "Chọn nhà cung cấp."),
   voiceModel: z.string().trim().min(1, "Chọn model."),
   voiceId: z.string().trim().min(1, "Chọn giọng."),

@@ -2670,9 +2670,9 @@ export async function voiceSettingsFor(
         voiceId: own.voiceId ?? base.voiceId,
         speed: own.speed ?? base.speed,
         instructions: own.instructions ?? base.instructions,
-        // The project's narrator voice, not the character's own (QĐ-158).
-        speechLanguage: null,
-        voiceProblem: null,
+        // Still the narrator's own (locked) voice unless the project chose a
+        // voice or another provider; a project speed alone keeps it (QĐ-158).
+        ...(own.voiceId || (own.provider && own.provider !== character?.voiceProvider) ? { speechLanguage: null, voiceProblem: null } : {}),
       };
     }
   }

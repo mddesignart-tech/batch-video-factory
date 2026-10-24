@@ -28,7 +28,9 @@ import { ensureNarrator } from "@/services/content-service";
 import { generateSceneVoice, planSceneVoice } from "@/services/generation";
 import { materialiseImport, scanImportSource, validateImport } from "@/services/storyboard-import";
 import { previewVoiceChoice, removeCharacterVoiceProfile, saveCharacterVoice } from "@/app/actions/characters";
-import { saveCharacter } from "@/app/actions/config";
+import { deleteCharacter, saveCharacter } from "@/app/actions/config";
+import { saveProjectControls } from "@/services/output-controls";
+import { duplicateProject, duplicateScene } from "@/services/trash-service";
 
 /**
  * QĐ-158 CHARACTER VOICE MANAGER - a voice per language, chosen from the voices
@@ -278,7 +280,7 @@ const row = (over: Partial<CharacterVoiceRow> = {}): CharacterVoiceRow => ({
 
 describe("QĐ-158 ngôn ngữ giọng (thuần)", () => {
   it("3 ngôn ngữ, câu thử đúng ngôn ngữ và không có nhãn người nói", () => {
-    expect(VOICE_LOCALES.map((l) => l.id)).toEqual(["vi-VN", "en-US", "en-GB"]);
+    expect(VOICE_LOCALES.map((l) => l.id)).toEqual(["vi-VN", "en", "en-US", "en-GB"]);
     for (const l of VOICE_LOCALES) expect(l.sample).not.toMatch(/^\s*\w+\s*:/);
     expect(VOICE_LOCALES.find((l) => l.id === "vi-VN")!.sample).toBe("Xin chào, rất vui được gặp bạn tại cửa hàng của chúng tôi.");
   });
@@ -310,16 +312,23 @@ describe("QĐ-158 ngôn ngữ giọng (thuần)", () => {
 // -------------------------------------------------------------- catalog ---
 
 describe("QĐ-158 Voice Catalog + lưu giọng (Mind Voice giả, Mock Mode, $0)", () => {
-  it("lọc theo ngôn ngữ: vi-VN = giọng VieNeu (có giới tính + vùng miền), en-US / en-GB = Supertonic với giọng vùng CHƯA xác minh", async () => {
+  it("lọc theo ngôn ngữ: vi-VN = giọng VieNeu (giới tính + vùng miền), English General = 10 giọng Supertonic; en-US / en-GB = 0 giọng (không ai xác minh giọng vùng)", async () => {
     const vi = await voiceCatalogFor("vi-VN");
     const mind = vi.models.find((m) => m.provider === "mindvoice")!;
     expect(mind).toMatchObject({ status: "ONLINE", local: true, pricePer1kChars: 0, supportsInstructions: false, emotion: "TAGS" });
     expect(mind.voices.map((v) => v.id)).toEqual(VIENEU.map((v) => v.id));
     expect(mind.voices.find((v) => v.id === "Thục Đoan")).toMatchObject({ gender: "female", region: "south", languageVerified: true, accentVerified: true });
+    const en = (await voiceCatalogFor("en")).models.find((m) => m.provider === "mindvoice")!;
+    expect(en.voices.map((v) => v.id)).toEqual(SUPERTONIC.map((v) => v.id));
+    expect(en.voices.every((v) => v.languageVerified && !v.accentVerified)).toBe(true);
+    // Never an OpenAI voice on Mind Voice.
+    expect(en.voices.some((v) => ["sage", "coral", "ballad", "echo"].includes(v.id))).toBe(false);
     for (const locale of ["en-US", "en-GB"] as const) {
-      const en = (await voiceCatalogFor(locale)).models.find((m) => m.provider === "mindvoice")!;
-      expect(en.voices.map((v) => v.id)).toEqual(SUPERTONIC.map((v) => v.id));
-      expect(en.voices.every((v) => v.languageVerified && !v.accentVerified)).toBe(true);
+      const cat = await voiceCatalogFor(locale);
+      const mind = cat.models.find((m) => m.provider === "mindvoice")!;
+      expect(mind.voices).toEqual([]);
+      expect(mind.statusMessage).toMatch(/English — General/);
+      expect(cat.models.filter((m) => m.provider === "openai").every((m) => m.voices.length === 0)).toBe(true);
     }
     // Mock Mode lists the fake voices, labelled as fake, by accent.
     expect((await voiceCatalogFor("en-GB")).models.find((m) => m.provider === "mock")!.voices.map((v) => v.id)).toEqual(["mock-male-uk", "mock-female-uk"]);
@@ -330,9 +339,11 @@ describe("QĐ-158 Voice Catalog + lưu giọng (Mind Voice giả, Mock Mode, $0)
     expect(checkVoiceChoice(vi, "mindvoice", "mind-local", "sage")).toMatchObject({ ok: false });
     expect(checkVoiceChoice(vi, "mindvoice", "mind-local", "M1")).toMatchObject({ ok: false });
     expect(checkVoiceChoice(vi, "mindvoice", "mind-local", "Thục Đoan")).toMatchObject({ ok: true });
-    const us = await voiceCatalogFor("en-US");
-    expect(checkVoiceChoice(us, "mindvoice", "mind-local", "Thục Đoan")).toMatchObject({ ok: false });
-    expect(checkVoiceChoice(us, "mindvoice", "mind-local", "M2")).toMatchObject({ ok: true });
+    const en = await voiceCatalogFor("en");
+    expect(checkVoiceChoice(en, "mindvoice", "mind-local", "Thục Đoan")).toMatchObject({ ok: false });
+    expect(checkVoiceChoice(en, "mindvoice", "mind-local", "M2")).toMatchObject({ ok: true });
+    // Not labelled American from its name or gender.
+    expect(checkVoiceChoice(await voiceCatalogFor("en-US"), "mindvoice", "mind-local", "M2")).toMatchObject({ ok: false });
 
     const id = await newCharacter(`Sage${tag}`);
     const refused = await save(id, "vi-VN", "sage");
@@ -341,21 +352,22 @@ describe("QĐ-158 Voice Catalog + lưu giọng (Mind Voice giả, Mock Mode, $0)
     expect((await prisma.character.findUniqueOrThrow({ where: { id } })).voiceId).toBe("mock-male-us");
   });
 
-  it("lưu → mở lại: giọng chính tiếng Việt + giọng phụ en-US; giới tính lấy từ engine; bỏ giọng phụ", async () => {
+  it("lưu → mở lại: giọng chính tiếng Việt + giọng phụ tiếng Anh; giới tính lấy từ engine; bỏ giọng phụ", async () => {
     const id = await newCharacter(`Lan${tag}`);
     expect((await save(id, "vi-VN", "Thục Đoan", { voiceGender: "male" })).ok).toBe(true);
-    expect((await save(id, "en-US", "F2", { voiceSpeed: "1.2" })).ok).toBe(true);
+    expect((await save(id, "en", "F2", { voiceSpeed: "1.2" })).ok).toBe(true);
     const c = await prisma.character.findUniqueOrThrow({ where: { id } });
     expect(c).toMatchObject({ voiceLanguage: "vi-VN", voiceProvider: "mindvoice", voiceModel: "mind-local", voiceId: "Thục Đoan", voiceGender: "female" });
     expect(characterProfiles(c).map((p) => [p.locale, p.profile.voiceId, p.profile.speed, p.primary])).toEqual([
       ["vi-VN", "Thục Đoan", 1, true],
-      ["en-US", "F2", 1.2, false],
+      ["en", "F2", 1.2, false],
     ]);
     // Speed is clamped to what Mind Voice can do, never sent out of range.
-    expect((await save(id, "en-GB", "F1", { voiceSpeed: "3" })).message).toMatch(/Tốc độ đưa về 1.5/);
-    expect((await removeCharacterVoiceProfile(id, "en-GB")).ok).toBe(true);
+    expect((await save(id, "en", "F1", { voiceSpeed: "3" })).message).toMatch(/Tốc độ đưa về 1.5/);
+    expect(characterProfiles(await prisma.character.findUniqueOrThrow({ where: { id } }))[1]!.profile).toMatchObject({ voiceId: "F1", speed: 1.5 });
+    expect((await removeCharacterVoiceProfile(id, "en")).ok).toBe(true);
     expect((await removeCharacterVoiceProfile(id, "vi-VN")).ok).toBe(false);
-    expect(characterProfiles(await prisma.character.findUniqueOrThrow({ where: { id } })).map((p) => p.locale)).toEqual(["vi-VN", "en-US"]);
+    expect(characterProfiles(await prisma.character.findUniqueOrThrow({ where: { id } })).map((p) => p.locale)).toEqual(["vi-VN"]);
   });
 
   it("sửa thông tin nhân vật không làm mất giọng; không đổi tên nhân vật đang có trong Storyboard", async () => {
@@ -379,11 +391,11 @@ describe("QĐ-158 nghe thử, nhiều nhân vật, nhiều ngôn ngữ (Mind Voi
     const ledger = await prisma.costEntry.count();
     const before = requests.length;
     const text = `Hello! Welcome to our store ${tag}.`;
-    const first = await previewVoiceChoice(id, { locale: "en-US", provider: "mindvoice", model: "mind-local", voiceId: "M3", speed: 1, instructions: "Speak warmly.", text });
+    const first = await previewVoiceChoice(id, { locale: "en", provider: "mindvoice", model: "mind-local", voiceId: "M3", speed: 1, instructions: "Speak warmly.", text });
     expect(first).toMatchObject({ ok: true, cost: 0 });
     expect(sentSince(before)).toEqual([{ voice: "M3", engine: "supertonic", language: "en", text }]);
     expect(JSON.stringify(requests[before])).not.toMatch(/Speak warmly/);
-    const again = await previewVoiceChoice(id, { locale: "en-US", provider: "mindvoice", model: "mind-local", voiceId: "M3", speed: 1, instructions: "", text });
+    const again = await previewVoiceChoice(id, { locale: "en", provider: "mindvoice", model: "mind-local", voiceId: "M3", speed: 1, instructions: "", text });
     expect(again.message).toMatch(/Dùng lại/);
     const bad = await previewVoiceChoice(id, { locale: "vi-VN", provider: "mindvoice", model: "mind-local", voiceId: "sage", speed: 1, instructions: "", text: "Xin chào" });
     expect(bad.ok).toBe(false);
@@ -404,7 +416,7 @@ describe("QĐ-158 nghe thử, nhiều nhân vật, nhiều ngôn ngữ (Mind Voi
       process.env.OPENAI_API_KEY = "sk-test-not-used";
       resetEnvCache();
       if (!hadModel?.enabled) await prisma.modelRegistry.update({ where: { provider_modelId: { provider: "openai", modelId: "gpt-4o-mini-tts" } }, data: { enabled: true } });
-      const ask = await previewVoiceChoice(id, { locale: "en-GB", provider: "openai", model: "gpt-4o-mini-tts", voiceId: "fable", speed: 1, instructions: "British accent.", text: `Good morning ${tag}.` });
+      const ask = await previewVoiceChoice(id, { locale: "en", provider: "openai", model: "gpt-4o-mini-tts", voiceId: "fable", speed: 1, instructions: "British accent.", text: `Good morning ${tag}.` });
       expect(ask).toMatchObject({ ok: false, needsConfirmation: true });
       expect(ask.cost).toBeGreaterThan(0);
       expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes("openai.com"))).toEqual([]);
@@ -441,7 +453,7 @@ describe("QĐ-158 nghe thử, nhiều nhân vật, nhiều ngôn ngữ (Mind Voi
     const customer = `John${tag}`;
     const narrator = `Dan${tag}`;
     await save(await newCharacter(seller), "vi-VN", "Thục Đoan");
-    await save(await newCharacter(customer), "en-US", "M2");
+    await save(await newCharacter(customer), "en", "M2");
     await save(await newCharacter(narrator), "vi-VN", "Quang Sơn");
     const s1 = await sceneWith(
       `${narrator}: Một buổi sáng ở cửa hàng ${tag}.\n${customer}: Hi! How much is this bag?\n${seller}: Dạ, cái túi này ba trăm nghìn ạ.`,
@@ -472,7 +484,7 @@ describe("QĐ-158 nghe thử, nhiều nhân vật, nhiều ngôn ngữ (Mind Voi
     const name = `Mai${tag}`;
     const id = await newCharacter(name);
     await save(id, "vi-VN", "Ngọc Huyền");
-    await save(id, "en-GB", "F1");
+    await save(id, "en", "F1");
     const s = await sceneWith(`${name}: Chào chị, em là Mai ${tag}.\n${name}: And this is our best seller.`, [name], "vi");
     const before = requests.length;
     await generateSceneVoice(s.sceneId);
@@ -514,4 +526,90 @@ describe("QĐ-158 nghe thử, nhiều nhân vật, nhiều ngôn ngữ (Mind Voi
     await generateSceneVoice(s.sceneId);
     expect(sentSince(before).map((r) => r.voice)).toEqual(["Hải Đăng", "Hải Đăng"]);
   }, 600_000);
+});
+
+// ------------------------------------------------------ voice lock rules ---
+
+describe("QĐ-158 khoá giọng: Voice Director, nhân bản, xoá / đổi tên (Mind Voice giả, $0)", () => {
+  it("Narrator đã khoá giọng: Voice Director bật vẫn dùng giọng đã khoá; dự án chỉ đổi tốc độ vẫn giữ; dự án CHỌN giọng thì dùng giọng đó", async () => {
+    const narrator = await prisma.character.findUniqueOrThrow({ where: { name: "Narrator" } });
+    try {
+      await save(narrator.id, "vi-VN", "Ngọc Huyền");
+      const s = await sceneWith(`Narrator: Chào mừng các bạn đến với cửa hàng ${tag}.`, ["Narrator"], "vi");
+      await saveProjectControls(s.projectId, { voice: { director: true } });
+      let before = requests.length;
+      await generateSceneVoice(s.sceneId);
+      expect(sentSince(before).map((r) => r.voice)).toEqual(["Ngọc Huyền"]);
+
+      // A project speed is not a voice choice: the line stays the locked voice
+      // (whether the director's speed rule needs new audio or not).
+      await saveProjectControls(s.projectId, { voice: { speed: 1.1 } });
+      expect((await planSceneVoice(s.sceneId)).lines.map((l) => l.voiceId)).toEqual(["Ngọc Huyền"]);
+      before = requests.length;
+      await generateSceneVoice(s.sceneId);
+      expect(sentSince(before).every((r) => r.voice === "Ngọc Huyền")).toBe(true);
+
+      await saveProjectControls(s.projectId, { voice: { provider: "mindvoice", model: "mind-local", voiceId: "Hải Đăng" } });
+      before = requests.length;
+      await generateSceneVoice(s.sceneId);
+      expect(sentSince(before).map((r) => r.voice)).toEqual(["Hải Đăng"]);
+    } finally {
+      const { id: _id, createdAt: _c, updatedAt: _u, ...fields } = narrator;
+      await prisma.character.update({ where: { id: narrator.id }, data: fields });
+    }
+  }, 600_000);
+
+  it("nhân vật thường + Voice Director bật: giữ đúng giọng đã khoá ở mọi cảnh", async () => {
+    const name = `Khoa${tag}`;
+    await save(await newCharacter(name), "vi-VN", "Quang Sơn");
+    const a = await sceneWith(`${name}: Cảnh một của tôi ${tag}.`, [name], "vi");
+    await saveProjectControls(a.projectId, { voice: { director: true } });
+    const before = requests.length;
+    await generateSceneVoice(a.sceneId);
+    expect(sentSince(before).map((r) => r.voice)).toEqual(["Quang Sơn"]);
+  }, 600_000);
+
+  it("nhân bản cảnh và nhân bản dự án: giữ nguyên giọng, không tạo lại giọng", async () => {
+    const seller = `Nhan${tag}`;
+    const customer = `Ben${tag}`;
+    await save(await newCharacter(seller), "vi-VN", "Thục Đoan");
+    await save(await newCharacter(customer), "en", "M1");
+    const s = await sceneWith(`${seller}: Chào anh, em có thể giúp gì ạ ${tag}?
+${customer}: Just looking, thanks.`, [seller, customer], "vi");
+    await generateSceneVoice(s.sceneId);
+    const before = requests.length;
+
+    const copy = await duplicateScene(s.sceneId);
+    const planCopy = await planSceneVoice(copy.sceneId);
+    expect(planCopy.lines.map((l) => [l.voiceId, l.state])).toEqual([
+      ["Thục Đoan", "DONE"],
+      ["M1", "DONE"],
+    ]);
+    await generateSceneVoice(copy.sceneId);
+
+    const dup = await duplicateProject(s.projectId);
+    const scenes = await prisma.scene.findMany({ where: { projectId: dup.id, deletedAt: null } });
+    for (const sc of scenes) {
+      const plan = await planSceneVoice(sc.id);
+      expect(plan.lines.map((l) => l.voiceId)).toEqual(["Thục Đoan", "M1"]);
+      expect(plan.lines.every((l) => l.state === "DONE" || l.state === "REUSE")).toBe(true);
+      await generateSceneVoice(sc.id);
+    }
+    expect(requests.length).toBe(before);
+  }, 600_000);
+
+  it("không xoá / không đổi tên nhân vật đang có trong cảnh, kể cả cảnh trong Thùng rác; nhân vật chưa dùng thì xoá được", async () => {
+    const name = `Xoa${tag}`;
+    const id = await newCharacter(name);
+    const s = await sceneWith(`${name}: Xin chào ${tag}.`, [name]);
+    await prisma.scene.update({ where: { id: s.sceneId }, data: { deletedAt: new Date() } });
+    const del = await deleteCharacter(id);
+    expect(del.ok).toBe(false);
+    expect(del.message).toMatch(/kể cả Thùng rác/);
+    expect(await prisma.character.count({ where: { id } })).toBe(1);
+    const renamed = await saveCharacter(id, form({ name: `${name}X`, description: "", visualPrompt: "A shop assistant, QA fixture." }));
+    expect(renamed.ok).toBe(false);
+    const free = await newCharacter(`Free${tag}`);
+    expect((await deleteCharacter(free)).ok).toBe(true);
+  });
 });
