@@ -26,7 +26,7 @@ Người dùng chọn **CÁCH A**: nghiệm thu các nhiệm vụ còn lại r�
 - **Dữ liệu thật:** người dùng tự xoá 4 dự án (gồm Lock&Lock) vào Thùng rác lúc 17:35 — giữ nguyên.
 
 **Việc còn lại:**
-1. Chạy lại bộ test đầy đủ.
+1. ~~Chạy lại bộ test đầy đủ~~ — XONG 2026-10-24 (0 lỗi).
 2. Gửi bảng nghiệm thu + đường dẫn cho người dùng.
 3. Chờ người dùng duyệt QĐ-151 / 152 / 153 / 154.
 4. Chỉ khi người dùng xác nhận: `git push origin main` (không force).
