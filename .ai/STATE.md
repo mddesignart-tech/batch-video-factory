@@ -5,6 +5,19 @@
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
 
+## QĐ-158 HOÀN THIỆN (2026-10-24, $0) — CHỜ NGƯỜI DÙNG XÁC NHẬN ÁP MIGRATION VÀO data/app.db
+
+- Commit local: `a7a2c6c` (tính năng) + `c207c84` (hoàn thiện) + commit tài liệu này. CHƯA PUSH, CHƯA RELEASE.
+- **English — General** (`en`): Supertonic / OpenAI không công bố giọng vùng → không gắn nhãn US/UK. en-US / en-GB chỉ liệt kê giọng đã xác minh giọng vùng (hiện 0).
+- **Ưu tiên giọng Narrator:** giọng dự án chọn (VIDEO OUTPUT) → giọng đã KHOÁ của Narrator → preset Voice Director (chỉ khi chưa khoá). Chỉ đổi tốc độ ở dự án không bỏ giọng khoá.
+- **Liên kết nhân vật:** Storyboard vẫn theo tên (tên duy nhất). Không xoá / không đổi tên nhân vật có trong bất kỳ cảnh nào (kể cả Thùng rác); UI báo lý do. DialogueLine lưu characterId. DB thật: 0 tên người nói mồ côi.
+- **Full suite (sau c207c84 code):** 141 file đạt + 2 bỏ qua có chủ đích; 2043/2048 test, 0 lỗi, 3096 s.
+- **Sao lưu:** `data/backups/app-before-qd158-voice-profiles-2026-10-24.db` (backup API SQLite; 24 bảng khớp số dòng; quick_check chỉ báo cảnh báo giả clipAudioGain đã biết).
+- **Thử migration trên bản sao:** 23 bảng dữ liệu không đổi; 4 nhân vật giữ giọng; 0 mock; 17 dự án + characters/workspace/batches/trash mở 200; chọn / nghe thử / lưu giọng (vi-VN + English General) trên bản sao đạt.
+- **Tác động lên dự án thật** (`scripts/qa/qd158-plan-impact.ts`, chỉ đọc): 46 câu DONE giữ nguyên; 18 câu (Leo `ballad`, Mia `coral`, Narrator `sage`) mà code cũ sẽ lặng lẽ TẠO LẠI bằng giọng mặc định Mind Voice → nay BLOCKED chờ chọn giọng. Không câu đã duyệt nào bị tạo lại.
+- **Khôi phục nếu lỗi:** dừng app → chép bản sao lưu đè `data/app.db` (migration chỉ thêm cột; code cũ f30413c bỏ qua cột thừa).
+- `F:`: chỉ 1 file qa.db 560 KB (8:55–8:58, 2 lần chạy seed QA lỗi đường dẫn); không liên quan DB/dự án thật; công cụ của Claude bị chặn xoá → người dùng tự xoá.
+
 ## QĐ-158 — CHARACTER VOICE MANAGER (2026-10-24, $0) — CHỜ NGHIỆM THU, CHƯA PUSH
 
 Người dùng gọi là "QD-157"; số đó đã dùng (sửa Mind Voice TCP reset), nên đây là **QĐ-158**.
