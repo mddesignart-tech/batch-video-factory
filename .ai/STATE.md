@@ -5,7 +5,7 @@
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
 
-## NGHIỆM THU CUỐI QĐ-151 → QĐ-156 (2026-10-23, đang làm — tiếp tục ngày mai)
+## NGHIỆM THU CUỐI QĐ-151 → QĐ-156 — ĐẠT (người dùng duyệt hết 2026-10-24, đã push main)
 
 Người dùng chọn **CÁCH A**: nghiệm thu các nhiệm vụ còn lại rồi push `main` một lần. **CHƯA PUSH.** Chỉ QĐ-156 đã được người dùng nghiệm thu.
 
@@ -13,10 +13,10 @@ Người dùng chọn **CÁCH A**: nghiệm thu các nhiệm vụ còn lại r�
 
 | Nhiệm vụ | Kiểm thử tự động | Kiểm tra trên app thật / QA | Người dùng duyệt |
 |---|---|---|---|
-| QĐ-151 Motion V2 | trong bộ đầy đủ | Lô "QĐ-151 NGHIỆM THU" có video A Legacy, B/C Smooth V2. Đo `uat-timing` 7 cảnh: jitter Legacy 42,5% / Smooth V2 10,4% / HQ V2 11,3%. Benchmark Pan / Zoom / Tilt / Dolly ở `data/benchmarks/qd151/index.html`. Dự án cũ: 14 Legacy, 3 Smooth V2 | CHƯA |
-| QĐ-152 Quản lý | trong bộ đầy đủ | App QA riêng (cổng 3100, DB + DATA_DIR riêng): xoá cảnh → Hoàn tác → xoá → khôi phục từ Thùng rác; nhân bản cảnh; xoá video đang dùng → khôi phục; nhân bản dự án; xoá dự án → khôi phục; kiểm tra kịch bản (0 lỗi / 0 cảnh báo / 3 tham khảo). Hash 27 file trước/sau: 0 mất, 0 đổi (gồm nguồn Remix Audio). Log 0 lỗi | CHƯA |
-| QĐ-153 Mind Voice | trong bộ đầy đủ | Mở app → Mind Voice tự bật sau 3 s, 1 cổng. START_TOOL khi đang chạy: "dang chay", không bật thêm. App QA: Online, 35 giọng, Nghe thử Thục Đoan 3,8 s, $0 | CHƯA |
-| QĐ-154 Runway | trong bộ đầy đủ (Runway giả, $0) | Trang Nhà cung cấp AI: Runway 7 model, h3_max:480x854 $0,05/s ≈ $0,25/clip 5 s. Người dùng đã tự cho phép h3_max:480x854 lúc 20:14 (lưu đúng); không gọi Runway trong lần kiểm tra | CHƯA |
+| QĐ-151 Motion V2 | trong bộ đầy đủ | Lô "QĐ-151 NGHIỆM THU" có video A Legacy, B/C Smooth V2. Đo `uat-timing` 7 cảnh: jitter Legacy 42,5% / Smooth V2 10,4% / HQ V2 11,3%. Benchmark Pan / Zoom / Tilt / Dolly ở `data/benchmarks/qd151/index.html`. Dự án cũ: 14 Legacy, 3 Smooth V2 | **ĐẠT** |
+| QĐ-152 Quản lý | trong bộ đầy đủ | App QA riêng (cổng 3100, DB + DATA_DIR riêng): xoá cảnh → Hoàn tác → xoá → khôi phục từ Thùng rác; nhân bản cảnh; xoá video đang dùng → khôi phục; nhân bản dự án; xoá dự án → khôi phục; kiểm tra kịch bản (0 lỗi / 0 cảnh báo / 3 tham khảo). Hash 27 file trước/sau: 0 mất, 0 đổi (gồm nguồn Remix Audio). Log 0 lỗi | **ĐẠT** |
+| QĐ-153 Mind Voice | trong bộ đầy đủ | Mở app → Mind Voice tự bật sau 3 s, 1 cổng. START_TOOL khi đang chạy: "dang chay", không bật thêm. App QA: Online, 35 giọng, Nghe thử Thục Đoan 3,8 s, $0 | **ĐẠT** |
+| QĐ-154 Runway | trong bộ đầy đủ (Runway giả, $0) | Trang Nhà cung cấp AI: Runway 7 model, h3_max:480x854 $0,05/s ≈ $0,25/clip 5 s. Người dùng đã tự cho phép h3_max:480x854 lúc 20:14 (lưu đúng); không gọi Runway trong lần kiểm tra | **ĐẠT** |
 | QĐ-156 TTS | đạt | đạt | **ĐẠT** |
 
 - **Bộ test đầy đủ:** 139/142 file đạt, 2 bỏ qua có chủ đích. 2 test lỗi ở `production-estimate.test.ts` do `mind-voice-launcher.test.ts` (QĐ-153) để lại dòng `mindvoice` trong DB test (chạy riêng thì đạt). Đã sửa ở commit `test(qd153)`; cặp test theo thứ tự lỗi giờ 20/20. **Cần chạy lại bộ đầy đủ một lần** trước khi push.
