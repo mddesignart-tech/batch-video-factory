@@ -23,7 +23,7 @@ import {
   type CharacterVoiceRow,
 } from "@/domain/voice-locale";
 import { MIND_CATALOG_SETTING, refreshMindCatalog } from "@/services/mind-voice-catalog";
-import { characterVoiceIssues, checkVoiceChoice, voiceCatalogFor } from "@/services/voice-catalog";
+import { characterVoiceIssues, checkVoiceChoice, savedVoiceProblem, voiceCatalogFor } from "@/services/voice-catalog";
 import { ensureNarrator } from "@/services/content-service";
 import { generateSceneVoice, planSceneVoice } from "@/services/generation";
 import { materialiseImport, scanImportSource, validateImport } from "@/services/storyboard-import";
@@ -368,6 +368,20 @@ describe("QĐ-158 Voice Catalog + lưu giọng (Mind Voice giả, Mock Mode, $0)
     expect((await removeCharacterVoiceProfile(id, "en")).ok).toBe(true);
     expect((await removeCharacterVoiceProfile(id, "vi-VN")).ok).toBe(false);
     expect(characterProfiles(await prisma.character.findUniqueOrThrow({ where: { id } })).map((p) => p.locale)).toEqual(["vi-VN"]);
+  });
+
+  it("giọng giả lập (mock) ngoài Mock Mode = chưa có giọng thật: cảnh báo; trong Mock Mode thì bình thường", () => {
+    const mock = { provider: "mock", model: "mock-voice-std", voiceId: "mock-male-us" };
+    expect(savedVoiceProblem(mock, null, null)).toBeNull();
+    const prev = process.env.AI_MOCK_MODE;
+    try {
+      process.env.AI_MOCK_MODE = "false";
+      resetEnvCache();
+      expect(savedVoiceProblem(mock, null, null)).toMatch(/chưa có giọng thật/);
+    } finally {
+      process.env.AI_MOCK_MODE = prev;
+      resetEnvCache();
+    }
   });
 
   it("sửa thông tin nhân vật không làm mất giọng; không đổi tên nhân vật đang có trong Storyboard", async () => {

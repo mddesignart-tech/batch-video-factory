@@ -281,8 +281,11 @@ export function savedVoiceProblem(profile: Pick<VoiceProfile, "provider" | "mode
   if (profile.provider === "openai") {
     return OPENAI_VOICES.some((v) => v.id === profile.voiceId) ? null : `OpenAI không có giọng "${profile.voiceId}".`;
   }
-  // The mock voice speaks any id; CIT (legacy) decides at generation time, as before.
-  if (profile.provider === "mock" || profile.provider === "cit") return null;
+  // The mock voice speaks any id - but outside Mock Mode it is a fake voice in a
+  // real video: a new character starts on it until a voice is chosen.
+  if (profile.provider === "mock") return isMockMode() ? null : "Nhân vật chưa có giọng thật (đang là giọng giả lập Mock).";
+  // CIT (legacy) decides at generation time, as before.
+  if (profile.provider === "cit") return null;
   return `Nhà cung cấp giọng "${profile.provider}" chưa được tích hợp.`;
 }
 
