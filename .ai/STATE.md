@@ -5,6 +5,14 @@
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
 
+## QĐ-158 FINAL DATABASE SAFETY (2026-10-24, $0) — SẴN SÀNG MIGRATION, CHỜ NGƯỜI DÙNG CHO PHÉP
+
+- 18 câu bị chặn = 5 dự án kiểm thử bằng API THẬT (Spill the beans, Piece of Cake, Break a Leg, 2× "3 mẹo nhỏ…"); audio OpenAI (ballad / coral) của cả 18 câu CÒN trên đĩa. Nguyên nhân: Leo / Mia / Narrator đã bị đổi sang Mind Voice với tên giọng OpenAI sau khi audio được tạo.
+- Render lại trên bản sao (`scripts/qa/qd158-rerender-check.ts`): "3 mẹo nhỏ giúp…" dùng đúng 5 file coral (hash không đổi), 0 TTS, 0 sổ chi; QĐ-150 Video A: 47,79 s, −16,1 LUFS, LRA 1,8 — giống hệt bản gốc.
+- Bản sao lưu = data/app.db (24 bảng, nội dung giống hệt; sổ $12,478543). data/app.db không đổi từ 07:33.
+- Mock voice ngoài Mock Mode = chưa có giọng thật (0e9654a).
+- Full suite (0e9654a): 141 file + 2 bỏ qua có chủ đích; 2044/2049, 0 lỗi, 3283 s. Pause Guard Python 16/16.
+
 ## QĐ-158 HOÀN THIỆN (2026-10-24, $0) — CHỜ NGƯỜI DÙNG XÁC NHẬN ÁP MIGRATION VÀO data/app.db
 
 - Commit local: `a7a2c6c` (tính năng) + `c207c84` (hoàn thiện) + commit tài liệu này. CHƯA PUSH, CHƯA RELEASE.
