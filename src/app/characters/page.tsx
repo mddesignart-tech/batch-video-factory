@@ -12,6 +12,9 @@ import { CharacterEditor, NewCharacterButton } from "./character-forms";
 import { CharacterReferences } from "./character-references";
 import { CharacterSheetForm } from "./character-sheet-form";
 import { CharacterVoiceForm } from "./character-voice-form";
+import { characterProfiles } from "@/domain/voice-locale";
+import { cachedMindCatalog } from "@/services/mind-voice-catalog";
+import { characterVoiceIssues } from "@/services/voice-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +40,11 @@ export default async function CharactersPage() {
     enabled: m.enabled,
   }));
   const mockMode = isMockMode();
+  // QĐ-158: saved voices that no longer fit (read from the kept Mind Voice list - no request).
+  const mind = await cachedMindCatalog();
+  const voiceIssues = new Map(
+    await Promise.all(characters.map(async (c) => [c.id, await characterVoiceIssues(c, mind)] as const)),
+  );
 
   return (
     <>
@@ -85,7 +93,6 @@ export default async function CharactersPage() {
                   personality: character.personality,
                   visualPrompt: character.visualPrompt,
                   negativePrompt: character.negativePrompt,
-                  voiceId: character.voiceId,
                   notes: character.notes,
                   enabled: character.enabled,
                   seed: character.seed,
@@ -113,16 +120,29 @@ export default async function CharactersPage() {
               <CharacterVoiceForm
                 characterId={character.id}
                 characterName={character.name}
+                isNarrator={character.name === "Narrator"}
                 mockMode={mockMode}
-                voice={{
-                  voiceProvider: character.voiceProvider,
-                  voiceModel: character.voiceModel,
-                  voiceId: character.voiceId,
-                  voiceInstructions: character.voiceInstructions,
-                  voiceSpeed: character.voiceSpeed,
-                  voiceGender: character.voiceGender,
-                  voiceAccent: character.voiceAccent,
-                }}
+                profiles={characterProfiles(character).map((p) => ({
+                  locale: p.locale,
+                  provider: p.profile.provider,
+                  model: p.profile.model,
+                  voiceId: p.profile.voiceId,
+                  speed: p.profile.speed,
+                  instructions: p.profile.instructions,
+                  primary: p.primary,
+                }))}
+                legacy={
+                  characterProfiles(character).length === 0
+                    ? {
+                        provider: character.voiceProvider,
+                        model: character.voiceModel,
+                        voiceId: character.voiceId,
+                        speed: character.voiceSpeed,
+                        instructions: character.voiceInstructions,
+                      }
+                    : null
+                }
+                issues={voiceIssues.get(character.id) ?? []}
               />
 
               <CharacterReferences

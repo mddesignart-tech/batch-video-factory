@@ -20,7 +20,9 @@ const CharacterInput = z.object({
   personality: z.string().default(""),
   visualPrompt: z.string().min(10, "Mô tả ngoại hình quá ngắn"),
   negativePrompt: z.string().default(""),
-  voiceId: z.string().default("mock-male-us"),
+  // No voice here (QĐ-158): the voice is chosen in its own form, per language,
+  // from the voices the engine has. A voice field in this form used to reset a
+  // saved voice to a mock one on every save of the description.
   notes: z.string().default(""),
 });
 
@@ -39,6 +41,24 @@ export async function saveCharacter(
   }
   try {
     if (id) {
+      // A storyboard names its speakers; renaming a character in use would cut
+      // every one of those lines off from this character's voice (QĐ-158).
+      const current = await prisma.character.findUnique({ where: { id }, select: { name: true } });
+      if (current && current.name !== parsed.data.name) {
+        const quoted = JSON.stringify(current.name);
+        const used = await prisma.scene.count({
+          where: {
+            deletedAt: null,
+            OR: [{ speakingCharactersJson: { contains: quoted } }, { charactersPresentJson: { contains: quoted } }],
+          },
+        });
+        if (used > 0) {
+          return {
+            ok: false,
+            message: `Không đổi tên: "${current.name}" đang có trong ${used} cảnh. Đổi tên sẽ làm các câu thoại đó mất liên kết với giọng của nhân vật.`,
+          };
+        }
+      }
       await prisma.character.update({ where: { id }, data: parsed.data });
     } else {
       await prisma.character.create({

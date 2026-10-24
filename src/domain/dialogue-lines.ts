@@ -24,8 +24,12 @@ export interface ParsedLine {
   lineNumber: number;
 }
 
-/** `Max: "..."` or `Max: ...` at the start of a segment. */
-const SPEAKER_LABEL = /([A-Z][A-Za-z '-]{0,19}):\s*/g;
+/**
+ * `Max: "..."` or `Max: ...` at the start of a segment. Any script's letters
+ * (QĐ-158): "Chị Hoa:" or "Người bán 2:" is a speaker as much as "Max:" - it
+ * is still taken only when it names one of the scene's speakers.
+ */
+const SPEAKER_LABEL = /(\p{Lu}[\p{L}\p{M}\p{N} '-]{0,29}):\s*/gu;
 
 /**
  * SPEAKER LABEL IS NOT SPOKEN TEXT (QĐ-143). A text model sometimes writes

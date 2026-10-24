@@ -126,6 +126,14 @@ model Character {
   voiceSpeed        Float    @default(1)
   voiceGender       String   @default("male")
   voiceAccent       String   @default("US")
+  /// QĐ-158: the language of the voice above ("vi-VN", "en-US", "en-GB").
+  /// "" = chosen before languages existed: the line's language comes from the
+  /// project and the text, as it always did.
+  voiceLanguage     String   @default("")
+  /// QĐ-158: the character's voices in its OTHER languages, by locale:
+  /// {"en-US": {provider, model, voiceId, speed, instructions, gender}}.
+  /// A voice is never assumed to speak every language.
+  voiceProfilesJson String   @default("{}")
   seed              Int?
   notes             String   @default("")
   enabled           Boolean  @default(true)

@@ -54,6 +54,10 @@ import { commit as commitReservation, release as releaseReservation } from "./co
 import { keyframeRequired, type MotionResolution } from "@/domain/local-motion";
 import { parseDialogueLines, splitSpeakerLabel, type ParsedLine } from "@/domain/dialogue-lines";
 import { voiceRowMatches } from "@/domain/voice-line-match";
+import { characterLineLanguage, profileForLanguage, voiceLocaleOf, VOICE_PROFILE_STALE } from "@/domain/voice-locale";
+import { speechLanguageOf, type SpeechLanguage } from "@/domain/speech-text";
+import { savedVoiceProblem } from "./voice-catalog";
+import { cachedMindCatalog } from "./mind-voice-catalog";
 import { MIN_VOICE_BYTES } from "@/services/voice-validity";
 import { isFreeVoiceProvider } from "@/providers/voice-config";
 import { NEEDS_SELECTION_STATUS, needsSelectionMessage } from "@/domain/video-selection";
@@ -2587,6 +2591,8 @@ export async function voiceSettingsFor(
   speaker: string,
   /** QĐ-125: the project whose own narrator voice (VIDEO OUTPUT) applies, if any. */
   projectId?: string | null,
+  /** QĐ-158: the line's words - they pick the voice of a character that speaks several languages. */
+  text?: string,
 ): Promise<{
   characterId: string | null;
   provider: string | null;
@@ -2596,8 +2602,38 @@ export async function voiceSettingsFor(
   speed: number;
   gender: "male" | "female";
   accent: "US" | "UK";
+  /** QĐ-158: the language of the character's chosen voice; null = from the project and the text, as before. */
+  speechLanguage: SpeechLanguage | null;
+  /** QĐ-158: why the character's own saved voice cannot speak; null = fine. Blocks new audio only. */
+  voiceProblem: string | null;
 }> {
-  const character = await prisma.character.findFirst({ where: { name: speaker } });
+  const found = await prisma.character.findFirst({ where: { name: speaker } });
+  // QĐ-158: a character with a language speaks each line with the voice of that
+  // line's language. One without (saved before QĐ-158) is read exactly as before.
+  const speechLanguage = found ? characterLineLanguage(found, text ?? "") : null;
+  const located = found && speechLanguage ? profileForLanguage(found, speechLanguage) : null;
+  const character = found && located?.primary === false
+    ? {
+        ...found,
+        voiceProvider: located.profile.provider,
+        voiceModel: located.profile.model,
+        voiceId: located.profile.voiceId,
+        voiceInstructions: located.profile.instructions,
+        voiceSpeed: located.profile.speed,
+        voiceGender: located.profile.gender,
+        voiceAccent: voiceLocaleOf(located.locale).accent ?? found.voiceAccent,
+      }
+    : found;
+  // Only a voice that will really be used: in Mock Mode a paid provider is not
+  // pinned (the router picks a mock voice), so its voice id cannot fail.
+  const pinned = character && (!isMockMode() || isFreeVoiceProvider(character.voiceProvider));
+  const voiceProblem = pinned
+    ? savedVoiceProblem(
+        { provider: character.voiceProvider, model: character.voiceModel, voiceId: character.voiceId },
+        await cachedMindCatalog(),
+        located?.locale ?? null,
+      )
+    : null;
 
   // In Mock Mode the character's real provider/model pair is not routable -
   // `openai/gpt-4o-mini-tts` is not a mock model - so pinning it would fail
@@ -2618,6 +2654,8 @@ export async function voiceSettingsFor(
     speed: character?.voiceSpeed ?? 1,
     gender: (character?.voiceGender === "female" ? "female" : "male") as "male" | "female",
     accent: (character?.voiceAccent === "UK" ? "UK" : "US") as "US" | "UK",
+    speechLanguage,
+    voiceProblem,
   };
   // GIỌNG THUYẾT MINH of this project (QĐ-125): only the narrator, only when
   // set. It is part of the voice key, so it buys new speech only through the
@@ -2632,6 +2670,9 @@ export async function voiceSettingsFor(
         voiceId: own.voiceId ?? base.voiceId,
         speed: own.speed ?? base.speed,
         instructions: own.instructions ?? base.instructions,
+        // The project's narrator voice, not the character's own (QĐ-158).
+        speechLanguage: null,
+        voiceProblem: null,
       };
     }
   }
@@ -2686,7 +2727,7 @@ export async function generateSceneVoice(
   const direct = await voiceDirectorFor(scene);
 
   for (const line of lines) {
-    const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId));
+    const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId, line.text));
     const spokenText = settings.spokenText ?? line.text;
 
     // A line that is ALREADY this audio - same words, voice, instructions,
@@ -2720,6 +2761,12 @@ export async function generateSceneVoice(
     ) {
       written.push(toAbsolute(existing.outputPath));
       continue;
+    }
+
+    // QĐ-158: a saved voice the engine no longer has is never swapped for
+    // another voice. Audio already made is kept (above); new audio waits for a choice.
+    if (settings.voiceProblem) {
+      throw new ProviderError(voiceProfileMessage(line.speaker, settings.voiceProblem), settings.provider ?? "voice", false, "voice_profile_invalid");
     }
 
     const routeLine = (c: SceneContext) =>
@@ -3059,10 +3106,12 @@ export async function existingVoiceLines(
   const direct = await voiceDirectorFor(scene);
   const lines: (ParsedLine & { state: "DONE" | "MISSING_LOCAL_FILE" | "CHANGED" | "NONE" })[] = [];
   for (const line of parsed) {
-    let base = settingsBySpeaker.get(line.speaker);
+    // By speaker AND the words' language: a character with a voice per language (QĐ-158).
+    const cacheKey = `${line.speaker}|${speechLanguageOf("auto", line.text)}`;
+    let base = settingsBySpeaker.get(cacheKey);
     if (!base) {
-      base = await voiceSettingsFor(line.speaker, scene.projectId);
-      settingsBySpeaker.set(line.speaker, base);
+      base = await voiceSettingsFor(line.speaker, scene.projectId, line.text);
+      settingsBySpeaker.set(cacheKey, base);
     }
     const settings = direct(line, base);
     const row = scene.dialogueLines.find((r) => r.lineNumber === line.lineNumber);
@@ -3120,6 +3169,11 @@ export interface SceneVoicePlan {
  * audio in the library, is the paid file lost. Read-only: no POST, no row
  * written, no asset marked.
  */
+/** QĐ-158: the stop for a line whose speaker's saved voice no longer exists. */
+export function voiceProfileMessage(speaker: string, problem: string): string {
+  return `VOICE_PROFILE_INVALID: ${speaker} - ${problem} ${VOICE_PROFILE_STALE} Không dùng giọng khác thay thế, không gửi request.`;
+}
+
 export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
   const ctx = await loadContext(sceneId);
   const { scene, project } = ctx;
@@ -3128,7 +3182,7 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
   const out: SceneVoiceLinePlan[] = [];
   const direct = await voiceDirectorFor(scene);
   for (const line of parsed) {
-    const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId));
+    const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId, line.text));
     const spokenChars = (settings.spokenText ?? line.text).length;
     const row = rows.find((r) => r.lineNumber === line.lineNumber) ?? null;
     const base = {
@@ -3165,6 +3219,17 @@ export async function planSceneVoice(sceneId: string): Promise<SceneVoicePlan> {
         durationSec: row.durationSec || null,
         audioPath: row.outputPath,
         message: bytes < MIN_VOICE_BYTES ? `File giọng chỉ ${bytes} byte - hỏng. Tạo lại có thể tốn phí.` : null,
+      });
+      continue;
+    }
+    if (settings.voiceProblem) {
+      out.push({
+        ...base,
+        state: "BLOCKED",
+        provider: settings.provider,
+        model: settings.model,
+        incrementalCost: 0,
+        message: voiceProfileMessage(line.speaker, settings.voiceProblem),
       });
       continue;
     }

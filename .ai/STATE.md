@@ -5,6 +5,23 @@
 `738f1f3`. Trước đó: V1.3.0 RELEASED — tag `batch-video-factory-v1.3.0` → `6524187`.)
 **Cột mốc trước:** V1.2.0 RELEASED (2026-10-01, QĐ-116). Baseline sản xuất thật: v1.1.0 (bên dưới).
 
+## QĐ-158 — CHARACTER VOICE MANAGER (2026-10-24, $0) — CHỜ NGHIỆM THU, CHƯA PUSH
+
+Người dùng gọi là "QD-157"; số đó đã dùng (sửa Mind Voice TCP reset), nên đây là **QĐ-158**.
+
+- **Nguyên nhân `Mind Voice không có giọng "sage"`:** ô Giọng nhập tự do, gợi ý toàn giọng OpenAI, lưu không kiểm tra. DB thật: Narrator `sage`, Leo `ballad`, Mia `coral` đều là `mindvoice`. Khi render, `mindDirected` lặng lẽ đổi giọng lạ thành "Tự động" (giao diện ghi `sage`, renderer dùng giọng mặc định). Thêm: form "Sửa nhân vật" có ô Giọng chỉ chứa giọng mock → mỗi lần lưu mô tả, voiceId bị đặt về `mock-male-us`.
+- **Sửa:**
+  - `src/domain/voice-locale.ts`: vi-VN / en-US / en-GB, hồ sơ giọng theo ngôn ngữ (cột cũ = giọng chính + `voiceLanguage`; giọng phụ ở `voiceProfilesJson`). Nhân vật 1 ngôn ngữ luôn nói ngôn ngữ đó; nhiều ngôn ngữ thì theo chữ của câu.
+  - `src/services/voice-catalog.ts`: danh sách giọng thật (Mind Voice /voices đã lưu; OpenAI danh sách cố định), đánh dấu chưa xác minh (giọng vùng US/UK của Supertonic và OpenAI, giới tính OpenAI, tiếng Việt OpenAI). CIT legacy không còn trong danh sách chọn.
+  - Lưu giọng kiểm tra theo catalog; nghe thử giọng ĐANG CHỌN; OpenAI ngoài Mock Mode phải xác nhận đúng giá.
+  - Render: giọng đã lưu không còn hợp lệ → câu MỚI bị chặn `VOICE_PROFILE_INVALID` (không thay giọng), câu đã có vẫn dùng. Mock / nhà cung cấp không được ghim trong Mock Mode không bị chặn.
+  - Bỏ ô Giọng khỏi form Sửa nhân vật; chặn đổi tên nhân vật đang có trong cảnh.
+  - Nhãn người nói nhận chữ có dấu / số ("Chị Hoa:", tối đa 30 ký tự).
+- **Migration** `20261024000000_character_voice_profiles` (chỉ thêm 2 cột) — **CHƯA áp vào data/app.db**. Nếu mở START_TOOL trước khi áp, tool cảnh báo migration; trang Nhân vật sẽ lỗi.
+- **QA:** `data/qa/qd158/` (DB + DATA_DIR riêng), app QA `next start -p 3100`, Mind Voice thật: 7 câu / 3 cảnh / 4 nhân vật đúng giọng-engine-ngôn ngữ, $0, video render xong. Nghe thử trong UI (Narrator → Thục Đoan) đạt.
+- Test: `tests/character-voice-manager.test.ts` 12/12; 25 file liên quan đạt (sau khi bỏ chặn với mock). lint · typecheck · build PASS. Chưa chạy full suite.
+- Thư mục thừa `F:\Tool Video Youtube\data\qa\qd158\qa.db` (tạo nhầm do DATABASE_URL kiểu `/f/...` từ Git Bash) — công cụ không cho xoá, người dùng tự xoá `F:`.
+
 ## NGHIỆM THU CUỐI QĐ-151 → QĐ-156 — ĐẠT (người dùng duyệt hết 2026-10-24, đã push main)
 
 Người dùng chọn **CÁCH A**: nghiệm thu các nhiệm vụ còn lại rồi push `main` một lần. **CHƯA PUSH.** Chỉ QĐ-156 đã được người dùng nghiệm thu.

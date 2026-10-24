@@ -230,7 +230,7 @@ export async function sceneVoiceDirectionAction(sceneId: string): Promise<{ ok: 
     const scene = await prisma.scene.findUniqueOrThrow({ where: { id: sceneId } });
     const voice = (await projectControls(scene.projectId)).voice;
     const line = parseDialogueLines(scene.dialogue, scene.narration, sceneCharacters(scene).speaking)[0];
-    const settings = line ? (await voiceDirectorFor(scene))(line, await voiceSettingsFor(line.speaker, scene.projectId)) : null;
+    const settings = line ? (await voiceDirectorFor(scene))(line, await voiceSettingsFor(line.speaker, scene.projectId, line.text)) : null;
     const d = settings?.directed;
     return {
       ok: true,

@@ -85,7 +85,7 @@ export async function sceneReuseFacts(
     const entries: string[] = [];
     const direct = await voiceDirectorFor(scene);
     for (const line of lines) {
-      const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId));
+      const settings = direct(line, await voiceSettingsFor(line.speaker, scene.projectId, line.text));
       for (const m of voiceModels) {
         entries.push(
           `${mk(m)}|${line.lineNumber}|${voiceReuseKey({

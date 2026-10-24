@@ -7,7 +7,7 @@ import { controlsOf } from "@/domain/output-controls";
 import { isNarrator, sceneCharacters, type SceneCharacterColumns } from "@/domain/scene-characters";
 import { parseDialogueLines } from "@/domain/dialogue-lines";
 import type { ScriptDoc } from "@/domain/script";
-import { prepareSpeechText, speechLanguageOf } from "@/domain/speech-text";
+import { prepareSpeechText, speechLanguageOf, type SpeechLanguage } from "@/domain/speech-text";
 import {
   autoPresetFor,
   directVoice,
@@ -60,6 +60,10 @@ export interface LineVoiceSettings {
   model: string | null;
   /** Who speaks it (QĐ-144: CIT gets its own adapter). Absent = not known here. */
   provider?: string | null;
+  /** QĐ-158: the language the speaker's chosen voice speaks; null/absent = from the project and the text. */
+  speechLanguage?: SpeechLanguage | null;
+  /** QĐ-158: why the speaker's OWN saved voice cannot speak (null = fine). */
+  voiceProblem?: string | null;
 }
 
 export interface Directed {
@@ -121,7 +125,10 @@ export async function voiceDirectorFor(
 
   return <T extends LineVoiceSettings>(line: { speaker: string; text: string }, base: T): T & Directed => {
     const narrated = isNarrator(line.speaker);
-    const language = speechLanguageOf(content.language, line.text);
+    // The narrator here speaks with the project's preset, not the character's own
+    // voice (QĐ-142): that voice's language and problem do not apply (QĐ-158).
+    if (narrated) base = { ...base, speechLanguage: null, voiceProblem: null };
+    const language = base.speechLanguage ?? speechLanguageOf(content.language, line.text);
     const spokenText = prepareSpeechText(line.text, language);
     const identity: VoiceIdentity = narrated
       ? {
@@ -185,7 +192,7 @@ function citDirected<T extends LineVoiceSettings>(
   projectLanguage: string,
   catalog: CitCatalog | null,
 ): T & Directed {
-  const lineLanguage = speechLanguageOf(projectLanguage, line.text);
+  const lineLanguage = base.speechLanguage ?? speechLanguageOf(projectLanguage, line.text);
   const language = citLanguageFor(projectLanguage, lineLanguage);
   const known = catalog?.voices.some((v) => v.id === base.voiceId) ?? false;
   // A voice id CIT does not have (an OpenAI or mock voice left on the narrator) means "Tự động".
@@ -250,7 +257,7 @@ function mindDirected<T extends LineVoiceSettings>(
   cues: boolean,
   dialogue: DialogueEmotionId | null,
 ): T & Directed {
-  const language = speechLanguageOf(projectLanguage, line.text);
+  const language = base.speechLanguage ?? speechLanguageOf(projectLanguage, line.text);
   const known = engineOfMindVoice(catalog, base.voiceId);
   let voiceId = known ? base.voiceId : MIND_AUTO_VOICE;
   let engine: MindEngineId = known ?? engineForLanguage(language) ?? "vieneu";

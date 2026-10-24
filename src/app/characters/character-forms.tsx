@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, CardContent, Field, Input, Select, Textarea } from "@/components/ui";
+import { Card, CardContent, Field, Input, Textarea } from "@/components/ui";
 import {
   ActionButton,
   ActionForm,
@@ -12,13 +12,6 @@ import {
   toggleCharacter,
 } from "@/app/actions/config";
 
-const VOICE_OPTIONS = [
-  { id: "mock-male-us", label: "Max (US, nam)" },
-  { id: "mock-female-us", label: "Mia (US, nữ)" },
-  { id: "mock-male-uk", label: "Leo (UK, nam)" },
-  { id: "mock-female-uk", label: "Ella (UK, nữ)" },
-];
-
 interface CharacterData {
   id: string;
   name: string;
@@ -26,7 +19,6 @@ interface CharacterData {
   personality: string;
   visualPrompt: string;
   negativePrompt: string;
-  voiceId: string;
   notes: string;
   enabled: boolean;
   seed: number | null;
@@ -38,15 +30,6 @@ function CharacterFields({ character }: { character?: CharacterData }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Tên nhân vật">
           <Input name="name" defaultValue={character?.name} required />
-        </Field>
-        <Field label="Giọng đọc">
-          <Select name="voiceId" defaultValue={character?.voiceId ?? "mock-male-us"}>
-            {VOICE_OPTIONS.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
         </Field>
       </div>
       <Field label="Mô tả ngắn">
